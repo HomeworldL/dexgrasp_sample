@@ -1,0 +1,85 @@
+seed: 42
+use_wandb: true
+wandb:
+  project: superdec
+  entity: elisabettafedele99
+run_name: 09-07-classic-par-2
+dataset: shapenet
+device: cuda
+checkpoints:
+  resume_from: /ephemeral/outputs/09-07-classic-par-1/epoch_500.pt
+  keep_epoch: false
+superdec:
+  decoder:
+    n_queries: 16
+    n_layers: 3
+    n_heads: 1
+    masked_attention: false
+    swapped_attention: false
+    dim_feedforward: 512
+    deep_supervision: false
+    pos_encoding_type: sinusoidal
+  point_encoder:
+    in_channels: 3
+    out_channels: 128
+    kernel_size: 3
+    resolution: 32
+    voxelization:
+      normalize: true
+      eps: 0
+    l1:
+      in_channels: 3
+      out_channels: 64
+      kernel_size: 3
+      resolution: 32
+      voxelization:
+        normalize: true
+        eps: 0
+    l2:
+      in_channels: 64
+      out_channels: 128
+      kernel_size: 3
+      resolution: 16
+      voxelization:
+        normalize: true
+        eps: 0
+    l3:
+      in_channels: 128
+      out_channels: 128
+      kernel_size: 3
+      resolution: 16
+      voxelization:
+        normalize: true
+        eps: 0
+shapenet:
+  path: data/ShapeNet
+  categories: null
+  normalize: false
+trainer:
+  save_path: /ephemeral/outputs/09-07-classic-par-2
+  save_every_n_epochs: 50
+  num_epochs: 1000
+  batch_size: 32
+  num_workers: 4
+  evaluate_every_n_epochs: 1
+  augmentations: true
+optimizer:
+  lr: 0.0001
+  weight_decay: 0
+  betas:
+  - 0.9
+  - 0.999
+  enable_scheduler: true
+scheduler:
+  _target_: torch.optim.lr_scheduler.OneCycleLR
+  max_lr: ${optimizer.lr}
+  epochs: ${trainer.num_epochs}
+  steps_per_epoch: 959
+loss:
+  n_samples: 500
+  w_sps: 0.6
+  w_ext: 0.01
+  w_cub: 1.0
+  w_cd: 1.0
+visualization:
+  res_primitives: 40

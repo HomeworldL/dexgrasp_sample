@@ -5,12 +5,12 @@ import time
 from src.dataset_objects import DatasetObjects, resolve_dataset_root
 from src.mj_ho import MjHO
 from utils.utils_vis import visualize_with_viser
-from utils.utils_file import load_config
+from utils.utils_file import DEFAULT_RUN_CONFIG_PATH, load_config
 
 
 def main():
     p = argparse.ArgumentParser(description="Visualize object meshes and scaled MuJoCo object by global id.")
-    p.add_argument("-c", "--config", type=str, default="configs/run_default.json")
+    p.add_argument("-c", "--config", type=str, default=DEFAULT_RUN_CONFIG_PATH)
     p.add_argument("-i", "--obj-id", type=int, default=None)
     args = p.parse_args()
 

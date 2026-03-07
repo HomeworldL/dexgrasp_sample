@@ -1,0 +1,53 @@
+{
+  "seed": 0,
+  "dataset": {
+    "root": null,
+    "include": ["YCB"],
+    "shapenet_scale_range": [0.06, 0.15]
+  },
+  "object": {
+    "id": 0
+  },
+  "sampling": {
+    "n_points": 4096,
+    "downsample_for_sim": 1024,
+    "Nd": 1,
+    "d_min": 0.02,
+    "d_max": 0.06,
+    "max_points": null
+  },
+  "transform": {
+    "base_rot_grasp_to_palm": [[0, 0, 1], [0, -1, 0], [1, 0, 0]],
+    "extra_euler": {
+      "axis": "y",
+      "degrees": 45.0
+    }
+  },
+  "hand": {
+    "xml_path": "./assets/hands/liberhand2/liberhand2_right.xml",
+    "prepared_joints": [0, 0.5, 0.4, 0.4, 0, 0.5, 0.4, 0.4, 0, 0.5, 0.4, 0.4, 0, 0.5, 0.4, 0.4, 1.5, 0.5, 0.3, 0.3],
+    "approach_joints": [0, 0.0, 0.0, 0.0, 0, 0.0, 0.0, 0.0, 0, 0.0, 0.0, 0.0, 0, 0.0, 0.0, 0.0, 1.5, 0.0, 0.0, 0.0],
+    "shift_local": [0.0, 0.0, -0.02],
+    "target_body_params": {
+      "hand_right_f13": [0.5, 1.0],
+      "hand_right_f14_end": [0.3, 0.2],
+      "hand_right_f23": [0.5, 1.0],
+      "hand_right_f24_end": [0.3, 0.2],
+      "hand_right_f33": [0.5, 1.0],
+      "hand_right_f34_end": [0.3, 0.2],
+      "hand_right_f43": [0.5, 1.0],
+      "hand_right_f44_end": [0.3, 0.2],
+      "hand_right_f53": [0.5, 1.0],
+      "hand_right_f54_end": [0.3, 0.2]
+    }
+  },
+  "validation": {
+    "contact_min_count": 4
+  },
+  "output": {
+    "base_dir": "outputs",
+    "max_cap": 2000,
+    "h5_name": "grasp_data.h5",
+    "npy_name": "grasp_data.npy"
+  }
+}

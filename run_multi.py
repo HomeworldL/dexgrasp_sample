@@ -60,8 +60,11 @@ def get_all_object_names(config_path: str) -> List[str]:
     ds = DatasetObjects(
         resolve_dataset_root(cfg["dataset"].get("root")),
         dataset_names=list(cfg["dataset"].get("include", [])),
-        shapenet_scale_range=tuple(cfg["dataset"].get("shapenet_scale_range", [0.06, 0.15])),
-        shapenet_scale_seed=int(cfg["seed"]),
+        scales=list(cfg["dataset"].get("scales", [])),
+        dataset_tag=Path(config_path).stem,
+        dataset_output_root=cfg.get("output", {}).get("dataset_root", "datasets"),
+        prebuild_scales=True,
+        object_mass_kg=float(cfg["dataset"]["object_mass_kg"]),
     )
     id2name = ds.id2name  # dict[int->str]
     # 按 key 排序并返回 name 列表

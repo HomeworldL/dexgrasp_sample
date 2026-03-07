@@ -51,12 +51,16 @@ def _validate_config(cfg: Dict, source_path: str) -> None:
     if not isinstance(include, list) or not include:
         raise ValueError("Config field dataset.include must be a non-empty list.")
 
-    scale_range = _require(cfg, "dataset.shapenet_scale_range")
-    if not isinstance(scale_range, list) or len(scale_range) != 2:
-        raise ValueError("Config field dataset.shapenet_scale_range must be [min, max].")
-    lo, hi = float(scale_range[0]), float(scale_range[1])
-    if lo <= 0 or hi < lo:
-        raise ValueError("dataset.shapenet_scale_range must satisfy 0 < min <= max.")
+    scales = _require(cfg, "dataset.scales")
+    if not isinstance(scales, list) or not scales:
+        raise ValueError("Config field dataset.scales must be a non-empty list.")
+    for s in scales:
+        if float(s) <= 0:
+            raise ValueError("All dataset.scales values must be > 0.")
+
+    object_mass_kg = float(_require(cfg, "dataset.object_mass_kg"))
+    if object_mass_kg <= 0:
+        raise ValueError("dataset.object_mass_kg must be > 0.")
 
     _require(cfg, "object.id")
 

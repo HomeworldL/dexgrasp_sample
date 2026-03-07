@@ -3,7 +3,8 @@ import gc
 import os
 import random
 import time
-from typing import Dict
+from pathlib import Path
+from typing import Dict, Tuple
 
 import h5py
 import numpy as np
@@ -33,53 +34,19 @@ def compose_rot_grasp_to_palm(cfg: Dict) -> np.ndarray:
     return (base @ extra_rot).T
 
 
-def main():
-    p = argparse.ArgumentParser(description="Sample grasps for a configured object/dataset/hand task.")
-    p.add_argument("-i", "--obj-id", type=int, default=None, help="Global object id in merged DatasetObjects.")
-    p.add_argument("-o", "--obj", type=str, default=None, help="Object name override (optional).")
-    p.add_argument("-c", "--config", type=str, default=DEFAULT_RUN_CONFIG_PATH, help="JSON config path.")
-    args = p.parse_args()
+def resolve_object_name(ds: DatasetObjects, cfg: Dict, obj_id_arg: int | None, obj_arg: str | None) -> str:
+    if obj_arg is not None:
+        return obj_arg
+    if obj_id_arg is not None:
+        return ds.id2name[int(obj_id_arg)]
+    return ds.id2name[int(cfg.get("object", {}).get("id", 0))]
 
-    cfg = load_config(args.config)
-    set_seed(int(cfg["seed"]))
 
-    ds_root = resolve_dataset_root(cfg["dataset"].get("root"))
-    ds = DatasetObjects(
-        ds_root,
-        dataset_names=list(cfg["dataset"].get("include", [])),
-        shapenet_scale_range=tuple(cfg["dataset"].get("shapenet_scale_range", [0.06, 0.15])),
-        shapenet_scale_seed=int(cfg["seed"]),
-    )
-
-    if args.obj is not None:
-        obj_name = args.obj
-    elif args.obj_id is not None:
-        obj_name = ds.id2name[int(args.obj_id)]
-    else:
-        obj_id_default = int(cfg.get("object", {}).get("id", 0))
-        obj_name = ds.id2name[obj_id_default]
-
-    obj_info = ds.get_info(obj_name)
-    print(
-        f"Using object id={obj_info['global_id']} name={obj_name} dataset={obj_info['dataset']} scale={obj_info['scale']:.4f}"
-    )
-
-    # Mesh loading is explicit so config can swap mesh_type without touching pipeline logic.
-    _ = ds.get_mesh(obj_name, "inertia")
-    _ = ds.get_mesh(obj_name, "coacd")
-    _ = ds.get_mesh(obj_name, "convex_parts")
-
+def sample_frames_from_points(cfg: Dict, pts: np.ndarray, norms: np.ndarray) -> np.ndarray:
     sampling_cfg = cfg["sampling"]
-    pcs_sample_poisson, norms_sample_poisson = ds.get_point_cloud(
-        obj_name,
-        n_points=int(sampling_cfg["n_points"]),
-        method="poisson",
-    )
-
-    ts = time.time()
     transforms = sample_grasp_frames(
-        pcs_sample_poisson,
-        norms_sample_poisson,
+        pts,
+        norms,
         Nd=int(sampling_cfg["Nd"]),
         d_min=float(sampling_cfg["d_min"]),
         d_max=float(sampling_cfg["d_max"]),
@@ -90,107 +57,116 @@ def main():
     del transforms
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
+    return transforms_np
 
-    print("Time to sample:", time.time() - ts)
-    print("Shape of transforms:", transforms_np.shape)
 
+def build_pose_candidates(cfg: Dict, transforms_np: np.ndarray) -> np.ndarray:
     rot_grasp_to_palm = compose_rot_grasp_to_palm(cfg)
     rotation_matrices = transforms_np[:, :3, :3] @ rot_grasp_to_palm
     positions = transforms_np[:, :3, 3]
     quaternions = R.from_matrix(rotation_matrices).as_quat()
-    quaternions = np.roll(quaternions, shift=1, axis=1)  # xyzw -> wxyz
-    pose = np.concatenate([positions, quaternions], axis=1).astype(np.float32)
+    quaternions = np.roll(quaternions, shift=1, axis=1)
+    return np.concatenate([positions, quaternions], axis=1).astype(np.float32)
 
-    xml_path = os.path.abspath(cfg["hand"]["xml_path"])
-    hand_name = os.path.basename(xml_path).split(".")[0]
-    print(f"hand_name: {hand_name}")
 
-    target_body_params = cfg["hand"]["target_body_params"]
-
-    mjho = MjHO(obj_info, xml_path, target_body_params=target_body_params)
-    pcs_for_sim, norms_for_sim, _ = downsample_fps(
-        pcs_sample_poisson,
-        norms_sample_poisson,
-        int(sampling_cfg["downsample_for_sim"]),
-        seed=int(cfg["seed"]),
-    )
-    mjho._set_obj_pts_norms(pcs_for_sim, norms_for_sim)
-
-    mjho_valid = MjHO(obj_info, xml_path, target_body_params=target_body_params, object_fixed=False)
-
+def make_qpos_triplets(cfg: Dict, pose: np.ndarray) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     prepared_joints = np.asarray(cfg["hand"]["prepared_joints"], dtype=np.float32)
     approach_joints = np.asarray(cfg["hand"]["approach_joints"], dtype=np.float32)
 
     q_expanded = np.tile(prepared_joints, (pose.shape[0], 1)).astype(np.float32)
     qpos_prepared_sample = np.concatenate([pose, q_expanded], axis=1).astype(np.float32)
 
-    N = qpos_prepared_sample.shape[0]
+    n = qpos_prepared_sample.shape[0]
     qpos_approach_sample = qpos_prepared_sample.copy()
-    qpos_approach_sample[:, 7:] = np.tile(approach_joints, (N, 1))
+    qpos_approach_sample[:, 7:] = np.tile(approach_joints, (n, 1))
 
     shift_local = np.asarray(cfg["hand"]["shift_local"], dtype=float)
     positions = qpos_prepared_sample[:, :3]
     quats_wxyz = qpos_prepared_sample[:, 3:7]
     quats_xyzw = quats_wxyz[:, [1, 2, 3, 0]]
     offset_world = R.from_quat(quats_xyzw).apply(shift_local)
+
     qpos_init_sample = qpos_prepared_sample.copy()
     qpos_init_sample[:, :3] = positions + offset_world
-    qpos_init_sample[:, 7:] = np.tile(approach_joints, (N, 1))
+    qpos_init_sample[:, 7:] = np.tile(approach_joints, (n, 1))
 
-    print(f"Shape of qpos_prepared: {qpos_prepared_sample.shape}")
-    print(f"Shape of qpos_approach: {qpos_approach_sample.shape}")
-    print(f"Shape of qpos_init: {qpos_init_sample.shape}")
+    return qpos_init_sample, qpos_approach_sample, qpos_prepared_sample
 
-    out_cfg = cfg["output"]
-    save_dir = os.path.join(out_cfg["base_dir"], hand_name, obj_name)
-    os.makedirs(save_dir, exist_ok=True)
-    h5path = os.path.join(save_dir, out_cfg["h5_name"])
-    npypath = os.path.join(save_dir, out_cfg["npy_name"])
 
-    print(f"Saving to {h5path} ...")
-    D = qpos_prepared_sample.shape[1]
-    MAX_CAP = int(out_cfg["max_cap"])
+def run_scale_sampling(
+    cfg: Dict,
+    object_name: str,
+    scale_key: str,
+    scale_asset: Dict,
+    hand_xml_path: str,
+    points: np.ndarray,
+    normals: np.ndarray,
+) -> str:
+    obj_info = {"name": object_name, "xml_abs": scale_asset["xml_abs"], "scale": 1.0}
+    target_body_params = cfg["hand"]["target_body_params"]
 
+    mjho = MjHO(obj_info, hand_xml_path, target_body_params=target_body_params)
+    sampling_cfg = cfg["sampling"]
+    pts_for_sim, norms_for_sim, _ = downsample_fps(
+        points,
+        normals,
+        int(sampling_cfg["downsample_for_sim"]),
+        seed=int(cfg["seed"]),
+    )
+    mjho._set_obj_pts_norms(pts_for_sim, norms_for_sim)
+
+    mjho_valid = MjHO(obj_info, hand_xml_path, target_body_params=target_body_params, object_fixed=False)
+
+    ts = time.time()
+    transforms_np = sample_frames_from_points(cfg, points, normals)
+    print(f"[{scale_key}] frame sampling time: {time.time() - ts:.3f}s, N={len(transforms_np)}")
+
+    pose = build_pose_candidates(cfg, transforms_np)
+    qpos_init, qpos_approach, qpos_prepared = make_qpos_triplets(cfg, pose)
+
+    out_dir = Path(scale_asset["xml_abs"]).parent
+    out_dir.mkdir(parents=True, exist_ok=True)
+    h5_path = out_dir / "grasp.h5"
+
+    d = qpos_prepared.shape[1]
+    max_cap = int(cfg["output"]["max_cap"])
     num_no_col = 0
     num_valid = 0
     num_samples = transforms_np.shape[0]
     ts = time.time()
 
-    with h5py.File(h5path, "w") as hf:
-        ds_init = hf.create_dataset("qpos_init", shape=(MAX_CAP, D), maxshape=(None, D), dtype="f4")
-        ds_approach = hf.create_dataset("qpos_approach", shape=(MAX_CAP, D), maxshape=(None, D), dtype="f4")
-        ds_prepared = hf.create_dataset("qpos_prepared", shape=(MAX_CAP, D), maxshape=(None, D), dtype="f4")
-        ds_grasp = hf.create_dataset("qpos_grasp", shape=(MAX_CAP, D), maxshape=(None, D), dtype="f4")
+    with h5py.File(h5_path, "w") as hf:
+        ds_init = hf.create_dataset("qpos_init", shape=(max_cap, d), maxshape=(None, d), dtype="f4")
+        ds_approach = hf.create_dataset("qpos_approach", shape=(max_cap, d), maxshape=(None, d), dtype="f4")
+        ds_prepared = hf.create_dataset("qpos_prepared", shape=(max_cap, d), maxshape=(None, d), dtype="f4")
+        ds_grasp = hf.create_dataset("qpos_grasp", shape=(max_cap, d), maxshape=(None, d), dtype="f4")
 
-        for i in tqdm(range(qpos_prepared_sample.shape[0]), desc="sampling", miniters=50):
-            if num_valid >= MAX_CAP:
+        for i in tqdm(range(qpos_prepared.shape[0]), desc=f"sampling-{scale_key}", miniters=50):
+            if num_valid >= max_cap:
                 num_samples = i
                 break
 
-            mjho.set_hand_qpos(qpos_prepared_sample[i])
+            mjho.set_hand_qpos(qpos_prepared[i])
             if mjho.is_contact():
                 continue
-
-            mjho.set_hand_qpos(qpos_approach_sample[i])
+            mjho.set_hand_qpos(qpos_approach[i])
             if mjho.is_contact():
                 continue
-
-            mjho.set_hand_qpos(qpos_init_sample[i])
+            mjho.set_hand_qpos(qpos_init[i])
             if mjho.is_contact():
                 continue
 
             num_no_col += 1
-
-            mjho.set_hand_qpos(qpos_prepared_sample[i])
+            mjho.set_hand_qpos(qpos_prepared[i])
             qpos_grasp, _ = mjho.sim_grasp(visualize=False)
             ho_contact, _ = mjho.get_contact_info(obj_margin=0.00)
 
             if len(ho_contact) >= int(cfg["validation"]["contact_min_count"]):
                 is_valid, _, _ = mjho_valid.sim_under_extforce(qpos_grasp.copy(), visualize=False)
                 if is_valid:
-                    ds_init[num_valid] = qpos_init_sample[i].astype("f4")
-                    ds_approach[num_valid] = qpos_approach_sample[i].astype("f4")
-                    ds_prepared[num_valid] = qpos_prepared_sample[i].astype("f4")
+                    ds_init[num_valid] = qpos_init[i].astype("f4")
+                    ds_approach[num_valid] = qpos_approach[i].astype("f4")
+                    ds_prepared[num_valid] = qpos_prepared[i].astype("f4")
                     ds_grasp[num_valid] = qpos_grasp.astype("f4")
                     num_valid += 1
 
@@ -199,33 +175,48 @@ def main():
                 gc.collect()
 
         final_size = num_valid
-        ds_init.resize((final_size, D))
-        ds_approach.resize((final_size, D))
-        ds_prepared.resize((final_size, D))
-        ds_grasp.resize((final_size, D))
+        ds_init.resize((final_size, d))
+        ds_approach.resize((final_size, d))
+        ds_prepared.resize((final_size, d))
+        ds_grasp.resize((final_size, d))
         hf.flush()
 
     duration = time.time() - ts
-    print(f"Time to generate grasp: {duration}")
-    if num_samples > 0:
-        print(f"Avg time per sample: {duration / num_samples}")
-    if num_no_col > 0:
-        print(f"Avg time per no-collision: {duration / num_no_col}")
-    print(f"Num of samples: {num_samples}")
-    print(f"Num of no-collision samples: {num_no_col}")
-    print(f"Num of valid samples: {num_valid}")
-    if num_samples > 0:
-        print(f"Rate of no-collision: {num_no_col / num_samples}")
-    if num_no_col > 0:
-        print(f"Rate of valid: {num_valid / num_no_col}")
+    print(f"[{scale_key}] samples={num_samples} no_col={num_no_col} valid={num_valid} time={duration:.2f}s out={h5_path}")
+    return str(h5_path)
 
-    with h5py.File(h5path, "r") as hf:
-        grasp_dict = {name: hf[name][()] for name in hf.keys()}
 
-    if len(grasp_dict.get("qpos_grasp", [])):
-        print(grasp_dict["qpos_grasp"][0])
-    np.save(npypath, grasp_dict)
-    print(f"Saved grasp data to {npypath}")
+def main():
+    p = argparse.ArgumentParser(description="Sample grasps for one object across fixed scales.")
+    p.add_argument("-i", "--obj-id", type=int, default=None, help="Global object id in merged DatasetObjects.")
+    p.add_argument("-o", "--obj", type=str, default=None, help="Object name override (optional).")
+    p.add_argument("-c", "--config", type=str, default=DEFAULT_RUN_CONFIG_PATH, help="JSON config path.")
+    args = p.parse_args()
+
+    cfg = load_config(args.config)
+    set_seed(int(cfg["seed"]))
+
+    config_stem = Path(args.config).stem
+    ds = DatasetObjects(
+        resolve_dataset_root(cfg["dataset"].get("root")),
+        dataset_names=list(cfg["dataset"].get("include", [])),
+        scales=list(cfg["dataset"].get("scales", [])),
+        dataset_tag=config_stem,
+        dataset_output_root=cfg.get("output", {}).get("dataset_root", "datasets"),
+        prebuild_scales=True,
+        object_mass_kg=float(cfg["dataset"]["object_mass_kg"]),
+    )
+
+    obj_name = resolve_object_name(ds, cfg, args.obj_id, args.obj)
+    info = ds.get_info(obj_name)
+    print(f"Using object id={info['global_id']} name={info['object_name']}")
+
+    hand_xml_path = os.path.abspath(cfg["hand"]["xml_path"])
+    n_points = int(cfg["sampling"]["n_points"])
+
+    for scale_key, scale_asset in sorted(info.get("scale_assets", {}).items()):
+        pts, norms = ds.sample_surface_mesh(scale_asset["coacd_abs"], n_points=n_points, method="even")
+        run_scale_sampling(cfg, obj_name, scale_key, scale_asset, hand_xml_path, pts, norms)
 
 
 if __name__ == "__main__":

@@ -207,4 +207,20 @@ marimo/_lsp/
 __marimo__/
 
 assets/*
+!assets/objects
+assets/objects/processed/
+assets/objects/*/
 tmp/
+
+# Runtime/generated artifacts
+old/
+logs/
+outputs/
+checkpoints/
+MUJOCO_LOG.TXT
+world_id
+
+# Session planning/change logs
+docs/
+diff.md
+TODO.md

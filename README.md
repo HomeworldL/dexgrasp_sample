@@ -1,87 +1,67 @@
 # dexgrasp_sample
 
-MuJoCo-based grasp sampling pipeline for 3D objects and multiple five-finger dexterous hands.
+MuJoCo-based dexterous grasp sampling pipeline for object 3D assets.
 
-## What This Repo Does
-- Loads processed object assets (YCB-style meshes + XML/URDF)
-- Samples grasp candidates from object surface points and normals
-- Simulates hand-object interaction in MuJoCo
-- Filters candidates by collision, contact richness, and external-force stability
-- Exports valid grasp states as HDF5 datasets
+## Mainline
+- `run.py`
+- `run_multi.py`
+- `src/mj_ho.py`
+- `src/sample.py`
+- `src/dataset_objects.py`
 
-This project is designed for building grasp datasets rather than online control.
+## What It Does
+1. Load object assets from a dataset root
+2. Sample surface points and normals
+3. Generate grasp-frame candidates
+4. Run MuJoCo hand-object filtering and grasp simulation
+5. Validate grasp stability and export valid states
 
-## Supported Hand Models
-- `assets/hands/liberhand/liberhand_right.xml`
-- `assets/hands/liberhand2/liberhand2_right.xml`
+## Dataset Root (External Interface)
+This project now supports generic dataset layouts through `DatasetObjects`.
 
-Main scripts:
-- `run.py` -> `liberhand_right`
-- `run_liberhand2.py` -> `liberhand2_right`
+Default root priority:
+1. `DEXGRASP_OBJECTS_ROOT`
+2. `assets/objects/processed`
 
-## Repository Structure
-- `src/dataset_objects.py`: object dataset indexing, mesh/point-cloud loading
-- `src/sample.py`: grasp frame candidate generation + FPS downsampling
-- `src/mj_ho.py`: MuJoCo hand-object environment and grasp validation logic
-- `src/sq_handler.py`, `src/EMS/`: superquadric utilities
-- `run.py`, `run_liberhand2.py`: single-object grasp sampling
-- `run_multi.py`: parallel multi-object execution
-- `assets/`: hands and YCB object assets
-- `outputs/`: generated grasp data
+`assets/objects` is expected to be a symlink interface (no large dataset copy).
 
-## Pipeline Overview
-1. Choose target object (`-o <object_name>`)
-2. Sample object point cloud and normals
-3. Generate candidate grasp frames around surface points
-4. Convert candidate transforms to hand root pose + finger joint preset
-5. Collision checks at `prepared`, `approach`, `init`
-6. Simulate closing to get `qpos_grasp`
-7. Keep grasps with enough hand-object contacts
-8. Validate stability under external force perturbation
-9. Save valid samples to HDF5
+## Config-First Entrypoints
+All CLI entrypoints are config-driven and require a JSON config schema:
+- `run.py`
+- `run_multi.py`
+- `vis_obj.py`
+- `vis_ho.py`
+- `run_liberhand2.py`
 
-## Installation
-No lockfile is currently provided. Create your own Python environment and install dependencies:
+Default config for all entrypoints:
+- `configs/run_YCB_liberhand.json`
 
-```bash
-pip install numpy scipy torch trimesh open3d mujoco mujoco-viewer h5py tqdm transforms3d viser
-```
+Available config matrix:
+- `run_DGN2_liberhand.json`, `run_YCB_liberhand.json`, `run_HOPE_liberhand.json`
+- `run_DGN2_liberhand2.json`, `run_YCB_liberhand2.json`, `run_HOPE_liberhand2.json`
+- `run_DGN2_inspire.json`, `run_YCB_inspire.json`, `run_HOPE_inspire.json`
+
+Dataset semantics:
+- `DGN2 = ["ShapeNetCore", "ShapeNetSem", "DDG", "MSO"]`
+
+If config fields are missing/invalid, program exits with explicit error (no in-code default config build).
+
+## Visualization Scripts
+Visualization and plotting tools are separated from mainline under:
+- `tools/visualization/`
 
 ## Quick Start
-Run one object with LiberHand:
-
 ```bash
-python run.py -o 002_master_chef_can
+python run.py -c configs/run_YCB_liberhand.json -o 002_master_chef_can
+python run_multi.py -c configs/run_DGN2_liberhand.json -j 4 --script run.py
+python vis_obj.py -c configs/run_YCB_liberhand.json -i 0
+python vis_ho.py -c configs/run_YCB_liberhand2.json -i 0
 ```
 
-Run one object with LiberHand2:
-
+## Tests
 ```bash
-python run_liberhand2.py -o 006_mustard_bottle
+pytest -q
 ```
 
-Run parallel jobs across objects:
-
-```bash
-python run_multi.py -j 4 --script run.py
-```
-
-## Output Format
-For each `(hand, object)` pair, outputs are written to:
-
-```text
-outputs/<hand_name>/<object_name>/grasp_data.h5
-```
-
-Datasets inside `grasp_data.h5`:
-- `qpos_init`
-- `qpos_approach`
-- `qpos_prepared`
-- `qpos_grasp`
-
-Each row corresponds to one valid grasp sample in MuJoCo qpos convention.
-
-## Notes
-- This codebase currently focuses on data generation and analysis scripts.
-- Some modules under `old/` and `src/backup/` are historical and not part of the main pipeline.
-- If MuJoCo rendering fails, verify local MuJoCo/OpenGL setup first.
+## Dependencies
+See `requirements.txt`.

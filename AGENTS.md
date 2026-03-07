@@ -1,62 +1,79 @@
 # AGENTS.md
 
 ## Repository Purpose
-This repository builds a MuJoCo-based grasp sampling pipeline for five-finger dexterous hands.
-It processes object 3D assets (mainly YCB-format meshes/XML), samples candidate grasp poses from object surface point clouds, validates them in simulation, and saves successful grasps as datasets for downstream training/evaluation.
+MuJoCo-based dexterous grasp sampling for 3D objects.
+Mainline focus is offline grasp configuration generation, not superquadric fitting.
 
-## Core Capabilities
-- Object dataset indexing and loading (`src/dataset_objects.py`)
-- Surface point cloud sampling + normal extraction from object meshes
-- Candidate grasp frame generation (`src/sample.py`)
-- Hand-object simulation, contact checking, closing, and stability validation under external force (`src/mj_ho.py`)
-- Optional superquadric/EMS utilities for geometric approximation (`src/EMS/`, `src/sq_handler.py`)
-- Multi-object batch sampling (`run_multi.py`)
+## Planning Index
+- Active plan: `TODO.md`
 
-## Main Entrypoints
-- `run.py`: Grasp sampling for `liberhand_right`
-- `run_liberhand2.py`: Grasp sampling for `liberhand2_right`
-- `run_multi.py`: Parallel execution across objects in `assets/ycb_datasets`
+## Mainline Code (Do Not Drift)
+- `run_multi.py`
+- `run.py`
+- `src/mj_ho.py` (core, keep stable)
+- `src/sample.py`
+- `src/dataset_objects.py`
 
-## Typical Workflow
-1. Load target object meshes and metadata from `assets/ycb_datasets/<object_name>/`
-2. Sample object point cloud + normals
-3. Generate grasp frame candidates around points
-4. Convert candidates into hand root pose + finger preset joint vectors
-5. Reject immediate collisions (`prepared`, `approach`, `init` checks)
-6. Simulate grasp closing and keep candidates with enough contacts
-7. Validate force robustness in a second MuJoCo instance
-8. Save valid trajectories/states to `outputs/<hand_name>/<object_name>/grasp_data.h5`
+## Architecture Notes
+- Main data flow: object mesh -> surface points/normals -> grasp frame sampling -> MuJoCo collision/stability filtering -> HDF5 grasp states.
+- Visualization scripts are intentionally isolated under `tools/visualization/` and are not part of the mainline pipeline.
+- SQ/Superquadric and SDF generation are removed from mainline.
 
-## Output Data Contract
-The main output HDF5 includes:
+## Dataset Interface
+- Preferred dataset root is `assets/objects/processed`.
+- This repo uses a symlink interface to external mesh repository:
+  - `assets/objects -> /home/ccs/repositories/mesh_process/assets/objects`
+- Override dataset root via env:
+  - `DEXGRASP_OBJECTS_ROOT=/abs/path/to/processed_or_object_root`
+- Default merged dataset list in mainline:
+  - `["ShapeNetCore", "ShapeNetSem", "DDG", "MSO"]`
+- `DatasetObjects` exposes a global integer id space over the merged list; `run.py` selects objects by global id.
+
+## Config Policy (Mandatory)
+- Mainline is config-first: all CLI entrypoints must load a JSON config.
+- Do not rebuild defaults inside Python code (`build_default_*` style is disallowed).
+- Default entry config for scripts is:
+  - `configs/run_YCB_liberhand.json`
+- Config set naming:
+  - `<dataset_group>_<hand>.json`, where dataset group in `{DGN2, YCB, HOPE}` and hand in `{liberhand, inspire, liberhand2}`.
+- `DGN2` means merged datasets:
+  - `["ShapeNetCore", "ShapeNetSem", "DDG", "MSO"]`
+- Invalid/missing config fields should fail fast with explicit error.
+
+## Output Contract
+Main output HDF5 fields:
 - `qpos_init`
 - `qpos_approach`
 - `qpos_prepared`
 - `qpos_grasp`
 
-Each row is one valid grasp sample in MuJoCo qpos layout for the selected hand model.
+## Unified Dataset Format (Summary)
+- Internal sample representation should include:
+  - `object_id`, `dataset`, `scale`, `hand_name`
+  - hand pose as `wxyz + qpos` relative-to-object convention
+  - object point cloud `(K,3)` and source metadata
+- Public references for format comparison are tracked in:
+  - `docs/dataset_format_and_scale.md`
 
-## Important Directories
-- `assets/hands/`: dexterous hand XML and kinematic config
-- `assets/ycb_datasets/`: object meshes/XML/URDF/metadata
-- `src/`: core pipeline modules
-- `outputs/`: generated grasp datasets
-- `logs/`: per-object run logs from parallel jobs
+## Scale Policy (Summary)
+- `YCB/HOPE/MSO`: keep real-world scale (`scale=1.0`).
+- `ShapeNetCore/ShapeNetSem`: enable scale by dataset policy.
+- Current mainline decision: per-object fixed random scale (deterministic by object id + seed), not per-grasp random scale.
+- Manifest gating must happen first: only `manifest.process_meshes.json` entries with `process_status=success` are eligible.
 
-## Environment Notes
-This repo expects a Python environment with at least:
-- `numpy`, `scipy`, `torch`, `trimesh`, `open3d`, `mujoco`, `mujoco-viewer`, `h5py`, `tqdm`, `transforms3d`, `viser`
+## Collaboration Rules
+- Keep edits focused on requested tasks.
+- Avoid structural rewrites of `src/mj_ho.py` unless strictly necessary.
+- Validate each refactor item with explicit completion checks in `TODO.md`.
 
-MuJoCo runtime must be correctly installed/licensed for local simulation.
-
-## Collaboration Rules for AI Agents
-- Keep changes minimal and task-focused; avoid refactoring unrelated modules.
-- Do not delete or rewrite generated outputs unless explicitly asked.
-- Prefer documenting assumptions when touching grasp conventions (pose frame, quaternion order, joint layout).
-- Validate any pipeline edits by running a small single-object sample first.
+## Global GitHub-KB Path (Mandatory)
+- `github-kb` default path is **global only**: `/home/ccs/github-kb`.
+- Do **not** clone or maintain `github-kb` inside this repository.
+- Any repo exploration/knowledge-base update must target `/home/ccs/github-kb/CLAUDE.md`.
 
 ## Git Remote Reminder
 User note: remote is managed with:
 `git remote set-url origin git@github.com:HomeworldL/`
 
-When pushing, ensure the final `origin` URL points to the intended SSH repo path (typically `git@github.com:HomeworldL/<repo>.git`).
+Ensure final remote URL targets the real repository SSH path, e.g.
+`git@github.com:HomeworldL/dexgrasp_sample.git`.

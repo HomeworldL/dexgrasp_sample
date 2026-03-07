@@ -1,0 +1,12 @@
+numpy
+scipy
+torch
+trimesh
+open3d
+mujoco
+mujoco-viewer
+h5py
+tqdm
+transforms3d
+viser
+pytest

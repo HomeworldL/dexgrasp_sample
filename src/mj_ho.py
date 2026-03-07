@@ -15,9 +15,47 @@ from scipy.spatial import cKDTree
 import time
 import trimesh
 import mujoco
-import mujoco_viewer
 import transforms3d.quaternions as tq
 from typing import Dict, List, Tuple, Optional, Sequence
+
+try:
+    from mujoco import viewer as mj_viewer
+except Exception:
+    mj_viewer = None
+
+
+def _default_hand_profiles() -> Dict[str, Dict]:
+    # qpos slices are indexed on hand qpos (including 7D root), ctrl slices on actuator vector.
+    return {
+        "liberhand_right": {
+            "ctrl_from_qpos_slices": [
+                (0, 3, 7, 10),
+                (3, 6, 11, 14),
+                (6, 8, 15, 17),
+                (8, 10, 19, 21),
+                (10, 13, 23, 26),
+            ],
+            "solimp": [0.4, 0.99, 0.0001],
+            "solref": [0.003, 1.0],
+            "side_swing_indices": [0, 4, 8, 12, 16],
+            "thumb_relax_indices": [17, 18, 19],
+            "thumb_relax_divisor": 1.2,
+        },
+        "liberhand2_right": {
+            "ctrl_from_qpos_slices": [
+                (0, 3, 7, 10),
+                (3, 6, 11, 14),
+                (6, 9, 15, 18),
+                (9, 12, 19, 22),
+                (12, 15, 23, 26),
+            ],
+            "solimp": [0.4, 0.99, 0.0001],
+            "solref": [0.003, 1.0],
+            "side_swing_indices": [0, 4, 8, 12, 16],
+            "thumb_relax_indices": [17, 18, 19],
+            "thumb_relax_divisor": 1.2,
+        },
+    }
 
 
 class MjHO:
@@ -26,6 +64,7 @@ class MjHO:
         obj_info: Dict,
         hand_xml_path: str,
         target_body_params: Optional[Dict] = None,
+        hand_profile: Optional[Dict] = None,
         friction_coef: Sequence[float] = (0.2, 0.2),
         object_fixed: bool = True,
         visualize: bool = False,
@@ -40,8 +79,13 @@ class MjHO:
         self.obj_info = obj_info
         self.hand_xml_path = os.path.abspath(hand_xml_path)
         self.hand_name = os.path.basename(self.hand_xml_path).split(".")[0]
+        profiles = _default_hand_profiles()
+        self.hand_profile = dict(profiles.get(self.hand_name, {}))
+        if hand_profile:
+            self.hand_profile.update(hand_profile)
         self.friction_coef = friction_coef
         self.object_fixed = object_fixed
+        self.object_scale = float(self.obj_info.get("scale", 1.0))
 
         # load hand spec as base
         self.spec = self._add_hand(self.hand_xml_path)
@@ -102,10 +146,9 @@ class MjHO:
         # reset to sensible default
         self.reset()
 
+        self.viewer = None
         if visualize:
-            self.viewer = mujoco_viewer.MujocoViewer(self.model, self.data)
-        else:
-            self.viewer = None
+            self.open_viewer()
 
     # -----------------------
     # spec construction
@@ -156,6 +199,20 @@ class MjHO:
                     mesh_file = os.path.abspath(mesh_file)
 
                 m.file = mesh_file
+            if abs(self.object_scale - 1.0) > 1e-12:
+                try:
+                    raw = np.asarray(getattr(m, "scale"), dtype=float).reshape(-1)
+                    if raw.size == 0:
+                        scaled = np.array([self.object_scale, self.object_scale, self.object_scale], dtype=float)
+                    elif raw.size == 1:
+                        s = float(raw[0]) * self.object_scale
+                        scaled = np.array([s, s, s], dtype=float)
+                    else:
+                        scaled = raw[:3] * self.object_scale
+                    m.scale = scaled.tolist()
+                except Exception:
+                    # Keep robust for mujoco builds that expose mesh scale differently.
+                    pass
 
         for text in getattr(obj_spec, "textures", []):
             # pass
@@ -200,12 +257,11 @@ class MjHO:
                 self.model.geom_gap[i] = obj_gap
 
     def _set_sol(self):
+        solimp = self.hand_profile.get("solimp", [0.4, 0.99, 0.0001])
+        solref = self.hand_profile.get("solref", [0.003, 1.0])
         for g in self.spec.geoms:
-            # This solimp and solref comes from the Shadow Hand xml
-            # They can generate larger force with smaller penetration
-            # The body will be more "rigid" and less "soft"
-            g.solimp[:3] = [0.4, 0.99, 0.0001]
-            g.solref[:2] = [0.003, 1]
+            g.solimp[:3] = solimp[:3]
+            g.solref[:2] = solref[:2]
 
     def _set_obj_pts_norms(self, obj_pts, obj_norms):
         obj_pts = np.asarray(obj_pts, dtype=float)
@@ -225,8 +281,31 @@ class MjHO:
     # -----------------------
     def open_viewer(self):
         if self.viewer is not None:
-            self.viewer.close()
-        self.viewer = mujoco_viewer.MujocoViewer(self.model, self.data)
+            try:
+                self.viewer.close()
+            except Exception:
+                pass
+        if mj_viewer is None:
+            raise RuntimeError("Official MuJoCo viewer is unavailable in current mujoco build.")
+        self.viewer = mj_viewer.launch_passive(self.model, self.data)
+
+    def _render_viewer(self):
+        if self.viewer is None:
+            return
+        try:
+            if hasattr(self.viewer, "sync"):
+                self.viewer.sync()
+            else:
+                self.viewer.render()
+        except Exception:
+            pass
+
+    def _viewer_alive(self) -> bool:
+        if self.viewer is None:
+            return False
+        if hasattr(self.viewer, "is_running"):
+            return bool(self.viewer.is_running())
+        return True
 
 
     def export_xml(self, out_path: str):
@@ -308,24 +387,24 @@ class MjHO:
         pass
 
     def qpos2ctrl(self, qpos):
-        if self.hand_name == "liberhand_right":
-            # 7 + (0,1,2) + (4,5,6) + (8,9) + (12, 13) + (16, 17, 18)
-            ctrl = np.zeros(self.nu)
-            ctrl[0:3] = qpos[7 + 0 : 7 + 3]
-            ctrl[3:6] = qpos[7 + 4 : 7 + 7]
-            ctrl[6:8] = qpos[7 + 8 : 7 + 10]
-            ctrl[8:10] = qpos[7 + 12 : 7 + 14]
-            ctrl[10:13] = qpos[7 + 16 : 7 + 19]
-            return ctrl
-        elif self.hand_name == "liberhand2_right":
-            # 7 + (0,1,2) + (4,5,6) + (8,9,10) + (12, 13,14) + (16, 17, 18)
-            ctrl = np.zeros(self.nu)
-            ctrl[0:3] = qpos[7 + 0 : 7 + 3]
-            ctrl[3:6] = qpos[7 + 4 : 7 + 7]
-            ctrl[6:9] = qpos[7 + 8 : 7 + 11]
-            ctrl[9:12] = qpos[7 + 12 : 7 + 15]
-            ctrl[12:15] = qpos[7 + 16 : 7 + 19]
-            return ctrl
+        q = np.asarray(qpos, dtype=float).reshape(-1)
+        if q.shape[0] == self.nq:
+            hand_qpos = q[: self.nq_hand]
+        elif q.shape[0] == self.nq_hand:
+            hand_qpos = q
+        else:
+            raise ValueError(f"Unsupported qpos length {q.shape[0]} for qpos2ctrl.")
+
+        slices = self.hand_profile.get("ctrl_from_qpos_slices")
+        if not slices:
+            raise NotImplementedError(
+                f"No hand_profile ctrl mapping for hand '{self.hand_name}'."
+            )
+
+        ctrl = np.zeros(self.nu, dtype=float)
+        for c0, c1, q0, q1 in slices:
+            ctrl[int(c0) : int(c1)] = hand_qpos[int(q0) : int(q1)]
+        return ctrl
             
 
     def step(self, n_steps: int = 1, ctrl: Optional[np.ndarray] = None):
@@ -504,15 +583,17 @@ class MjHO:
             # exit()
 
             # now add to hand_qpos
-            special_indices = [0, 4, 8, 12, 16]
+            special_indices = list(self.hand_profile.get("side_swing_indices", [0, 4, 8, 12, 16]))
             mask = ~np.isin(np.arange(total_dq_hand.shape[0]), special_indices)
             total_dq_hand[mask] = np.maximum(total_dq_hand[mask], 0)
             # for idx in special_indices:
             #     total_dq_hand[idx] /= 3
 
-            thumb_indices = [17, 18, 19]
+            thumb_indices = list(self.hand_profile.get("thumb_relax_indices", [17, 18, 19]))
+            thumb_div = float(self.hand_profile.get("thumb_relax_divisor", 1.2))
             for idx in thumb_indices:
-                total_dq_hand[idx] /= 1.2
+                if 0 <= idx < total_dq_hand.shape[0]:
+                    total_dq_hand[idx] /= max(thumb_div, 1e-6)
             # print(f"total_dq_hand: {total_dq_hand}")
             # print(f"total_dq_hand.shape: {total_dq_hand.shape}")
 
@@ -523,7 +604,7 @@ class MjHO:
             self.step(1, ctrl=ctrl)
 
             if visualize:
-                self.viewer.render()
+                self._render_viewer()
                 time.sleep(0.1)
         # if visualize:
         #     while self.viewer.is_alive:
@@ -641,8 +722,7 @@ class MjHO:
 
         # tighten hand: add grip_delta to all joints except side-swing indices
         hand_qpos = qpos_grasp.copy()
-        # define excluded indices (side-swing)
-        excluded = set([0, 4, 8, 12, 16])
+        excluded = set(self.hand_profile.get("side_swing_indices", [0, 4, 8, 12, 16]))
         # apply delta
         for i in range(hand_qpos.shape[0]):
             if i not in excluded:
@@ -691,11 +771,7 @@ class MjHO:
                 self.step(check_step, ctrl=hand_ctrl)
 
                 if visualize:
-                    try:
-                        self.viewer.render()
-                        # time.sleep(0.1) # debug
-                    except Exception:
-                        pass
+                    self._render_viewer()
 
                 # check if object has moved
                 if self.is_contact():
@@ -725,13 +801,11 @@ class MjHO:
         return succ_flag, pos_delta, angle_delta
 
     def viewer_loop(self):
-        """Launch simple viewer (MujocoViewer). Blocking if specified."""
+        """Launch simple viewer loop with official MuJoCo viewer."""
         try:
-            while self.viewer.is_alive:
+            while self._viewer_alive():
                 self.step()
-                # hand_qpos = self.get_hand_qpos()
-                # print(hand_qpos)
-                self.viewer.render()
+                self._render_viewer()
         except KeyboardInterrupt:
             try:
                 self.viewer.close()

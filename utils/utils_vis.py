@@ -2,9 +2,13 @@ import numpy as np
 import time
 from typing import Dict, Any, Tuple, Union, Sequence
 import trimesh
-import viser
 import colorsys
 import random
+
+try:
+    import viser
+except Exception:
+    viser = None
 
 
 def generate_ncolors(num: int) -> np.ndarray:
@@ -49,7 +53,7 @@ def visualize_with_viser(
     camera_position: Tuple[float, float, float] = (0.5, 0.5, 0.5),
     look_at: Tuple[float, float, float] = (0.0, 0.0, 0.0),
     default_point_size: float = 0.001,
-    blocking: bool = True,
+    blocking: bool = False,
 ) -> "viser.ViserServer":
     """
     Generic viser visualization helper.
@@ -61,11 +65,13 @@ def visualize_with_viser(
         camera_position: initial camera position (x,y,z)
         look_at: camera look-at target
         default_point_size: fallback point size for point clouds
-        blocking: if True, function will block (simple sleep loop) to keep server alive. If False, returns server immediately.
+        blocking: if True, function blocks in a keep-alive loop. Default False returns server immediately.
 
     Returns:
         viser.ViserServer instance
     """
+    if viser is None:
+        raise RuntimeError("viser is not installed in current environment.")
     meshes = meshes or {}
     pointclouds = pointclouds or {}
 

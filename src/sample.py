@@ -147,16 +147,16 @@ def farthest_point_sampling(points, k, seed=None):
     # distances to nearest selected point
     dists = np.full(N, np.inf)
     # update distances iteratively
-    selected = points[indices[0:1]]  # shape (1,3)
+    last_selected = points[indices[0]]
     for i in range(1, k):
-        # compute squared distances to newest selected point
-        new_d = np.sum((points - selected[-1]) ** 2, axis=1)
+        # compute squared distances to newest selected point (avoid repeated array growth)
+        new_d = np.sum((points - last_selected) ** 2, axis=1)
         # update min distances
         dists = np.minimum(dists, new_d)
         # pick farthest
         idx = np.argmax(dists)
         indices[i] = idx
-        selected = points[indices[: i + 1]]  # append; small overhead but ok
+        last_selected = points[idx]
     return indices
 
 

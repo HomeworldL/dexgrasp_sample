@@ -48,6 +48,8 @@ class DatasetObjects:
             "convex_parts_abs": List[str],
             "scale": float,
             "mjcf_abs": str,
+            "output_dir_abs": str,
+            "object_scale_key": str,
         }
     """
 
@@ -198,6 +200,7 @@ class DatasetObjects:
                 )
 
                 for scale_key, rec in sorted(scale_assets.items()):
+                    output_dir_abs = str(Path(rec["xml_abs"]).resolve().parent)
                     info = {
                         "global_id": gid,
                         "object_name": object_name,
@@ -205,6 +208,8 @@ class DatasetObjects:
                         "convex_parts_abs": list(rec["convex_parts_abs"]),
                         "scale": float(rec["scale"]),
                         "mjcf_abs": rec["xml_abs"],
+                        "output_dir_abs": output_dir_abs,
+                        "object_scale_key": f"{object_name}__{scale_key}",
                     }
                     self.items.append(info)
                     self._key_to_index[f"{object_name}__{scale_key}"] = gid

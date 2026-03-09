@@ -85,7 +85,6 @@ class MjHO:
             self.hand_profile.update(hand_profile)
         self.friction_coef = friction_coef
         self.object_fixed = object_fixed
-        self.object_scale = float(self.obj_info.get("scale", 1.0))
 
         # load hand spec as base
         self.spec = self._add_hand(self.hand_xml_path)
@@ -174,7 +173,7 @@ class MjHO:
         """
         Minimal: merge object's MjSpec assets (meshes) and worldbody into self.spec.
 
-        - obj_info['xml_path'] should point to the object's MJCF/XML produced by preprocessing.
+        - obj_info['xml_abs'] should point to the object's pre-scaled MJCF/XML.
         - Only mesh assets and worldbody are merged (no texture/material copying).
         - If fixed==True, add a weld equality between 'world' and the object's root body.
         """
@@ -199,20 +198,6 @@ class MjHO:
                     mesh_file = os.path.abspath(mesh_file)
 
                 m.file = mesh_file
-            if abs(self.object_scale - 1.0) > 1e-12:
-                try:
-                    raw = np.asarray(getattr(m, "scale"), dtype=float).reshape(-1)
-                    if raw.size == 0:
-                        scaled = np.array([self.object_scale, self.object_scale, self.object_scale], dtype=float)
-                    elif raw.size == 1:
-                        s = float(raw[0]) * self.object_scale
-                        scaled = np.array([s, s, s], dtype=float)
-                    else:
-                        scaled = raw[:3] * self.object_scale
-                    m.scale = scaled.tolist()
-                except Exception:
-                    # Keep robust for mujoco builds that expose mesh scale differently.
-                    pass
 
         for text in getattr(obj_spec, "textures", []):
             # pass

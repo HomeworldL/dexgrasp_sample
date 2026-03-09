@@ -98,7 +98,7 @@ def run_sampling(
     obj_info = {"name": object_name, "xml_abs": object_mjcf_path}
     target_body_params = cfg["hand"]["target_body_params"]
 
-    mjho = MjHO(obj_info, hand_xml_path, target_body_params=target_body_params)
+    mjho = MjHO(obj_info, hand_xml_path, target_body_params=target_body_params, visualize=False)
     sampling_cfg = cfg["sampling"]
     pts_for_sim, norms_for_sim, _ = downsample_fps(
         points,
@@ -159,7 +159,7 @@ def run_sampling(
 
             num_no_col += 1
             mjho.set_hand_qpos(qpos_prepared[i])
-            qpos_grasp, _ = mjho.sim_grasp(visualize=False)
+            qpos_grasp, _ = mjho.sim_grasp(visualize=True)
             ho_contact, _ = mjho.get_contact_info(obj_margin=0.00)
 
             if len(ho_contact) >= contact_min_count:

@@ -56,6 +56,8 @@ def test_manifest_driven_build_returns_object_scale_items(tmp_path: Path):
     assert items[0]["object_name"] == "YCB_001_obj"
     assert Path(items[0]["coacd_abs"]).exists()
     assert Path(items[0]["mjcf_abs"]).exists()
+    assert Path(items[0]["output_dir_abs"]).is_dir()
+    assert items[0]["object_scale_key"].startswith("YCB_001_obj__scale")
 
 
 def test_dataset_missing_dir_raises(tmp_path: Path):

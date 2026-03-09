@@ -48,10 +48,10 @@ def main():
         "obj_coacd": ds.load_mesh(asset["coacd_abs"]),
         "obj_convex_parts": trimesh.util.concatenate(parts),
     }
-    pts, _ = ds.sample_surface_mesh(
+    pts, _ = ds.sample_surface_o3d(
         asset["coacd_abs"],
         n_points=min(2048, int(cfg.get("sampling", {}).get("n_points", 2048))),
-        method="even",
+        method="poisson",
     )
     cols = np.tile(np.array([[90, 160, 255]], dtype=np.uint8), (pts.shape[0], 1))
 

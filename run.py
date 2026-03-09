@@ -215,7 +215,7 @@ def main():
     n_points = int(cfg["sampling"]["n_points"])
 
     for scale_key, scale_asset in sorted(info.get("scale_assets", {}).items()):
-        pts, norms = ds.sample_surface_mesh(scale_asset["coacd_abs"], n_points=n_points, method="even")
+        pts, norms = ds.sample_surface_o3d(scale_asset["coacd_abs"], n_points=n_points, method="poisson")
         run_scale_sampling(cfg, obj_name, scale_key, scale_asset, hand_xml_path, pts, norms)
 
 

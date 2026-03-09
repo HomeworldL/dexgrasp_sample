@@ -4,12 +4,17 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from collections import OrderedDict
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Union
 
 import numpy as np
 import trimesh
+try:
+    import open3d as o3d
+except Exception:
+    o3d = None
 
 from src.scale_dataset_builder import DEFAULT_FIXED_SCALES, ScaleDatasetBuilder
 
@@ -287,26 +292,86 @@ class DatasetObjects:
         n_points: int = 4096,
         method: str = "even",
     ) -> Tuple[np.ndarray, np.ndarray]:
+        # Compatibility wrapper: prefer Open3D path sampling to keep deterministic
+        # behavior with previous pipeline (uniform/poisson).
+        if isinstance(mesh_or_path, str):
+            if method in ("even", "poisson"):
+                o3d_method = "poisson"
+            elif method in ("random", "uniform"):
+                o3d_method = "uniform"
+            else:
+                raise ValueError("Unknown sampling method: choose 'even/random/uniform/poisson'")
+            return self.sample_surface_o3d(mesh_or_path, n_points=n_points, method=o3d_method)
+
         mesh = self.load_mesh(mesh_or_path)
-
-        if method == "even":
-            try:
-                pts, face_idx = trimesh.sample.sample_surface_even(mesh, n_points)
-            except Exception:
-                pts, face_idx = trimesh.sample.sample_surface(mesh, n_points)
-        elif method == "random":
-            pts, face_idx = trimesh.sample.sample_surface(mesh, n_points)
-        else:
-            raise ValueError("Unknown sampling method: choose 'even' or 'random'")
-
+        pts, face_idx = trimesh.sample.sample_surface(mesh, n_points)
         normals = mesh.face_normals[np.asarray(face_idx, dtype=np.int64)]
         return pts.astype(np.float32), normals.astype(np.float32)
+
+    def sample_surface_o3d(
+        self,
+        obj_path: str,
+        n_points: int = 4096,
+        method: str = "uniform",
+        preview: bool = False,
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        """
+        Sample surface points from an OBJ using Open3D.
+
+        Returns:
+            points (N,3) numpy array, normals (N,3) numpy array
+        """
+        if o3d is None:
+            raise RuntimeError(
+                "open3d is required for sampling. Install open3d (`pip install open3d`)."
+            )
+        if not os.path.exists(obj_path):
+            raise FileNotFoundError(f"OBJ path not found: {obj_path}")
+
+        mesh_o3d = o3d.io.read_triangle_mesh(obj_path)
+        if not mesh_o3d.has_triangles():
+            raise RuntimeError(f"Loaded mesh has no triangles: {obj_path}")
+
+        if not mesh_o3d.has_vertex_normals():
+            mesh_o3d.compute_vertex_normals()
+
+        ts = time.time()
+        if method == "uniform":
+            pcd = mesh_o3d.sample_points_uniformly(number_of_points=n_points)
+        elif method == "poisson":
+            try:
+                pcd = mesh_o3d.sample_points_poisson_disk(
+                    number_of_points=n_points, init_factor=5
+                )
+            except Exception:
+                pcd = mesh_o3d.sample_points_uniformly(number_of_points=n_points)
+        else:
+            raise ValueError("Unknown sampling method: choose 'uniform' or 'poisson'")
+
+        _ = ts
+        pts = np.asarray(pcd.points, dtype=np.float32)
+        if pcd.has_normals():
+            norms = np.asarray(pcd.normals, dtype=np.float32)
+        else:
+            norms = np.zeros_like(pts)
+
+        if preview:
+            self._preview_pointcloud_with_normals(pts, norms)
+        return pts, norms
+
+    def _preview_pointcloud_with_normals(self, pts: np.ndarray, norms: np.ndarray) -> None:
+        if o3d is None:
+            return
+        pcd = o3d.geometry.PointCloud()
+        pcd.points = o3d.utility.Vector3dVector(pts)
+        pcd.normals = o3d.utility.Vector3dVector(norms)
+        o3d.visualization.draw_geometries([pcd])
 
     def get_point_cloud(
         self,
         name_or_id: Union[str, int],
         n_points: int = 4096,
-        method: str = "even",
+        method: str = "poisson",
         scale_key: Optional[str] = None,
     ) -> Tuple[np.ndarray, np.ndarray]:
         info = self.get_info(name_or_id)
@@ -314,5 +379,7 @@ class DatasetObjects:
             rec = info.get("scale_assets", {}).get(scale_key)
             if rec is None:
                 raise KeyError(f"scale_key '{scale_key}' not found for object {info['object_name']}")
-            return self.sample_surface_mesh(rec["coacd_abs"], n_points=n_points, method=method)
-        return self.sample_surface_mesh(info["coacd_abs"], n_points=n_points, method=method)
+            return self.sample_surface_o3d(rec["coacd_abs"], n_points=n_points, method=method)
+
+        mesh_path = info.get("inertia_abs") or info.get("coacd_abs")
+        return self.sample_surface_o3d(mesh_path, n_points=n_points, method=method)

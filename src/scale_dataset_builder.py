@@ -61,9 +61,26 @@ class ScaleDatasetBuilder:
             "object_name": object_name,
             "norm_convex": norm_convex,
             "norm_coacd": norm_coacd,
+            "orig_coacd_volume": self._mesh_volume_safe(merged_convex),
+            "norm_volume": self._mesh_volume_safe(norm_coacd),
         }
         self._norm_cache[object_name] = rec
         return rec
+
+    @staticmethod
+    def _mesh_volume_safe(mesh: trimesh.Trimesh) -> float:
+        try:
+            vol = float(abs(mesh.volume))
+        except Exception:
+            vol = 0.0
+        if not np.isfinite(vol) or vol <= 1e-16:
+            try:
+                vol = float(abs(mesh.convex_hull.volume))
+            except Exception:
+                vol = 0.0
+        if not np.isfinite(vol) or vol <= 1e-16:
+            raise ValueError("Failed to compute a valid positive mesh volume.")
+        return vol
 
     def _render_object_xml(
         self,
@@ -147,8 +164,16 @@ class ScaleDatasetBuilder:
 
         m0 = float(mass_kg)
         p0 = np.asarray(principal_moments, dtype=np.float64).reshape(3)
-        mass_scaled = m0 * (scale_value ** 3)
-        inertia_scaled = p0 * (scale_value ** 5)
+        v0 = float(norm["orig_coacd_volume"])
+        vn = float(norm["norm_volume"])
+        if not np.isfinite(v0) or v0 <= 1e-16:
+            raise ValueError(f"Invalid original coacd volume for {object_name}: {v0}")
+        if not np.isfinite(vn) or vn <= 1e-16:
+            raise ValueError(f"Invalid normalized coacd volume for {object_name}: {vn}")
+
+        volume_ratio = vn / v0
+        mass_scaled = m0 * volume_ratio * (scale_value ** 3)
+        inertia_scaled = p0 * (volume_ratio ** (5.0 / 3.0)) * (scale_value ** 5)
 
         convex_rel_paths = [os.path.relpath(p, scale_dir).replace("\\", "/") for p in scaled_convex_paths]
         xml_text = self._render_object_xml(

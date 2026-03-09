@@ -13,9 +13,16 @@ from utils.utils_vis import visualize_with_viser
 
 
 def main():
-    p = argparse.ArgumentParser(description="Visualize one object-scale entry by global id.")
+    p = argparse.ArgumentParser(description="Visualize one object-scale entry by global id or key.")
     p.add_argument("-c", "--config", type=str, default=DEFAULT_RUN_CONFIG_PATH)
     p.add_argument("-i", "--obj-id", type=int, default=None)
+    p.add_argument(
+        "-k",
+        "--obj-key",
+        type=str,
+        default=None,
+        help="Object-scale key, e.g. 'YCB_002_master_chef_can__scale080'.",
+    )
     args = p.parse_args()
 
     cfg = load_config(args.config)
@@ -29,8 +36,11 @@ def main():
         verbose=bool(cfg["dataset"].get("verbose", False)),
     )
 
-    obj_id = int(args.obj_id) if args.obj_id is not None else int(cfg.get("object", {}).get("id", 0))
-    info = ds.get_info(obj_id)
+    if args.obj_key:
+        info = ds.get_info(args.obj_key)
+    else:
+        obj_id = int(args.obj_id) if args.obj_id is not None else int(cfg.get("object", {}).get("id", 0))
+        info = ds.get_info(obj_id)
     obj_name = info["object_name"]
     print(f"[vis_obj] id={info['global_id']} name={obj_name} scale={info['scale']}")
 

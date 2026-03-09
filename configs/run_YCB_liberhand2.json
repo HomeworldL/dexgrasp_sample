@@ -3,7 +3,7 @@
   "dataset": {
     "root": null,
     "include": ["YCB"],
-    "scales": [0.06, 0.08, 0.10, 0.12, 0.14],
+    "scales": [0.08, 0.10, 0.12, 0.14, 0.16],
     "object_mass_kg": 0.1
   },
   "object": {

@@ -2,8 +2,8 @@
   "seed": 0,
   "dataset": {
     "root": null,
-    "include": ["HOPE"],
-    "scales": [0.08, 0.10, 0.12, 0.14, 0.16],
+    "include": ["DGN"],
+    "scales": [0.06, 0.08, 0.10, 0.12, 0.14],
     "object_mass_kg": 0.1
   },
   "object": {
@@ -25,9 +25,9 @@
     }
   },
   "hand": {
-    "xml_path": "./assets/hands/liberhand2/liberhand2_right.xml",
-    "prepared_joints": [0, 0.5, 0.4, 0.4, 0, 0.5, 0.4, 0.4, 0, 0.5, 0.4, 0.4, 0, 0.5, 0.4, 0.4, 1.5, 0.5, 0.3, 0.3],
-    "approach_joints": [0, 0.0, 0.0, 0.0, 0, 0.0, 0.0, 0.0, 0, 0.0, 0.0, 0.0, 0, 0.0, 0.0, 0.0, 1.5, 0.0, 0.0, 0.0],
+    "xml_path": "./assets/hands/inspire/inspire_right.xml",
+    "prepared_joints": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+    "approach_joints": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
     "shift_local": [0.0, 0.0, -0.02],
     "target_body_params": {
       "hand_right_f13": [0.5, 1.0],

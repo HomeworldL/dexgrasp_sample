@@ -12,7 +12,7 @@ import torch
 from scipy.spatial.transform import Rotation as R
 from tqdm import tqdm
 
-from src.dataset_objects import DatasetObjects, resolve_dataset_root
+from src.dataset_objects import DatasetObjects
 from src.mj_ho import MjHO
 from src.sample import downsample_fps, sample_grasp_frames
 from utils.utils_file import DEFAULT_RUN_CONFIG_PATH, load_config
@@ -198,25 +198,29 @@ def main():
 
     config_stem = Path(args.config).stem
     ds = DatasetObjects(
-        resolve_dataset_root(cfg["dataset"].get("root")),
+        cfg["dataset"]["root"],
         dataset_names=list(cfg["dataset"].get("include", [])),
         scales=list(cfg["dataset"].get("scales", [])),
         dataset_tag=config_stem,
         dataset_output_root=cfg.get("output", {}).get("dataset_root", "datasets"),
-        prebuild_scales=True,
-        object_mass_kg=float(cfg["dataset"]["object_mass_kg"]),
+        verbose=bool(cfg["dataset"].get("verbose", False)),
     )
 
     obj_name = resolve_object_name(ds, cfg, args.obj_id, args.obj)
     info = ds.get_info(obj_name)
-    print(f"Using object id={info['global_id']} name={info['object_name']}")
+    print(f"Using object id={info['global_id']} name={info['object_name']} scale={info['scale']}")
 
     hand_xml_path = os.path.abspath(cfg["hand"]["xml_path"])
     n_points = int(cfg["sampling"]["n_points"])
-
-    for scale_key, scale_asset in sorted(info.get("scale_assets", {}).items()):
-        pts, norms = ds.sample_surface_o3d(scale_asset["coacd_abs"], n_points=n_points, method="poisson")
-        run_scale_sampling(cfg, obj_name, scale_key, scale_asset, hand_xml_path, pts, norms)
+    scale_key = f"scale{int(round(float(info['scale']) * 1000)):03d}"
+    scale_asset = {
+        "coacd_abs": info["coacd_abs"],
+        "convex_parts_abs": info["convex_parts_abs"],
+        "xml_abs": info["mjcf_abs"],
+        "scale": info["scale"],
+    }
+    pts, norms = ds.sample_surface_o3d(scale_asset["coacd_abs"], n_points=n_points, method="poisson")
+    run_scale_sampling(cfg, obj_name, scale_key, scale_asset, hand_xml_path, pts, norms)
 
 
 if __name__ == "__main__":

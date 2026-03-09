@@ -23,8 +23,6 @@ Mainline focus is offline grasp configuration generation, not superquadric fitti
 - Preferred dataset root is `assets/objects/processed`.
 - This repo uses a symlink interface to external mesh repository:
   - `assets/objects -> /home/ccs/repositories/mesh_process/assets/objects`
-- Override dataset root via env:
-  - `DEXGRASP_OBJECTS_ROOT=/abs/path/to/processed_or_object_root`
 - Default merged dataset list in mainline:
   - `["ShapeNetCore", "ShapeNetSem", "DDG", "MSO"]`
 - `DatasetObjects` exposes a global integer id space over the merged list; `run.py` selects objects by global id.
@@ -56,9 +54,10 @@ Main output HDF5 fields:
   - `docs/dataset_format_and_scale.md`
 
 ## Scale Policy (Summary)
-- `YCB/HOPE/MSO`: keep real-world scale (`scale=1.0`).
-- `ShapeNetCore/ShapeNetSem`: enable scale by dataset policy.
-- Current mainline decision: per-object fixed random scale (deterministic by object id + seed), not per-grasp random scale.
+- All datasets use unified fixed scale list from config (`dataset.scales`).
+- Current mainline default list for liberhand configs:
+  - `[0.08, 0.10, 0.12, 0.14, 0.16]`
+- Scale granularity is object-scale flattened indexing (one entry per object per scale).
 - Manifest gating must happen first: only `manifest.process_meshes.json` entries with `process_status=success` are eligible.
 
 ## Collaboration Rules

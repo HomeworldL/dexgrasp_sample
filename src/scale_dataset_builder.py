@@ -4,11 +4,10 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Dict, List, Sequence
 
 import numpy as np
 import trimesh
-from tqdm import tqdm
 
 DEFAULT_FIXED_SCALES = [0.06, 0.08, 0.10, 0.12, 0.14]
 
@@ -16,9 +15,8 @@ DEFAULT_FIXED_SCALES = [0.06, 0.08, 0.10, 0.12, 0.14]
 class ScaleDatasetBuilder:
     """Generate scaled convex parts + coacd + MJCF for one object/scale."""
 
-    def __init__(self, base_output_dir: str, object_mass_kg: float = 0.1):
+    def __init__(self, base_output_dir: str):
         self.base_output_dir = Path(base_output_dir)
-        self.object_mass_kg = float(object_mass_kg)
         self._norm_cache: Dict[str, Dict] = {}
 
     @staticmethod
@@ -31,16 +29,18 @@ class ScaleDatasetBuilder:
         if cached is not None:
             return cached
 
-        convex_meshes: List[trimesh.Trimesh] = []
-        for p in object_info["convex_parts_abs"]:
-            m = trimesh.load(p, process=False)
-            if isinstance(m, trimesh.Scene):
-                m = trimesh.util.concatenate(list(m.geometry.values()))
-            convex_meshes.append(m)
-
-        coacd_mesh = trimesh.load(object_info["coacd_abs"], process=False)
-        if isinstance(coacd_mesh, trimesh.Scene):
-            coacd_mesh = trimesh.util.concatenate(list(coacd_mesh.geometry.values()))
+        # Load coacd once; prefer scene mode to preserve OBJ groups (o convex_0/1/...).
+        loaded = trimesh.load(object_info["coacd_abs"], process=False, force="scene")
+        if isinstance(loaded, trimesh.Scene):
+            convex_meshes = [g.copy() for g in loaded.geometry.values()]
+        else:
+            mesh = loaded if isinstance(loaded, trimesh.Trimesh) else trimesh.load(object_info["coacd_abs"], process=False)
+            if isinstance(mesh, trimesh.Scene):
+                mesh = trimesh.util.concatenate(list(mesh.geometry.values()))
+            # Fallback: split disconnected components as convex parts.
+            convex_meshes = [m.copy() for m in mesh.split(only_watertight=False)]
+            if not convex_meshes:
+                convex_meshes = [mesh.copy()]
 
         merged_convex = trimesh.util.concatenate(convex_meshes)
         center = np.asarray(merged_convex.bounding_box.centroid, dtype=np.float64)
@@ -48,46 +48,28 @@ class ScaleDatasetBuilder:
         if extent <= 1e-12:
             raise ValueError(f"Invalid object extent for normalization: {object_name}")
 
-        norm_convex = []
+        norm_convex: List[trimesh.Trimesh] = []
         for mesh in convex_meshes:
             mc = mesh.copy()
             mc.vertices = (mc.vertices - center) / extent
             norm_convex.append(mc)
 
-        norm_coacd = coacd_mesh.copy()
+        norm_coacd = merged_convex.copy()
         norm_coacd.vertices = (norm_coacd.vertices - center) / extent
 
         rec = {
             "object_name": object_name,
-            "norm_center": center,
-            "norm_extent": extent,
             "norm_convex": norm_convex,
             "norm_coacd": norm_coacd,
         }
         self._norm_cache[object_name] = rec
         return rec
 
-    def _compute_inertial(self, scaled_coacd: trimesh.Trimesh) -> Tuple[float, np.ndarray]:
-        volume = float(scaled_coacd.volume)
-        if not np.isfinite(volume) or volume <= 1e-12:
-            ext = np.asarray(scaled_coacd.bounding_box.extents, dtype=np.float64)
-            volume = float(np.prod(np.clip(ext, 1e-8, None)))
-
-        density = float(self.object_mass_kg / max(volume, 1e-12))
-
-        ext = np.asarray(scaled_coacd.bounding_box.extents, dtype=np.float64)
-        x, y, z = np.clip(ext, 1e-8, None)
-        m = self.object_mass_kg
-        ixx = (m / 12.0) * (y * y + z * z)
-        iyy = (m / 12.0) * (x * x + z * z)
-        izz = (m / 12.0) * (x * x + y * y)
-        return density, np.array([ixx, iyy, izz], dtype=np.float64)
-
     def _render_object_xml(
         self,
         object_name: str,
-        density: float,
-        inertia_diag: np.ndarray,
+        mass_kg_scaled: float,
+        inertia_diag_scaled: np.ndarray,
         convex_rel_paths: List[str],
     ) -> str:
         mesh_assets = [f'    <mesh name="convex_{i}" file="{rel}"/>' for i, rel in enumerate(convex_rel_paths)]
@@ -110,13 +92,12 @@ class ScaleDatasetBuilder:
             f'    <body name="{object_name}" pos="0 0 0">',
             f'      <freejoint name="{object_name}_joint"/>',
             (
-                f'      <inertial pos="0 0 0" mass="{self.object_mass_kg:.8f}" '
-                f'diaginertia="{inertia_diag[0]:.10f} {inertia_diag[1]:.10f} {inertia_diag[2]:.10f}"/>'
+                f'      <inertial pos="0 0 0" mass="{mass_kg_scaled:.10f}" '
+                f'diaginertia="{inertia_diag_scaled[0]:.12e} {inertia_diag_scaled[1]:.12e} {inertia_diag_scaled[2]:.12e}"/>'
             ),
             *geom_lines,
             '    </body>',
             '  </worldbody>',
-            f'  <!-- density={density:.12f} mass={self.object_mass_kg:.6f}kg -->',
             '</mujoco>',
         ]
         return "\n".join(xml_lines) + "\n"
@@ -126,6 +107,8 @@ class ScaleDatasetBuilder:
         config_stem: str,
         object_info: Dict,
         scale: float,
+        mass_kg: float,
+        principal_moments: Sequence[float],
         overwrite: bool = False,
     ) -> Dict:
         norm = self._load_normalized_meshes(object_info)
@@ -162,9 +145,18 @@ class ScaleDatasetBuilder:
         scaled_coacd.vertices = scaled_coacd.vertices * scale_value
         scaled_coacd.export(coacd_path)
 
-        density, inertia_diag = self._compute_inertial(scaled_coacd)
+        m0 = float(mass_kg)
+        p0 = np.asarray(principal_moments, dtype=np.float64).reshape(3)
+        mass_scaled = m0 * (scale_value ** 3)
+        inertia_scaled = p0 * (scale_value ** 5)
+
         convex_rel_paths = [os.path.relpath(p, scale_dir).replace("\\", "/") for p in scaled_convex_paths]
-        xml_text = self._render_object_xml(object_name, density, inertia_diag, convex_rel_paths)
+        xml_text = self._render_object_xml(
+            object_name=object_name,
+            mass_kg_scaled=mass_scaled,
+            inertia_diag_scaled=inertia_scaled,
+            convex_rel_paths=convex_rel_paths,
+        )
         xml_path.write_text(xml_text, encoding="utf-8")
 
         return {
@@ -181,16 +173,19 @@ class ScaleDatasetBuilder:
         config_stem: str,
         object_info: Dict,
         scales: List[float],
+        mass_kg: float,
+        principal_moments: Sequence[float],
         overwrite: bool = False,
-        show_progress: bool = True,
     ) -> Dict[str, Dict]:
-        object_name = object_info["object_name"]
-        iterator = scales
-        if show_progress:
-            iterator = tqdm(scales, desc=f"prebuild:{object_name}", leave=False)
-
         out: Dict[str, Dict] = {}
-        for scale in iterator:
-            rec = self.build_scale_assets(config_stem, object_info, float(scale), overwrite=overwrite)
+        for scale in scales:
+            rec = self.build_scale_assets(
+                config_stem=config_stem,
+                object_info=object_info,
+                scale=float(scale),
+                mass_kg=float(mass_kg),
+                principal_moments=principal_moments,
+                overwrite=overwrite,
+            )
             out[self.scale_tag(float(scale))] = rec
         return out

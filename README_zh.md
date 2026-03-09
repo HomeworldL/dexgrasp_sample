@@ -19,10 +19,7 @@
 ## 数据接口（外部链接）
 `DatasetObjects` 已支持通用目录结构，不再仅限 YCB。
 
-默认数据根目录优先级：
-1. `DEXGRASP_OBJECTS_ROOT`
-2. `assets/objects/processed`
-
+数据根目录由配置文件中的 `dataset.root` 显式指定（推荐 `assets/objects/processed`）。
 其中 `assets/objects` 采用软链接方式接入外部数据目录，避免大规模拷贝。
 
 ## 配置驱动入口
@@ -31,7 +28,6 @@
 - `run_multi.py`
 - `vis_obj.py`
 - `vis_ho.py`
-- `run_liberhand2.py`
 
 所有入口默认配置：
 - `configs/run_YCB_liberhand.json`

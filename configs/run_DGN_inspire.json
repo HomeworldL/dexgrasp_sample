@@ -1,10 +1,10 @@
 {
   "seed": 0,
   "dataset": {
-    "root": null,
+    "root": "assets/objects/processed",
     "include": ["DGN"],
     "scales": [0.06, 0.08, 0.10, 0.12, 0.14],
-    "object_mass_kg": 0.1
+    "verbose": false
   },
   "object": {
     "id": 0

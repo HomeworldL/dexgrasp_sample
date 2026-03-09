@@ -19,7 +19,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import List
 import time
-from src.dataset_objects import DatasetObjects, resolve_dataset_root
+from src.dataset_objects import DatasetObjects
 from utils.utils_file import DEFAULT_RUN_CONFIG_PATH, load_config
 
 # 全局进程注册（用于在主线程捕获中断时终止子进程）
@@ -58,13 +58,12 @@ def get_all_object_names(config_path: str) -> List[str]:
     """
     cfg = load_config(config_path)
     ds = DatasetObjects(
-        resolve_dataset_root(cfg["dataset"].get("root")),
+        cfg["dataset"]["root"],
         dataset_names=list(cfg["dataset"].get("include", [])),
         scales=list(cfg["dataset"].get("scales", [])),
         dataset_tag=Path(config_path).stem,
         dataset_output_root=cfg.get("output", {}).get("dataset_root", "datasets"),
-        prebuild_scales=True,
-        object_mass_kg=float(cfg["dataset"]["object_mass_kg"]),
+        verbose=bool(cfg["dataset"].get("verbose", False)),
     )
     id2name = ds.id2name  # dict[int->str]
     # 按 key 排序并返回 name 列表

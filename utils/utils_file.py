@@ -51,16 +51,20 @@ def _validate_config(cfg: Dict, source_path: str) -> None:
     if not isinstance(include, list) or not include:
         raise ValueError("Config field dataset.include must be a non-empty list.")
 
+    root = _require(cfg, "dataset.root")
+    if not isinstance(root, str) or not root.strip():
+        raise ValueError("Config field dataset.root must be a non-empty string.")
+
+    verbose = _require(cfg, "dataset.verbose")
+    if not isinstance(verbose, bool):
+        raise ValueError("Config field dataset.verbose must be a boolean.")
+
     scales = _require(cfg, "dataset.scales")
     if not isinstance(scales, list) or not scales:
         raise ValueError("Config field dataset.scales must be a non-empty list.")
     for s in scales:
         if float(s) <= 0:
             raise ValueError("All dataset.scales values must be > 0.")
-
-    object_mass_kg = float(_require(cfg, "dataset.object_mass_kg"))
-    if object_mass_kg <= 0:
-        raise ValueError("dataset.object_mass_kg must be > 0.")
 
     _require(cfg, "object.id")
 

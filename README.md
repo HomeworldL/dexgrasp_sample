@@ -19,10 +19,7 @@ MuJoCo-based dexterous grasp sampling pipeline for object 3D assets.
 ## Dataset Root (External Interface)
 This project now supports generic dataset layouts through `DatasetObjects`.
 
-Default root priority:
-1. `DEXGRASP_OBJECTS_ROOT`
-2. `assets/objects/processed`
-
+Dataset root is explicit in JSON config field `dataset.root` (recommended: `assets/objects/processed`).
 `assets/objects` is expected to be a symlink interface (no large dataset copy).
 
 ## Config-First Entrypoints
@@ -31,7 +28,6 @@ All CLI entrypoints are config-driven and require a JSON config schema:
 - `run_multi.py`
 - `vis_obj.py`
 - `vis_ho.py`
-- `run_liberhand2.py`
 
 Default config for all entrypoints:
 - `configs/run_YCB_liberhand.json`

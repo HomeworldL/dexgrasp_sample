@@ -11,10 +11,10 @@ import torch
 from scipy.spatial.transform import Rotation as R
 from tqdm import tqdm
 
-from src.dataset_objects import DatasetObjects
 from src.mj_ho import MjHO
 from src.sample import downsample_fps, sample_grasp_frames
 from utils.utils_file import DEFAULT_RUN_CONFIG_PATH, load_config
+from utils.utils_pointcloud import sample_surface_o3d
 
 
 def set_seed(random_seed: int):
@@ -24,6 +24,12 @@ def set_seed(random_seed: int):
     torch.cuda.manual_seed_all(random_seed)
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
+
+
+def object_name_from_scale_key(object_scale_key: str) -> str:
+    if "__" in object_scale_key:
+        return object_scale_key.split("__", 1)[0]
+    return object_scale_key
 
 
 def compose_rot_grasp_to_palm(cfg: Dict) -> np.ndarray:
@@ -86,7 +92,6 @@ def make_qpos_triplets(cfg: Dict, pose: np.ndarray) -> Tuple[np.ndarray, np.ndar
 
 def run_sampling(
     cfg: Dict,
-    object_name: str,
     object_scale_key: str,
     hand_xml_path: str,
     object_mjcf_path: str,
@@ -95,6 +100,7 @@ def run_sampling(
     normals: np.ndarray,
     verbose: bool,
 ) -> str:
+    object_name = object_name_from_scale_key(object_scale_key)
     obj_info = {"name": object_name, "xml_abs": object_mjcf_path}
     target_body_params = cfg["hand"]["target_body_params"]
 
@@ -191,53 +197,30 @@ def run_sampling(
 
 
 def main():
-    p = argparse.ArgumentParser(description="Sample grasps for one object across fixed scales.")
-    p.add_argument("-i", "--obj-id", type=int, default=None, help="Global object id in merged DatasetObjects.")
-    p.add_argument(
-        "-k",
-        "--obj-key",
-        type=str,
-        default=None,
-        help="Object-scale key, e.g. 'YCB_002_master_chef_can__scale080'.",
-    )
+    p = argparse.ArgumentParser(description="Sample grasps for one object-scale entry.")
+    p.add_argument("--object-scale-key", type=str, required=True, help="Unique object-scale key.")
+    p.add_argument("--coacd-path", type=str, required=True, help="Path to scaled COACD mesh OBJ.")
+    p.add_argument("--mjcf-path", type=str, required=True, help="Path to scaled object MJCF.")
+    p.add_argument("--output-dir", type=str, required=True, help="Output directory for grasp artifacts.")
     p.add_argument("-v", "--verbose", action="store_true", help="Enable verbose logs.")
     p.add_argument("-c", "--config", type=str, default=DEFAULT_RUN_CONFIG_PATH, help="JSON config path.")
     args = p.parse_args()
 
     cfg = load_config(args.config)
     set_seed(int(cfg["seed"]))
-
     verbose = bool(args.verbose)
-
-    config_stem = Path(args.config).stem
-    ds = DatasetObjects(
-        cfg["dataset"]["root"],
-        dataset_names=list(cfg["dataset"].get("include", [])),
-        scales=list(cfg["dataset"].get("scales", [])),
-        dataset_tag=config_stem,
-        dataset_output_root=cfg.get("output", {}).get("dataset_root", "datasets"),
-        verbose=verbose,
-    )
-
-    if args.obj_key:
-        info = ds.get_info(args.obj_key)
-    else:
-        obj_id = int(args.obj_id) if args.obj_id is not None else int(cfg.get("object", {}).get("id", 0))
-        info = ds.get_info(obj_id)
-    obj_name = info["object_name"]
     if verbose:
-        print(f"Using object id={info['global_id']} name={info['object_name']} scale={info['scale']}")
+        print(f"Using object-scale key: {args.object_scale_key}")
 
     hand_xml_path = os.path.abspath(cfg["hand"]["xml_path"])
     n_points = int(cfg["sampling"]["n_points"])
-    pts, norms = ds.sample_surface_o3d(info["coacd_abs"], n_points=n_points, method="poisson")
+    pts, norms = sample_surface_o3d(args.coacd_path, n_points=n_points, method="poisson")
     run_sampling(
         cfg=cfg,
-        object_name=obj_name,
-        object_scale_key=info.get("object_scale_key", f"{obj_name}__unknown_scale"),
+        object_scale_key=args.object_scale_key,
         hand_xml_path=hand_xml_path,
-        object_mjcf_path=info["mjcf_abs"],
-        output_dir_abs=info["output_dir_abs"],
+        object_mjcf_path=args.mjcf_path,
+        output_dir_abs=args.output_dir,
         points=pts,
         normals=norms,
         verbose=verbose,

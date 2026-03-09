@@ -10,8 +10,6 @@ Design notes
 from __future__ import annotations
 
 import json
-import os
-import time
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Union
 
@@ -19,12 +17,8 @@ import numpy as np
 import trimesh
 from tqdm import tqdm
 
-try:
-    import open3d as o3d
-except Exception:
-    o3d = None
-
 from src.scale_dataset_builder import DEFAULT_FIXED_SCALES, ScaleDatasetBuilder
+from utils.utils_pointcloud import preview_pointcloud_with_normals, sample_surface_o3d
 
 DEFAULT_DATASETS = ["YCB"]
 
@@ -262,51 +256,14 @@ class DatasetObjects:
         Returns:
             points (N,3) numpy array, normals (N,3) numpy array
         """
-        if o3d is None:
-            raise RuntimeError(
-                "open3d is required for sampling. Install open3d (`pip install open3d`)."
-            )
-        if not os.path.exists(obj_path):
-            raise FileNotFoundError(f"OBJ path not found: {obj_path}")
-
-        mesh_o3d = o3d.io.read_triangle_mesh(obj_path)
-        if not mesh_o3d.has_triangles():
-            raise RuntimeError(f"Loaded mesh has no triangles: {obj_path}")
-
-        if not mesh_o3d.has_vertex_normals():
-            mesh_o3d.compute_vertex_normals()
-
-        ts = time.time()
-        if method == "uniform":
-            pcd = mesh_o3d.sample_points_uniformly(number_of_points=n_points)
-        elif method == "poisson":
-            try:
-                pcd = mesh_o3d.sample_points_poisson_disk(
-                    number_of_points=n_points, init_factor=5
-                )
-            except Exception:
-                pcd = mesh_o3d.sample_points_uniformly(number_of_points=n_points)
-        else:
-            raise ValueError("Unknown sampling method: choose 'uniform' or 'poisson'")
-
-        _ = ts
-        pts = np.asarray(pcd.points, dtype=np.float32)
-        if pcd.has_normals():
-            norms = np.asarray(pcd.normals, dtype=np.float32)
-        else:
-            norms = np.zeros_like(pts)
+        pts, norms = sample_surface_o3d(obj_path=obj_path, n_points=n_points, method=method)
 
         if preview:
             self._preview_pointcloud_with_normals(pts, norms)
         return pts, norms
 
     def _preview_pointcloud_with_normals(self, pts: np.ndarray, norms: np.ndarray) -> None:
-        if o3d is None:
-            return
-        pcd = o3d.geometry.PointCloud()
-        pcd.points = o3d.utility.Vector3dVector(pts)
-        pcd.normals = o3d.utility.Vector3dVector(norms)
-        o3d.visualization.draw_geometries([pcd])
+        preview_pointcloud_with_normals(pts, norms)
 
     def get_point_cloud(self, name_or_id: Union[str, int], n_points: int = 4096, method: str = "poisson"):
         info = self.get_info(name_or_id)

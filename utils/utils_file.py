@@ -41,6 +41,37 @@ def _validate_target_body_params(cfg: Dict) -> None:
             ) from exc
 
 
+def _validate_mjx_optional(cfg: Dict) -> None:
+    if "mjx" not in cfg:
+        return
+    mjx_cfg = cfg["mjx"]
+    if not isinstance(mjx_cfg, dict):
+        raise ValueError("Config field mjx must be an object when provided.")
+
+    if "impl" in mjx_cfg and not isinstance(mjx_cfg["impl"], str):
+        raise ValueError("Config field mjx.impl must be a string.")
+    if "device" in mjx_cfg and mjx_cfg["device"] is not None and not isinstance(mjx_cfg["device"], str):
+        raise ValueError("Config field mjx.device must be null or a string.")
+    if "naconmax" in mjx_cfg and mjx_cfg["naconmax"] is not None:
+        if int(mjx_cfg["naconmax"]) <= 0:
+            raise ValueError("Config field mjx.naconmax must be > 0 when provided.")
+
+    batch_cfg = mjx_cfg.get("batch", {})
+    if batch_cfg:
+        if not isinstance(batch_cfg, dict):
+            raise ValueError("Config field mjx.batch must be an object.")
+        for key in ["precheck_batch_size", "sim_grasp_batch_size", "extforce_batch_size"]:
+            if key in batch_cfg and int(batch_cfg[key]) <= 0:
+                raise ValueError(f"Config field mjx.batch.{key} must be > 0.")
+
+    tail_cfg = mjx_cfg.get("tail", {})
+    if tail_cfg:
+        if not isinstance(tail_cfg, dict):
+            raise ValueError("Config field mjx.tail must be an object.")
+        if "drop_tail" in tail_cfg and not isinstance(tail_cfg["drop_tail"], bool):
+            raise ValueError("Config field mjx.tail.drop_tail must be a boolean.")
+
+
 def _validate_config(cfg: Dict, source_path: str) -> None:
     if not isinstance(cfg, dict):
         raise ValueError(f"Config root must be a JSON object: {source_path}")
@@ -91,6 +122,8 @@ def _validate_config(cfg: Dict, source_path: str) -> None:
 
     for k in ["base_dir", "max_cap", "h5_name", "npy_name"]:
         _require(cfg, f"output.{k}")
+
+    _validate_mjx_optional(cfg)
 
 
 def load_config(path: Optional[str]) -> Dict:

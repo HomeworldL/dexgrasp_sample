@@ -23,7 +23,7 @@
     "Nd": 1,
     "d_min": 0.02,
     "d_max": 0.06,
-    "max_points": null
+    "max_points": 1024
   },
   "transform": {
     "base_rot_grasp_to_palm": [
@@ -168,11 +168,12 @@
   "mjx": {
     "impl": "jax",
     "device": null,
-    "naconmax": null,
+    "naconmax": 1024,
     "batch": {
-      "precheck_batch_size": 64,
-      "sim_grasp_batch_size": 64,
-      "extforce_batch_size": 64
+      "precheck_batch_size": 16,
+      "precheck_inner_chunk_size": 4,
+      "sim_grasp_batch_size": 16,
+      "extforce_batch_size": 8
     },
     "tail": {
       "drop_tail": false

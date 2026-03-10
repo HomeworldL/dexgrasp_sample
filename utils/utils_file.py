@@ -60,7 +60,12 @@ def _validate_mjx_optional(cfg: Dict) -> None:
     if batch_cfg:
         if not isinstance(batch_cfg, dict):
             raise ValueError("Config field mjx.batch must be an object.")
-        for key in ["precheck_batch_size", "sim_grasp_batch_size", "extforce_batch_size"]:
+        for key in [
+            "precheck_batch_size",
+            "precheck_inner_chunk_size",
+            "sim_grasp_batch_size",
+            "extforce_batch_size",
+        ]:
             if key in batch_cfg and int(batch_cfg[key]) <= 0:
                 raise ValueError(f"Config field mjx.batch.{key} must be > 0.")
 

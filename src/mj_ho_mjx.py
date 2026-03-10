@@ -322,6 +322,8 @@ class MjHOMJX:
         if self.mjx_device is not None:
             make_kwargs["device"] = self.mjx_device
         self.mjx_data_template = mjx.make_data(self.mjx_model, **make_kwargs)
+        # Cache compiled vmapped stage-contact kernels by fixed chunk size.
+        self._precheck_vm_cache: Dict[int, Any] = {}
 
         self._geom_bodyid_jax = jnp.asarray(np.asarray(self.model.geom_bodyid, dtype=np.int32))
         self._world_id = 0
@@ -961,6 +963,7 @@ class MjHOMJX:
         qpos_init_batch: np.ndarray,
         qpos_approach_batch: np.ndarray,
         qpos_prepared_batch: np.ndarray,
+        chunk_size: Optional[int] = None,
     ) -> np.ndarray:
         self._require_mjx()
         batch = self._check_batch_shapes(qpos_init_batch, qpos_approach_batch, qpos_prepared_batch)
@@ -971,17 +974,42 @@ class MjHOMJX:
         q_app = jnp.asarray(qpos_approach_batch, dtype=jnp.float32)
         q_pre = jnp.asarray(qpos_prepared_batch, dtype=jnp.float32)
 
-        def stage_contact(q_row):
-            d = self.mjx_data_template.replace(qpos=q_row, ctrl=self._ctrl_from_qpos_jax(q_row))
-            d = mjx.forward(self.mjx_model, d)
-            return self._has_any_contact_jax(d)
+        eff_chunk = int(chunk_size) if chunk_size is not None else int(batch)
+        eff_chunk = max(1, min(eff_chunk, batch))
+        vm_stage = self._precheck_vm_cache.get(eff_chunk)
+        if vm_stage is None:
+            def stage_contact(q_row):
+                d = self.mjx_data_template.replace(qpos=q_row, ctrl=self._ctrl_from_qpos_jax(q_row))
+                d = mjx.forward(self.mjx_model, d)
+                return self._has_any_contact_jax(d)
 
-        vm_stage = jax.vmap(stage_contact)
-        pre_col = vm_stage(q_pre)
-        app_col = vm_stage(q_app)
-        init_col = vm_stage(q_init)
-        passed = ~(pre_col | app_col | init_col)
-        return np.asarray(jax.device_get(passed), dtype=bool).reshape(batch)
+            vm_stage = jax.jit(jax.vmap(stage_contact))
+            self._precheck_vm_cache[eff_chunk] = vm_stage
+
+        passed_chunks = []
+        for s in range(0, batch, eff_chunk):
+            e = min(s + eff_chunk, batch)
+            this_n = e - s
+            pre_chunk = q_pre[s:e]
+            app_chunk = q_app[s:e]
+            init_chunk = q_init[s:e]
+
+            if this_n < eff_chunk:
+                pad_n = eff_chunk - this_n
+                pad_cfg = ((0, pad_n), (0, 0))
+                pre_chunk = jnp.pad(pre_chunk, pad_cfg)
+                app_chunk = jnp.pad(app_chunk, pad_cfg)
+                init_chunk = jnp.pad(init_chunk, pad_cfg)
+
+            pre_col = vm_stage(pre_chunk)[:this_n]
+            app_col = vm_stage(app_chunk)[:this_n]
+            init_col = vm_stage(init_chunk)[:this_n]
+            passed = ~(pre_col | app_col | init_col)
+            passed_chunks.append(np.asarray(jax.device_get(passed), dtype=bool))
+
+        if len(passed_chunks) == 1:
+            return passed_chunks[0].reshape(batch)
+        return np.concatenate(passed_chunks, axis=0).reshape(batch)
 
     def sim_grasp_batch(
         self,

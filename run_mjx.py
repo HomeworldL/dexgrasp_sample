@@ -130,6 +130,7 @@ def run_sampling_mjx(
     precheck_batch_size = int(batch_cfg.get("precheck_batch_size", 256))
     sim_grasp_batch_size = int(batch_cfg.get("sim_grasp_batch_size", 128))
     extforce_batch_size = int(batch_cfg.get("extforce_batch_size", 64))
+    precheck_inner_chunk_size = int(batch_cfg.get("precheck_inner_chunk_size", precheck_batch_size))
     drop_tail = bool(dict(mjx_cfg.get("tail", {})).get("drop_tail", False))
 
     runner = MjHOMJX(
@@ -185,7 +186,16 @@ def run_sampling_mjx(
     ext_pool: Dict[str, np.ndarray] = {}
 
     ts = time.time()
-    with h5py.File(h5_path, "w") as hf:
+    try:
+        hf_file = h5py.File(h5_path, "w")
+    except BlockingIOError as exc:
+        raise RuntimeError(
+            f"Failed to open output HDF5 for write: {h5_path}. "
+            "Another process is likely writing the same file. "
+            "Use a unique --output-dir per running process, or stop the existing job first."
+        ) from exc
+
+    with hf_file as hf:
         ds_init = hf.create_dataset("qpos_init", shape=(max_cap, d), maxshape=(None, d), dtype="f4")
         ds_approach = hf.create_dataset("qpos_approach", shape=(max_cap, d), maxshape=(None, d), dtype="f4")
         ds_prepared = hf.create_dataset("qpos_prepared", shape=(max_cap, d), maxshape=(None, d), dtype="f4")
@@ -205,10 +215,35 @@ def run_sampling_mjx(
             q_app = qpos_approach_all[start:end]
             q_pre = qpos_prepared_all[start:end]
 
-            mask_precheck = runner.precheck_batch(q_init, q_app, q_pre)
+            cur_chunk = max(1, min(precheck_inner_chunk_size, len(q_pre)))
+            while True:
+                try:
+                    mask_precheck = runner.precheck_batch(
+                        q_init,
+                        q_app,
+                        q_pre,
+                        chunk_size=cur_chunk,
+                    )
+                    break
+                except Exception as exc:
+                    msg = str(exc)
+                    if ("RESOURCE_EXHAUSTED" in msg or "Out of memory" in msg) and cur_chunk > 1:
+                        next_chunk = max(1, cur_chunk // 2)
+                        if verbose:
+                            print(
+                                f"[{object_scale_key}] precheck OOM with chunk={cur_chunk}, retry chunk={next_chunk}"
+                            )
+                        cur_chunk = next_chunk
+                        continue
+                    raise
+
             if mask_precheck.any():
                 num_no_col += int(mask_precheck.sum())
-                print(f"Precheck passed {mask_precheck.sum()}/{len(mask_precheck)} samples in batch {start}-{end}.")
+                if verbose:
+                    print(
+                        f"Precheck passed {mask_precheck.sum()}/{len(mask_precheck)} "
+                        f"samples in batch {start}-{end}."
+                    )
     #             passed = {
     #                 "qpos_init": q_init[mask_precheck],
     #                 "qpos_approach": q_app[mask_precheck],

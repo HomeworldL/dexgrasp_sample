@@ -68,7 +68,7 @@ def _validate_config(cfg: Dict, source_path: str) -> None:
 
     _require(cfg, "object.id")
 
-    for k in ["n_points", "downsample_for_sim", "Nd", "d_min", "d_max"]:
+    for k in ["n_points", "downsample_for_sim", "Nd", "rot_n", "d_min", "d_max"]:
         _require(cfg, f"sampling.{k}")
 
     _require(cfg, "transform.base_rot_grasp_to_palm")

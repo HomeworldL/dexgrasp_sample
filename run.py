@@ -45,6 +45,7 @@ def sample_frames_from_points(cfg: Dict, pts: np.ndarray, norms: np.ndarray) -> 
         pts,
         norms,
         Nd=int(sampling_cfg["Nd"]),
+        rot_n=int(sampling_cfg["rot_n"]),
         d_min=float(sampling_cfg["d_min"]),
         d_max=float(sampling_cfg["d_max"]),
         device=torch.device("cuda:0" if torch.cuda.is_available() else "cpu"),

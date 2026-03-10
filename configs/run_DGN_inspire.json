@@ -10,9 +10,10 @@
     "id": 0
   },
   "sampling": {
-    "n_points": 4096,
-    "downsample_for_sim": 1024,
+    "n_points": 1024,
+    "downsample_for_sim": 512,
     "Nd": 1,
+    "rot_n": 8,
     "d_min": 0.02,
     "d_max": 0.06,
     "max_points": null
@@ -52,7 +53,7 @@
     "max_tip_speed": 0.05
   },
   "extforce": {
-    "duration": 1.0,
+    "duration": 0.5,
     "trans_thresh": 0.05,
     "angle_thresh": 10.0,
     "grip_delta": 0.05,
@@ -61,7 +62,7 @@
   },
   "output": {
     "base_dir": "outputs",
-    "max_cap": 2000,
+    "max_cap": 100,
     "h5_name": "grasp_data.h5",
     "npy_name": "grasp_data.npy"
   }

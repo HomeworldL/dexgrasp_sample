@@ -98,7 +98,7 @@ def run_sampling(
     obj_info = {"name": object_name, "xml_abs": object_mjcf_path}
     target_body_params = cfg["hand"]["target_body_params"]
 
-    mjho = MjHO(obj_info, hand_xml_path, target_body_params=target_body_params, visualize=False)
+    mjho = MjHO(obj_info, hand_xml_path, target_body_params=target_body_params, visualize=True)
     sampling_cfg = cfg["sampling"]
     pts_for_sim, norms_for_sim, _ = downsample_fps(
         points,

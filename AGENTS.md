@@ -2,22 +2,46 @@
 
 ## Repository Purpose
 MuJoCo-based dexterous grasp sampling for 3D objects.
-Mainline focus is offline grasp configuration generation, not superquadric fitting.
+Mainline focus is offline grasp configuration generation.
 
 ## Planning Index
 - Active plan: `TODO.md`
 
+## TODO Lifecycle (Mandatory)
+- Keep only one active plan file at repo root: `TODO.md`.
+- Before replacing an active TODO, archive it to `docs/` using:
+  - `docs/TODO_<timestamp>_history.md`
+- When all items in the current `TODO.md` are checked:
+  - archive that TODO to `docs/` with the same naming rule
+  - create a new root `TODO.md` for the next iteration
+- During execution, always read the active root `TODO.md` first; history files are reference only.
+
 ## Mainline Code (Do Not Drift)
 - `run_multi.py`
 - `run.py`
+- `run_warp_render.py`
 - `src/mj_ho.py` (core, keep stable)
 - `src/sample.py`
 - `src/dataset_objects.py`
 
 ## Architecture Notes
 - Main data flow: object mesh -> surface points/normals -> grasp frame sampling -> MuJoCo collision/stability filtering -> HDF5 grasp states.
-- Visualization scripts are intentionally isolated under `tools/visualization/` and are not part of the mainline pipeline.
-- SQ/Superquadric and SDF generation are removed from mainline.
+- Post-sampling vision flow: after grasp sampling for each object-scale, run `run_warp_render.py` to render multi-view partial point clouds from scaled `coacd.obj`.
+
+## Dataset Interface
+- Preferred dataset root is `assets/objects/processed`.
+- This repo uses a symlink interface to external mesh repository:
+  - `assets/objects -> /home/ccs/repositories/mesh_process/assets/objects`
+- Default merged dataset list in mainline:
+  - `["YCB"]`
+- `DatasetObjects` exposes a global integer id space over the merged list; `run.py` selects objects by global id.
+
+## Scale Policy
+- All datasets use unified fixed scale list from config (`dataset.scales`).
+- Current mainline default list for liberhand configs:
+  - `[0.08, 0.10, 0.12, 0.14, 0.16]`
+- Scale granularity is object-scale flattened indexing (one entry per object per scale).
+- Manifest gating must happen first: only `manifest.process_meshes.json` entries with `process_status=success` are eligible.
 
 ## Sampling Pipeline (End-to-End)
 - Set deterministic seed for `numpy/random/torch` (including CUDA and cuDNN deterministic flags).
@@ -44,15 +68,10 @@ Mainline focus is offline grasp configuration generation, not superquadric fitti
   - use preallocated capacity + runtime truncate to final valid size
   - periodic flush/GC during long runs
 - After HDF5 is finalized, load the same arrays and convert to `grasp.npy` (values must be identical to HDF5).
+- After grasp outputs are ready, render object partial point clouds with Warp (`run_warp_render.py`) and save under:
+  - `datasets/<config_stem>/<object>/scaleXXX/<warp_render.output_subdir>/`
+  - default subdir: `partial_pc_warp`
 - Point cloud is saved separately and is not bundled into `grasp.npy`.
-
-## Dataset Interface
-- Preferred dataset root is `assets/objects/processed`.
-- This repo uses a symlink interface to external mesh repository:
-  - `assets/objects -> /home/ccs/repositories/mesh_process/assets/objects`
-- Default merged dataset list in mainline:
-  - `["YCB"]`
-- `DatasetObjects` exposes a global integer id space over the merged list; `run.py` selects objects by global id.
 
 ## Config Policy (Mandatory)
 - Mainline is config-first: all CLI entrypoints must load a JSON config.
@@ -82,20 +101,16 @@ Mainline focus is offline grasp configuration generation, not superquadric fitti
     - `qpos_grasp: [tx,ty,tz,qw,qx,qy,qz,q1...qN]`
     - `meta: {}`
   - point cloud is stored separately and must not be bundled into `grasp.npy`
+  - partial point cloud rendering output (post-grasp, separate from grasp arrays):
+    - `cam_in.npy`
+    - `cam_ex_XX.npy`
+    - `partial_pc_XX.npy`
 - Public references for format comparison are tracked in:
   - `docs/dataset_format_and_scale.md`
-
-## Scale Policy (Summary)
-- All datasets use unified fixed scale list from config (`dataset.scales`).
-- Current mainline default list for liberhand configs:
-  - `[0.08, 0.10, 0.12, 0.14, 0.16]`
-- Scale granularity is object-scale flattened indexing (one entry per object per scale).
-- Manifest gating must happen first: only `manifest.process_meshes.json` entries with `process_status=success` are eligible.
 
 ## Collaboration Rules
 - Keep edits focused on requested tasks.
 - Avoid structural rewrites of `src/mj_ho.py` unless strictly necessary.
-- Validate each refactor item with explicit completion checks in `TODO.md`.
 
 ## Python Code Style (Concise)
 - Follow PEP 8 and format with `black` + `isort`.

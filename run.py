@@ -132,6 +132,10 @@ def run_sampling(
     max_cap = int(cfg["output"]["max_cap"])
     flush_every = int(cfg.get("output", {}).get("flush_every", 0) or 0)
     contact_min_count = int(cfg["validation"]["contact_min_count"])
+    sim_grasp_cfg = dict(cfg.get("sim_grasp", {}))
+    extforce_cfg = dict(cfg.get("extforce", {}))
+    sim_grasp_cfg.pop("visualize", None)
+    extforce_cfg.pop("visualize", None)
     num_no_col = 0
     num_valid = 0
     num_samples = transforms_np.shape[0]
@@ -165,11 +169,15 @@ def run_sampling(
 
             num_no_col += 1
             mjho.set_hand_qpos(qpos_prepared[i])
-            qpos_grasp, _ = mjho.sim_grasp(visualize=False)
+            qpos_grasp, _ = mjho.sim_grasp(visualize=False, **sim_grasp_cfg)
             ho_contact, _ = mjho.get_contact_info(obj_margin=0.00)
 
             if len(ho_contact) >= contact_min_count:
-                is_valid, _, _ = mjho_valid.sim_under_extforce(qpos_grasp.copy(), visualize=False)
+                is_valid, _, _ = mjho_valid.sim_under_extforce(
+                    qpos_grasp.copy(),
+                    visualize=False,
+                    **extforce_cfg,
+                )
                 if is_valid:
                     ds_init[num_valid] = qpos_init[i].astype(np.float32, copy=False)
                     ds_approach[num_valid] = qpos_approach[i].astype(np.float32, copy=False)

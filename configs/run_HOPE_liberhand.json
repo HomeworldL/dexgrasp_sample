@@ -45,6 +45,20 @@
   "validation": {
     "contact_min_count": 4
   },
+  "sim_grasp": {
+    "Mp": 20,
+    "steps": 40,
+    "speed_gain": 1.5,
+    "max_tip_speed": 0.05
+  },
+  "extforce": {
+    "duration": 1.0,
+    "trans_thresh": 0.05,
+    "angle_thresh": 10.0,
+    "grip_delta": 0.05,
+    "force_mag": 1.0,
+    "check_step": 50
+  },
   "output": {
     "base_dir": "outputs",
     "max_cap": 2000,

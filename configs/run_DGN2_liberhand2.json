@@ -196,8 +196,8 @@
     },
     "camera": {
       "type": "spherical",
-      "radius": 1.0,
-      "pos_noise": 0.1,
+      "radius": 0.6,
+      "pos_noise": 0.3,
       "lookat": [
         0.0,
         0.0,

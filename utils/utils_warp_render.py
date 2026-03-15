@@ -44,6 +44,8 @@ def camera_view_matrix(
     pos: np.ndarray,
     rng: np.random.Generator,
     pos_noise: float = 0.0,
+    min_radius: float = 0.0,
+    min_radius_margin: float = 1e-3,
     lookat: Sequence[float] = (0.0, 0.0, 0.0),
     lookat_noise: float = 0.0,
     up: Optional[Sequence[float]] = None,
@@ -51,6 +53,13 @@ def camera_view_matrix(
 ) -> np.ndarray:
     pos = np.asarray(pos, dtype=np.float64)
     pos = pos + pos_noise * (rng.random((sample_num, 3)) - 0.5)
+    if min_radius > 0.0:
+        pos_norm = np.linalg.norm(pos, axis=-1, keepdims=True)
+        safe_radius = float(min_radius) + float(min_radius_margin)
+        bad = pos_norm[:, 0] <= safe_radius
+        if np.any(bad):
+            pos_dir = _np_normalize(pos[bad])
+            pos[bad] = pos_dir * safe_radius
     lookat = np.asarray(lookat, dtype=np.float64)
     lookat = lookat[None, :] + lookat_noise * (rng.random((sample_num, 3)) - 0.5)
 
@@ -75,7 +84,12 @@ def camera_view_matrix(
     return view_matrix
 
 
-def get_camera_matrix(camera_cfg: Dict, sample_num: int, rng: np.random.Generator) -> np.ndarray:
+def get_camera_matrix(
+    camera_cfg: Dict,
+    sample_num: int,
+    rng: np.random.Generator,
+    min_radius: float = 0.0,
+) -> np.ndarray:
     cam_type = str(camera_cfg["type"])
     if cam_type == "spherical":
         pos = camera_spherical(sample_num=sample_num, radius=float(camera_cfg["radius"]), rng=rng)
@@ -93,6 +107,7 @@ def get_camera_matrix(camera_cfg: Dict, sample_num: int, rng: np.random.Generato
         pos=pos,
         rng=rng,
         pos_noise=float(camera_cfg.get("pos_noise", 0.0)),
+        min_radius=float(min_radius),
         lookat=list(camera_cfg.get("lookat", [0.0, 0.0, 0.0])),
         lookat_noise=float(camera_cfg.get("lookat_noise", 0.0)),
         up=camera_cfg.get("up", None),

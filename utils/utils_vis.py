@@ -150,7 +150,7 @@ def visualize_with_viser(
                 name = f"frame_{i}"
                 try:
                     # preferred API: add_frame(name, wxyz=(w,x,y,z), position=(px,py,pz))
-                    scene.add_frame(name, wxyz=(w, x, y, z), position=(px, py, pz), axes_length=0.003, axes_radius=0.0005)
+                    scene.add_frame(name, wxyz=(w, x, y, z), position=(px, py, pz), axes_length=0.03, axes_radius=0.002)
                 except Exception:
                     # minimal fallback: try positional arguments
                     try:

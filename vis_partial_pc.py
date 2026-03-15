@@ -119,6 +119,7 @@ def main() -> None:
         pts = np.asarray(np.load(pc_files[vid], allow_pickle=True), dtype=np.float32)
         if pts.ndim != 2 or pts.shape[1] != 3:
             raise ValueError(f"Invalid point cloud shape in {pc_files[vid]}: {pts.shape}")
+        print(f"[vis_partial_pc] view={vid:02d} shape={pts.shape} file={pc_files[vid].name}")
         cols = np.tile(colors[i : i + 1], (pts.shape[0], 1))
         pointclouds[f"partial_pc_{vid:02d}"] = (pts, cols)
 

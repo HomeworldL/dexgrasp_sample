@@ -145,7 +145,13 @@ def _render_entry(
             return f"skip {entry['object_scale_key']}"
 
     mesh = mesh_from_path(str(entry["coacd_abs"]))
-    camera_view = get_camera_matrix(render_cfg["camera"], sample_num=batch, rng=rng)
+    mesh_radius = float(np.max(np.linalg.norm(np.asarray(mesh.vertices, dtype=np.float64), axis=1)))
+    camera_view = get_camera_matrix(
+        render_cfg["camera"],
+        sample_num=batch,
+        rng=rng,
+        min_radius=mesh_radius,
+    )
     view_matrix = renderer.render_mesh(mesh=mesh, view_matrix=camera_view)
 
     cam_in_path = out_dir / "cam_in.npy"

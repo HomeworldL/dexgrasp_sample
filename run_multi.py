@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
-"""
-"""
+"""Parallel object-scale runner with dataset split index export."""
 
 import argparse
+import json
 import subprocess
 import sys
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Optional, Sequence, Tuple
 import time
 from src.dataset_objects import DatasetObjects
 from utils.utils_file import DEFAULT_RUN_CONFIG_PATH, dataset_tag_from_config, load_config
@@ -51,6 +51,120 @@ def safe_filename(name: str) -> str:
 def _grasp_outputs_exist(entry: Dict) -> bool:
     out_dir = Path(str(entry["output_dir_abs"]))
     return (out_dir / "grasp.h5").exists() and (out_dir / "grasp.npy").exists()
+
+
+def _relpath_str(path: Path, start: Path) -> str:
+    return path.resolve().relative_to(start.resolve()).as_posix()
+
+
+def _list_existing_files(folder: Path, prefix: str) -> List[Path]:
+    return sorted(p for p in folder.glob(f"{prefix}*.npy") if p.is_file())
+
+
+def _collect_entry_record(
+    entry: Dict,
+    dataset_dir: Path,
+    render_subdir: str,
+) -> Tuple[Optional[Dict], Optional[str]]:
+    output_dir = Path(str(entry["output_dir_abs"])).resolve()
+    grasp_h5_path = output_dir / "grasp.h5"
+    grasp_npy_path = output_dir / "grasp.npy"
+    if not grasp_h5_path.exists():
+        return None, f"missing {grasp_h5_path.name}"
+    if not grasp_npy_path.exists():
+        return None, f"missing {grasp_npy_path.name}"
+
+    render_dir = output_dir / render_subdir
+    cam_in_path = render_dir / "cam_in.npy"
+    if not cam_in_path.exists():
+        return None, f"missing {render_subdir}/cam_in.npy"
+
+    partial_pc_paths = _list_existing_files(render_dir, "partial_pc_")
+    partial_pc_cam_paths = _list_existing_files(render_dir, "partial_pc_cam_")
+    cam_ex_paths = _list_existing_files(render_dir, "cam_ex_")
+
+    partial_pc_paths = [p for p in partial_pc_paths if not p.name.startswith("partial_pc_cam_")]
+
+    if not partial_pc_paths:
+        return None, f"missing {render_subdir}/partial_pc_*.npy"
+    if not partial_pc_cam_paths:
+        return None, f"missing {render_subdir}/partial_pc_cam_*.npy"
+    if not cam_ex_paths:
+        return None, f"missing {render_subdir}/cam_ex_*.npy"
+
+    world_suffixes = [p.stem[len("partial_pc_"):] for p in partial_pc_paths]
+    cam_suffixes = [p.stem[len("partial_pc_cam_"):] for p in partial_pc_cam_paths]
+    ex_suffixes = [p.stem[len("cam_ex_"):] for p in cam_ex_paths]
+    if world_suffixes != cam_suffixes or world_suffixes != ex_suffixes:
+        return None, f"mismatched render view files under {render_subdir}"
+
+    record = {
+        "global_id": int(entry["global_id"]),
+        "object_scale_key": str(entry["object_scale_key"]),
+        "object_name": str(entry["object_name"]),
+        "output_path": _relpath_str(output_dir, dataset_dir),
+        "coacd_path": _relpath_str(Path(str(entry["coacd_abs"])), dataset_dir),
+        "mjcf_path": _relpath_str(Path(str(entry["mjcf_abs"])), dataset_dir),
+        "grasp_h5_path": _relpath_str(grasp_h5_path, dataset_dir),
+        "grasp_npy_path": _relpath_str(grasp_npy_path, dataset_dir),
+        "partial_pc_path": [_relpath_str(path, dataset_dir) for path in partial_pc_paths],
+        "partial_pc_cam_path": [_relpath_str(path, dataset_dir) for path in partial_pc_cam_paths],
+        "cam_ex_path": [_relpath_str(path, dataset_dir) for path in cam_ex_paths],
+        "cam_in": _relpath_str(cam_in_path, dataset_dir),
+        "scale": float(entry["scale"]),
+    }
+    return record, None
+
+
+def build_split_records(
+    entries: Sequence[Dict],
+    dataset_dir: Path,
+    render_subdir: str,
+) -> Tuple[List[Dict], List[Tuple[str, str]]]:
+    records: List[Dict] = []
+    skipped: List[Tuple[str, str]] = []
+    for entry in sorted(entries, key=lambda it: int(it["global_id"])):
+        record, reason = _collect_entry_record(entry=entry, dataset_dir=dataset_dir, render_subdir=render_subdir)
+        if record is None:
+            skipped.append((str(entry["object_scale_key"]), str(reason)))
+            continue
+        records.append(record)
+    return records, skipped
+
+
+def split_records_by_object(records: Sequence[Dict]) -> Tuple[List[Dict], List[Dict]]:
+    object_names = sorted({str(record["object_name"]) for record in records})
+    if len(object_names) <= 1:
+        test_objects = set()
+    else:
+        test_count = max(1, int(round(len(object_names) * 0.2)))
+        test_objects = set(object_names[-test_count:])
+
+    train_records = [record for record in records if str(record["object_name"]) not in test_objects]
+    test_records = [record for record in records if str(record["object_name"]) in test_objects]
+    return train_records, test_records
+
+
+def write_split_jsons(
+    entries: Sequence[Dict],
+    dataset_dir: Path,
+    render_subdir: str,
+) -> Tuple[Path, Path]:
+    records, skipped = build_split_records(entries=entries, dataset_dir=dataset_dir, render_subdir=render_subdir)
+    train_records, test_records = split_records_by_object(records)
+
+    train_path = dataset_dir / "train.json"
+    test_path = dataset_dir / "test.json"
+    train_path.write_text(json.dumps(train_records, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    test_path.write_text(json.dumps(test_records, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+
+    print(
+        f"Wrote dataset splits under {dataset_dir}: "
+        f"train={len(train_records)} test={len(test_records)} skipped={len(skipped)}"
+    )
+    for object_scale_key, reason in skipped:
+        print(f"[SKIP] {object_scale_key}: {reason}")
+    return train_path, test_path
 
 
 def run_one(
@@ -134,11 +248,12 @@ def main():
 
     print("Discovering dataset object-scale entries...")
     cfg = load_config(args.config)
+    dataset_tag = dataset_tag_from_config(args.config)
     ds = DatasetObjects(
         cfg["dataset"]["root"],
         dataset_names=list(cfg["dataset"].get("include", [])),
         scales=list(cfg["dataset"].get("scales", [])),
-        dataset_tag=dataset_tag_from_config(args.config),
+        dataset_tag=dataset_tag,
         dataset_output_root=cfg.get("output", {}).get("dataset_root", "datasets"),
         verbose=bool(args.verbose),
     )
@@ -154,46 +269,53 @@ def main():
         if skipped > 0:
             print(f"Pre-skip existing results: {skipped}/{total_entries} entries already have grasp.h5 and grasp.npy.")
         if not entries:
-            print("所有 object-scale 条目都已存在 grasp.h5 和 grasp.npy，退出。")
-            return
+            print("所有 object-scale 条目都已存在 grasp.h5 和 grasp.npy，跳过并行执行，继续构建数据划分。")
 
-    print(f"Found {len(entries)} object-scale entries. Running with max parallel = {args.max_parallel}.")
+    print(f"Found {len(entries)} object-scale entries to run. Running with max parallel = {args.max_parallel}.")
     if args.verbose:
         for i, it in enumerate(entries):
             print(f"  [{i}] {it['object_scale_key']}")
 
     # 并行执行
     futures = []
-    try:
-        with ThreadPoolExecutor(max_workers=args.max_parallel) as ex:
-            for entry in entries:
-                futures.append(
-                    ex.submit(
-                        run_one,
-                        entry,
-                        args.script,
-                        args.config,
-                        bool(args.force),
-                        bool(args.verbose),
-                        sys.executable,
-                        logs_dir,
+    if entries:
+        try:
+            with ThreadPoolExecutor(max_workers=args.max_parallel) as ex:
+                for entry in entries:
+                    futures.append(
+                        ex.submit(
+                            run_one,
+                            entry,
+                            args.script,
+                            args.config,
+                            bool(args.force),
+                            bool(args.verbose),
+                            sys.executable,
+                            logs_dir,
+                        )
                     )
-                )
-            # 等待完成并打印结果（每完成一个就开始下一个是 ThreadPoolExecutor 的默认行为）
-            for fut in as_completed(futures):
-                try:
-                    object_scale_key, code, logpath = fut.result()
-                    status = "OK" if code == 0 else f"FAIL(code={code})"
-                    print(f"[DONE] {object_scale_key}: {status} (log: {logpath})")
-                except Exception as exc:
-                    print(f"[ERR] task raised exception: {exc}")
-    except KeyboardInterrupt:
-        print("\nKeyboardInterrupt detected — terminating running child processes...")
-        terminate_all_running()
-        print("Exiting.")
-        sys.exit(1)
+                # 等待完成并打印结果（每完成一个就开始下一个是 ThreadPoolExecutor 的默认行为）
+                for fut in as_completed(futures):
+                    try:
+                        object_scale_key, code, logpath = fut.result()
+                        status = "OK" if code == 0 else f"FAIL(code={code})"
+                        print(f"[DONE] {object_scale_key}: {status} (log: {logpath})")
+                    except Exception as exc:
+                        print(f"[ERR] task raised exception: {exc}")
+        except KeyboardInterrupt:
+            print("\nKeyboardInterrupt detected — terminating running child processes...")
+            terminate_all_running()
+            print("Exiting.")
+            sys.exit(1)
 
     print("All jobs finished.")
+    dataset_root = Path(cfg.get("output", {}).get("dataset_root", "datasets")).resolve()
+    dataset_dir = dataset_root / dataset_tag
+    write_split_jsons(
+        entries=ds.get_entries(),
+        dataset_dir=dataset_dir,
+        render_subdir=str(cfg["warp_render"]["output_subdir"]),
+    )
     print(f"Time Stamp: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}")
 
 

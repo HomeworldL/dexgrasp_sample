@@ -203,6 +203,31 @@ Args:
 - `-c/--config` config path
 - `-v/--verbose`
 
+After parallel execution finishes, `run_multi.py` also writes:
+- `datasets/<dataset_tag>/train.json`
+- `datasets/<dataset_tag>/test.json`
+
+Build rules:
+- Re-scan all object-scale entries for the current config.
+- Only include complete outputs: `grasp.h5`, `grasp.npy`, `cam_in.npy`, and matched `partial_pc_XX.npy`, `partial_pc_cam_XX.npy`, `cam_ex_XX.npy`.
+- Split by `object_name` with a stable 4:1 train/test partition, so all scales of the same object stay in the same split.
+- Even when every object-scale already exists and no parallel sampling is launched, this split export step still runs.
+
+Each JSON item remains flattened at object-scale granularity, with all paths relative to `datasets/<dataset_tag>/`. Fields:
+- `global_id`
+- `object_scale_key`
+- `object_name`
+- `output_path`
+- `coacd_path`
+- `mjcf_path`
+- `grasp_h5_path`
+- `grasp_npy_path`
+- `partial_pc_path`
+- `partial_pc_cam_path`
+- `cam_ex_path`
+- `cam_in`
+- `scale`
+
 ### 6.3 `run_warp_render.py`
 Post-process partial point cloud rendering.
 

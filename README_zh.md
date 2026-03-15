@@ -202,6 +202,31 @@ python run_multi.py -c configs/run_YCB_liberhand.json -j 4 -v
 - `-c/--config`
 - `-v/--verbose`
 
+完成所有并行任务后，`run_multi.py` 还会在 `datasets/<dataset_tag>/` 下构建：
+- `train.json`
+- `test.json`
+
+构建规则：
+- 先重新遍历当前 config 对应的全部 object-scale 条目。
+- 仅收录产物完整的条目：需要存在 `grasp.h5`、`grasp.npy`、`cam_in.npy`，以及一一对应的 `partial_pc_XX.npy`、`partial_pc_cam_XX.npy`、`cam_ex_XX.npy`。
+- 按 `object_name` 分组做稳定的 4:1 划分，同一个物体的全部 scale 只会落在同一个 split。
+- 即使所有 object-scale 已经存在、无需再启动并行采样，也仍然会继续执行这一步划分导出。
+
+`train.json` / `test.json` 里的每条记录仍然是 obj-scale 粒度，路径都相对 `datasets/<dataset_tag>/`，字段包括：
+- `global_id`
+- `object_scale_key`
+- `object_name`
+- `output_path`
+- `coacd_path`
+- `mjcf_path`
+- `grasp_h5_path`
+- `grasp_npy_path`
+- `partial_pc_path`
+- `partial_pc_cam_path`
+- `cam_ex_path`
+- `cam_in`
+- `scale`
+
 ### 6.3 `run_warp_render.py`
 抓取后处理：渲染部分点云。
 

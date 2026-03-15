@@ -7,10 +7,20 @@ Mainline focus is offline grasp configuration generation.
 ## Planning Index
 - Active plan: `TODO.md`
 
+## Docs Naming (Mandatory)
+- Self-maintained docs under `docs/` must use:
+  - `YYYYMMDD_<类别>_<标题概括>.md`
+- Required category labels:
+  - `TODO`
+  - `方案`
+  - `调研`
+- Keep the date first, then category, then a short summary title.
+- Exported scan/data artifacts (for example `github_dexterous_grasp_scan.*`) do not need to follow this rule.
+
 ## TODO Lifecycle (Mandatory)
 - Keep only one active plan file at repo root: `TODO.md`.
 - Before replacing an active TODO, archive it to `docs/` using:
-  - `docs/TODO_<timestamp>_history.md`
+  - `docs/YYYYMMDD_TODO_<标题概括>_history.md`
 - When all items in the current `TODO.md` are checked:
   - archive that TODO to `docs/` with the same naming rule
   - create a new root `TODO.md` for the next iteration
@@ -108,7 +118,7 @@ Mainline focus is offline grasp configuration generation.
     - `partial_pc_XX.npy`
     - `partial_pc_cam_XX.npy`
 - Public references for format comparison are tracked in:
-  - `docs/dataset_format_and_scale.md`
+  - `docs/20260310_方案_dataset_format_and_scale.md`
 
 ## Collaboration Rules
 - Keep edits focused on requested tasks.

@@ -2,18 +2,18 @@ import argparse
 import os
 import random
 import time
-from typing import Dict, Tuple
+from pathlib import Path
+from typing import Dict, Optional, Tuple
 
-import h5py
 import numpy as np
 import torch
 from scipy.spatial.transform import Rotation as R
 from tqdm import tqdm
 
-from src.dataset_objects import DatasetObjects
 from src.mj_ho import MjHO
 from src.sample import downsample_fps, sample_grasp_frames
-from utils.utils_file import DEFAULT_RUN_CONFIG_PATH, dataset_tag_from_config, load_config
+from utils.utils_file import DEFAULT_RUN_CONFIG_PATH, load_config
+from utils.utils_pointcloud import sample_surface_o3d
 
 
 def set_seed(random_seed: int):
@@ -23,6 +23,24 @@ def set_seed(random_seed: int):
     torch.cuda.manual_seed_all(random_seed)
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
+
+
+def object_name_from_scale_key(object_scale_key: str) -> str:
+    if "__" in object_scale_key:
+        return object_scale_key.split("__", 1)[0]
+    return object_scale_key
+
+
+def _scale_from_object_scale_key(object_scale_key: str) -> Optional[float]:
+    if "__" not in object_scale_key:
+        return None
+    suffix = object_scale_key.split("__", 1)[1]
+    if not suffix.startswith("scale"):
+        return None
+    digits = suffix[len("scale") :]
+    if not digits.isdigit():
+        return None
+    return float(int(digits)) / 1000.0
 
 
 def compose_rot_grasp_to_palm(cfg: Dict) -> np.ndarray:
@@ -38,6 +56,7 @@ def sample_frames_from_points(cfg: Dict, pts: np.ndarray, norms: np.ndarray) -> 
         pts,
         norms,
         Nd=int(sampling_cfg["Nd"]),
+        rot_n=int(sampling_cfg["rot_n"]),
         d_min=float(sampling_cfg["d_min"]),
         d_max=float(sampling_cfg["d_max"]),
         device=torch.device("cuda:0" if torch.cuda.is_available() else "cpu"),
@@ -85,8 +104,10 @@ def make_qpos_triplets(cfg: Dict, pose: np.ndarray) -> Tuple[np.ndarray, np.ndar
 
 def run_sampling(
     cfg: Dict,
-    object_name: str,
     object_scale_key: str,
+    object_id: str,
+    scale: Optional[float],
+    hand_name: str,
     hand_xml_path: str,
     object_mjcf_path: str,
     output_dir_abs: str,
@@ -94,6 +115,7 @@ def run_sampling(
     normals: np.ndarray,
     verbose: bool,
 ) -> str:
+    object_name = object_name_from_scale_key(object_scale_key)
     obj_info = {"name": object_name, "xml_abs": object_mjcf_path}
     target_body_params = cfg["hand"]["target_body_params"]
 
@@ -107,8 +129,6 @@ def run_sampling(
     )
     mjho._set_obj_pts_norms(pts_for_sim, norms_for_sim)
 
-    mjho_valid = MjHO(obj_info, hand_xml_path, target_body_params=target_body_params, object_fixed=False)
-
     ts = time.time()
     transforms_np = sample_frames_from_points(cfg, points, normals)
     if verbose:
@@ -117,125 +137,92 @@ def run_sampling(
     pose = build_pose_candidates(cfg, transforms_np)
     qpos_init, qpos_approach, qpos_prepared = make_qpos_triplets(cfg, pose)
 
-    out_dir = Path(output_dir_abs)
-    out_dir.mkdir(parents=True, exist_ok=True)
-    h5_path = out_dir / "grasp.h5"
-
-    d = qpos_prepared.shape[1]
     max_cap = int(cfg["output"]["max_cap"])
-    flush_every = int(cfg.get("output", {}).get("flush_every", 0) or 0)
     contact_min_count = int(cfg["validation"]["contact_min_count"])
+    sim_grasp_cfg = dict(cfg.get("sim_grasp", {}))
+    sim_grasp_cfg.pop("visualize", None)
     num_no_col = 0
     num_valid = 0
     num_samples = transforms_np.shape[0]
     ts = time.time()
+    valid_qpos_grasp = []
 
-    with h5py.File(h5_path, "w") as hf:
-        ds_init = hf.create_dataset("qpos_init", shape=(max_cap, d), maxshape=(None, d), dtype="f4")
-        ds_approach = hf.create_dataset("qpos_approach", shape=(max_cap, d), maxshape=(None, d), dtype="f4")
-        ds_prepared = hf.create_dataset("qpos_prepared", shape=(max_cap, d), maxshape=(None, d), dtype="f4")
-        ds_grasp = hf.create_dataset("qpos_grasp", shape=(max_cap, d), maxshape=(None, d), dtype="f4")
+    for i in tqdm(
+        range(qpos_prepared.shape[0]),
+        desc=f"sampling-{object_scale_key}",
+        miniters=50,
+        disable=not verbose,
+    ):
+        if num_valid >= max_cap:
+            num_samples = i
+            break
 
-        for i in tqdm(
-            range(qpos_prepared.shape[0]),
-            desc=f"sampling-{object_scale_key}",
-            miniters=50,
-            disable=not verbose,
-        ):
-            if num_valid >= max_cap:
-                num_samples = i
-                break
+        mjho.set_hand_qpos(qpos_prepared[i])
+        if mjho.is_contact():
+            continue
+        mjho.set_hand_qpos(qpos_approach[i])
+        if mjho.is_contact():
+            continue
+        mjho.set_hand_qpos(qpos_init[i])
+        if mjho.is_contact():
+            continue
 
-            mjho.set_hand_qpos(qpos_prepared[i])
-            if mjho.is_contact():
-                continue
-            mjho.set_hand_qpos(qpos_approach[i])
-            if mjho.is_contact():
-                continue
-            mjho.set_hand_qpos(qpos_init[i])
-            if mjho.is_contact():
-                continue
+        num_no_col += 1
+        mjho.set_hand_qpos(qpos_prepared[i])
+        qpos_grasp, _ = mjho.sim_grasp(visualize=True, **sim_grasp_cfg)
+        ho_contact, _ = mjho.get_contact_info(obj_margin=0.00)
 
-            num_no_col += 1
-            mjho.set_hand_qpos(qpos_prepared[i])
-            qpos_grasp, _ = mjho.sim_grasp(visualize=True)
-            ho_contact, _ = mjho.get_contact_info(obj_margin=0.00)
-
-            if len(ho_contact) >= contact_min_count:
-                is_valid, _, _ = mjho_valid.sim_under_extforce(qpos_grasp.copy(), visualize=False)
-                if is_valid:
-                    ds_init[num_valid] = qpos_init[i].astype(np.float32, copy=False)
-                    ds_approach[num_valid] = qpos_approach[i].astype(np.float32, copy=False)
-                    ds_prepared[num_valid] = qpos_prepared[i].astype(np.float32, copy=False)
-                    ds_grasp[num_valid] = qpos_grasp.astype(np.float32, copy=False)
-                    num_valid += 1
-
-            if flush_every > 0 and (i + 1) % flush_every == 0:
-                hf.flush()
-
-        final_size = num_valid
-        ds_init.resize((final_size, d))
-        ds_approach.resize((final_size, d))
-        ds_prepared.resize((final_size, d))
-        ds_grasp.resize((final_size, d))
-        hf.flush()
+        if len(ho_contact) >= contact_min_count:
+            valid_qpos_grasp.append(qpos_grasp.astype(np.float32, copy=False))
+            num_valid += 1
 
     duration = time.time() - ts
     if verbose:
         print(
             f"[{object_scale_key}] samples={num_samples} no_col={num_no_col} "
-            f"valid={num_valid} time={duration:.2f}s out={h5_path}"
+            f"valid={num_valid} time={duration:.2f}s"
         )
-    return str(h5_path)
+        print(
+            f"[{object_scale_key}] demo_only object_id={object_id} scale={scale} "
+            f"hand={hand_name} grasps_in_memory={len(valid_qpos_grasp)} output_dir={Path(output_dir_abs)}"
+        )
+    return object_scale_key
 
 
 def main():
-    p = argparse.ArgumentParser(description="Sample grasps for one object across fixed scales.")
-    p.add_argument("-i", "--obj-id", type=int, default=None, help="Global object id in merged DatasetObjects.")
-    p.add_argument(
-        "-k",
-        "--obj-key",
-        type=str,
-        default=None,
-        help="Object-scale key, e.g. 'YCB_002_master_chef_can__scale080'.",
-    )
+    p = argparse.ArgumentParser(description="Sample grasps for one object-scale entry.")
+    p.add_argument("--object-scale-key", type=str, required=True, help="Unique object-scale key.")
+    p.add_argument("--coacd-path", type=str, required=True, help="Path to scaled COACD mesh OBJ.")
+    p.add_argument("--mjcf-path", type=str, required=True, help="Path to scaled object MJCF.")
+    p.add_argument("--output-dir", type=str, required=True, help="Output directory for grasp artifacts.")
+    p.add_argument("--scale", type=float, default=None, help="Object scale metadata for grasp.h5.")
+    p.add_argument("--object-id", type=str, default=None, help="Object id metadata for grasp.h5.")
     p.add_argument("-v", "--verbose", action="store_true", help="Enable verbose logs.")
     p.add_argument("-c", "--config", type=str, default=DEFAULT_RUN_CONFIG_PATH, help="JSON config path.")
     args = p.parse_args()
 
     cfg = load_config(args.config)
     set_seed(int(cfg["seed"]))
-
     verbose = bool(args.verbose)
-
-    ds = DatasetObjects(
-        cfg["dataset"]["root"],
-        dataset_names=list(cfg["dataset"].get("include", [])),
-        scales=list(cfg["dataset"].get("scales", [])),
-        dataset_tag=dataset_tag_from_config(args.config),
-        dataset_output_root=cfg.get("output", {}).get("dataset_root", "datasets"),
-        verbose=verbose,
-    )
-
-    if args.obj_key:
-        info = ds.get_obj_info_by_scale_key(args.obj_key)
-    else:
-        obj_id = int(args.obj_id) if args.obj_id is not None else int(cfg.get("object", {}).get("id", 0))
-        info = ds.get_obj_info_by_index(obj_id)
-    obj_name = info["object_name"]
     if verbose:
-        print(f"Using object id={info['global_id']} name={info['object_name']} scale={info['scale']}")
+        print(f"Using object-scale key: {args.object_scale_key}")
 
     hand_xml_path = os.path.abspath(cfg["hand"]["xml_path"])
+    hand_name = Path(hand_xml_path).stem
     n_points = int(cfg["sampling"]["n_points"])
-    pts, norms = ds.sample_surface_o3d(info["coacd_abs"], n_points=n_points, method="poisson")
+    pts, norms = sample_surface_o3d(args.coacd_path, n_points=n_points, method="poisson")
+    object_name = object_name_from_scale_key(args.object_scale_key)
+    object_id = str(args.object_id) if args.object_id else object_name
+    scale = args.scale if args.scale is not None else _scale_from_object_scale_key(args.object_scale_key)
     run_sampling(
         cfg=cfg,
-        object_name=obj_name,
-        object_scale_key=info.get("object_scale_key", f"{obj_name}__unknown_scale"),
+        object_scale_key=args.object_scale_key,
+        object_id=object_id,
+        scale=scale,
+        hand_name=hand_name,
         hand_xml_path=hand_xml_path,
-        object_mjcf_path=info["mjcf_abs"],
-        output_dir_abs=info["output_dir_abs"],
+        object_mjcf_path=args.mjcf_path,
+        output_dir_abs=args.output_dir,
         points=pts,
         normals=norms,
         verbose=verbose,

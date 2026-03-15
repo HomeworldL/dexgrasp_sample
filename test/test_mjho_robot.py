@@ -42,7 +42,7 @@ def test_mjho_init_and_set_qpos(tmp_path: Path):
         pytest.skip("Hand XML not found")
 
     obj_xml = _build_temp_object_xml(tmp_path)
-    env = MjHO({"name": "obj_a", "xml_abs": obj_xml, "scale": 1.0}, xml_path)
+    env = MjHO({"name": "obj_a", "xml_abs": obj_xml}, xml_path)
     q = np.zeros(env.nq_hand, dtype=float)
     q[:7] = np.array([0, 0, 0, 1, 0, 0, 0], dtype=float)
     env.set_hand_qpos(q)

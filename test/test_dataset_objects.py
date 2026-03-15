@@ -44,7 +44,7 @@ def test_manifest_driven_build_returns_object_scale_items(tmp_path: Path):
         dataset_root=str(tmp_path),
         dataset_names=["YCB"],
         scales=[0.06, 0.08],
-        dataset_tag="run_YCB_liberhand",
+        dataset_tag="graspdata_YCB_liberhand",
         dataset_output_root=str(tmp_path / "datasets"),
         verbose=False,
     )
@@ -66,7 +66,7 @@ def test_dataset_missing_dir_raises(tmp_path: Path):
             dataset_root=str(tmp_path),
             dataset_names=["MISSING_DATASET"],
             scales=[0.06],
-            dataset_tag="run_YCB_liberhand",
+            dataset_tag="graspdata_YCB_liberhand",
             dataset_output_root=str(tmp_path / "datasets"),
             verbose=False,
         )
@@ -81,7 +81,7 @@ def test_get_point_cloud_uses_coacd(tmp_path: Path):
         dataset_root=str(tmp_path),
         dataset_names=["YCB"],
         scales=[0.06],
-        dataset_tag="run_YCB_liberhand",
+        dataset_tag="graspdata_YCB_liberhand",
         dataset_output_root=str(tmp_path / "datasets"),
         verbose=False,
     )

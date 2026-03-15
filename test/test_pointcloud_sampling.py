@@ -38,7 +38,7 @@ def test_sample_surface_mesh_with_coacd_path(tmp_path: Path):
         dataset_root=str(tmp_path),
         dataset_names=["MSO"],
         scales=[0.06],
-        dataset_tag="run_YCB_liberhand",
+        dataset_tag="graspdata_YCB_liberhand",
         dataset_output_root=str(tmp_path / "datasets"),
         verbose=False,
     )

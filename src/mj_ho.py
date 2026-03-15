@@ -25,15 +25,16 @@ except Exception:
 
 
 def _default_hand_profiles() -> Dict[str, Dict]:
-    # qpos slices are indexed on hand qpos (including 7D root), ctrl slices on actuator vector.
+    # qpos slices are indexed on hand qpos (including the 7D root pose).
+    # ctrl is formed by concatenating these slices in order.
     return {
         "liberhand_right": {
-            "ctrl_from_qpos_slices": [
-                (0, 3, 7, 10),
-                (3, 6, 11, 14),
-                (6, 8, 15, 17),
-                (8, 10, 19, 21),
-                (10, 13, 23, 26),
+            "ctrl_qpos_slices": [
+                (7, 10),
+                (11, 14),
+                (15, 17),
+                (19, 21),
+                (23, 26),
             ],
             "solimp": [0.4, 0.99, 0.0001],
             "solref": [0.003, 1.0],
@@ -42,12 +43,12 @@ def _default_hand_profiles() -> Dict[str, Dict]:
             "thumb_relax_divisor": 1.2,
         },
         "liberhand2_right": {
-            "ctrl_from_qpos_slices": [
-                (0, 3, 7, 10),
-                (3, 6, 11, 14),
-                (6, 9, 15, 18),
-                (9, 12, 19, 22),
-                (12, 15, 23, 26),
+            "ctrl_qpos_slices": [
+                (7, 10),
+                (11, 14),
+                (15, 18),
+                (19, 22),
+                (23, 26),
             ],
             "solimp": [0.4, 0.99, 0.0001],
             "solref": [0.003, 1.0],
@@ -380,15 +381,18 @@ class MjHO:
         else:
             raise ValueError(f"Unsupported qpos length {q.shape[0]} for qpos2ctrl.")
 
-        slices = self.hand_profile.get("ctrl_from_qpos_slices")
+        slices = self.hand_profile.get("ctrl_qpos_slices")
         if not slices:
             raise NotImplementedError(
                 f"No hand_profile ctrl mapping for hand '{self.hand_name}'."
             )
 
-        ctrl = np.zeros(self.nu, dtype=float)
-        for c0, c1, q0, q1 in slices:
-            ctrl[int(c0) : int(c1)] = hand_qpos[int(q0) : int(q1)]
+        ctrl_parts = [hand_qpos[int(q0) : int(q1)] for q0, q1 in slices]
+        ctrl = np.concatenate(ctrl_parts, axis=0) if ctrl_parts else np.zeros(0, dtype=float)
+        if ctrl.shape[0] != self.nu:
+            raise ValueError(
+                f"ctrl length {ctrl.shape[0]} != model.nu {self.nu} for hand '{self.hand_name}'."
+            )
         return ctrl
             
 
@@ -590,7 +594,7 @@ class MjHO:
 
             if visualize:
                 self._render_viewer()
-                time.sleep(0.1)
+                # time.sleep(0.1)
         # if visualize:
         #     while self.viewer.is_alive:
         #         self.viewer.render()

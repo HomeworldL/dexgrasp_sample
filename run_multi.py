@@ -10,6 +10,9 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Tuple
 import time
+
+import h5py
+
 from src.dataset_objects import DatasetObjects
 from utils.utils_file import DEFAULT_RUN_CONFIG_PATH, dataset_tag_from_config, load_config
 
@@ -145,6 +148,37 @@ def split_records_by_object(records: Sequence[Dict]) -> Tuple[List[Dict], List[D
     return train_records, test_records
 
 
+def _grasp_h5_nonempty(h5_path: Path) -> Tuple[bool, str]:
+    try:
+        with h5py.File(h5_path, "r") as hf:
+            if "qpos_grasp" not in hf:
+                return False, "missing qpos_grasp dataset"
+            ds_grasp = hf["qpos_grasp"]
+            if len(ds_grasp.shape) == 0:
+                return False, "qpos_grasp is scalar"
+            if int(ds_grasp.shape[0]) <= 0:
+                return False, "qpos_grasp has zero rows"
+    except Exception as exc:
+        return False, f"failed to read grasp.h5 ({exc})"
+    return True, ""
+
+
+def filter_nonempty_grasp_records(
+    records: Sequence[Dict],
+    dataset_dir: Path,
+) -> Tuple[List[Dict], List[Tuple[str, str]]]:
+    kept: List[Dict] = []
+    removed: List[Tuple[str, str]] = []
+    for record in records:
+        h5_path = dataset_dir / str(record["grasp_h5_path"])
+        ok, reason = _grasp_h5_nonempty(h5_path)
+        if ok:
+            kept.append(record)
+            continue
+        removed.append((str(record["object_scale_key"]), reason))
+    return kept, removed
+
+
 def write_split_jsons(
     entries: Sequence[Dict],
     dataset_dir: Path,
@@ -152,6 +186,9 @@ def write_split_jsons(
 ) -> Tuple[Path, Path]:
     records, skipped = build_split_records(entries=entries, dataset_dir=dataset_dir, render_subdir=render_subdir)
     train_records, test_records = split_records_by_object(records)
+    train_records, empty_train = filter_nonempty_grasp_records(train_records, dataset_dir)
+    test_records, empty_test = filter_nonempty_grasp_records(test_records, dataset_dir)
+    empty_records = empty_train + empty_test
 
     train_path = dataset_dir / "train.json"
     test_path = dataset_dir / "test.json"
@@ -160,10 +197,12 @@ def write_split_jsons(
 
     print(
         f"Wrote dataset splits under {dataset_dir}: "
-        f"train={len(train_records)} test={len(test_records)} skipped={len(skipped)}"
+        f"train={len(train_records)} test={len(test_records)} skipped={len(skipped)} empty={len(empty_records)}"
     )
     for object_scale_key, reason in skipped:
         print(f"[SKIP] {object_scale_key}: {reason}")
+    for object_scale_key, reason in empty_records:
+        print(f"[EMPTY] {object_scale_key}: {reason}")
     return train_path, test_path
 
 

@@ -1,6 +1,8 @@
 import json
 from pathlib import Path
 
+import h5py
+
 from run_multi import build_split_records, split_records_by_object
 
 
@@ -31,6 +33,12 @@ def _make_entry(dataset_dir: Path, global_id: int, object_name: str, scale_tag: 
         "mjcf_abs": str(output_dir / "object.xml"),
         "scale": scale,
     }
+
+
+def _write_grasp_h5(path: Path, rows: int) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with h5py.File(path, "w") as hf:
+        hf.create_dataset("qpos_grasp", shape=(rows, 3), dtype="f4")
 
 
 def test_build_split_records_and_split_by_object(tmp_path: Path):
@@ -74,3 +82,32 @@ def test_build_split_records_and_split_by_object(tmp_path: Path):
 
     serialized = json.loads(json.dumps(test_records, ensure_ascii=False))
     assert serialized[0]["object_scale_key"].startswith("obj_e__")
+
+
+def test_empty_grasp_h5_is_filtered_after_split(tmp_path: Path):
+    dataset_dir = tmp_path / "datasets" / "graspdata_YCB_liberhand"
+    entries = [
+        _make_entry(dataset_dir, 0, "obj_a", "scale080", 0.08),
+        _make_entry(dataset_dir, 1, "obj_b", "scale080", 0.08),
+        _make_entry(dataset_dir, 2, "obj_c", "scale080", 0.08),
+        _make_entry(dataset_dir, 3, "obj_d", "scale080", 0.08),
+        _make_entry(dataset_dir, 4, "obj_e", "scale080", 0.08),
+    ]
+
+    for entry in entries:
+        _write_grasp_h5(Path(entry["output_dir_abs"]) / "grasp.h5", rows=2)
+    _write_grasp_h5(Path(entries[-1]["output_dir_abs"]) / "grasp.h5", rows=0)
+
+    from run_multi import build_split_records, filter_nonempty_grasp_records
+
+    records, skipped = build_split_records(entries, dataset_dir, "partial_pc_warp")
+    assert skipped == []
+
+    train_records, test_records = split_records_by_object(records)
+    filtered_train, empty_train = filter_nonempty_grasp_records(train_records, dataset_dir)
+    filtered_test, empty_test = filter_nonempty_grasp_records(test_records, dataset_dir)
+
+    assert len(filtered_train) == 4
+    assert filtered_test == []
+    assert empty_train == []
+    assert empty_test == [("obj_e__scale080", "qpos_grasp has zero rows")]

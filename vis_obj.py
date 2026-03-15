@@ -1,14 +1,13 @@
 import argparse
 import os
 import time
-from pathlib import Path
 
 import numpy as np
 import trimesh
 
 from src.dataset_objects import DatasetObjects
 from src.mj_ho import MjHO
-from utils.utils_file import DEFAULT_RUN_CONFIG_PATH, load_config
+from utils.utils_file import DEFAULT_RUN_CONFIG_PATH, dataset_tag_from_config, load_config
 from utils.utils_vis import visualize_with_viser
 
 
@@ -26,23 +25,25 @@ def main():
     args = p.parse_args()
 
     cfg = load_config(args.config)
-    config_stem = Path(args.config).stem
     ds = DatasetObjects(
         dataset_root=cfg["dataset"]["root"],
         dataset_names=list(cfg["dataset"].get("include", [])),
         scales=list(cfg["dataset"].get("scales", [])),
-        dataset_tag=config_stem,
+        dataset_tag=dataset_tag_from_config(args.config),
         dataset_output_root=cfg.get("output", {}).get("dataset_root", "datasets"),
         verbose=bool(cfg["dataset"].get("verbose", False)),
     )
 
     if args.obj_key:
-        info = ds.get_info(args.obj_key)
+        info = ds.get_obj_info_by_scale_key(args.obj_key)
     else:
         obj_id = int(args.obj_id) if args.obj_id is not None else int(cfg.get("object", {}).get("id", 0))
-        info = ds.get_info(obj_id)
+        info = ds.get_obj_info_by_index(obj_id)
     obj_name = info["object_name"]
     print(f"[vis_obj] id={info['global_id']} name={obj_name} scale={info['scale']}")
+    print(f"[vis_obj] convex_parts_abs={info['convex_parts_abs']}")
+    print(f"[vis_obj] coacd_abs={info['coacd_abs']}")
+    print(f"[vis_obj] mjcf_abs={info['mjcf_abs']}")
 
     parts = [ds.load_mesh(p) for p in info["convex_parts_abs"]]
     meshes_for_vis = {

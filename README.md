@@ -11,7 +11,8 @@ Mainline workflow:
 3. Sample grasp frame candidates and convert to hand base pose.
 4. Run MuJoCo staged collision filtering + grasp closing + external-force validation.
 5. Save valid grasps to `grasp.h5`.
-6. (Optional, post-process) Render partial point clouds per object-scale via Warp.
+6. Export `grasp.npy` from `grasp.h5`.
+7. (Optional, post-process) Render partial point clouds per object-scale via Warp.
 
 Mainline code (from `AGENTS.md`):
 - `run.py`
@@ -62,7 +63,8 @@ Optional dependencies by feature:
 - `src/dataset_objects.py`
   - Manifest-driven merged object-scale index.
   - Reads `manifest.process_meshes.json`, keeps only `process_status=success`.
-  - Prebuilds scaled assets under `datasets/<config_stem>/<object>/scaleXXX/`.
+  - Prebuilds scaled assets under `datasets/<dataset_tag>/<object>/scaleXXX/`.
+  - `dataset_tag` is derived from config stem by replacing leading `run_` with `graspdata_`.
 - `src/scale_dataset_builder.py`
   - Builds per-scale assets:
     - `coacd.obj`
@@ -126,11 +128,12 @@ Each entry has fields:
 For each object-scale:
 
 ```text
-datasets/<config_stem>/<object_name>/scaleXXX/
+datasets/<dataset_tag>/<object_name>/scaleXXX/
   coacd.obj
   object.xml
   convex_parts/part_000.obj ...
   grasp.h5
+  grasp.npy
   <warp_render.output_subdir>/
     cam_in.npy
     cam_ex_00.npy ...
@@ -138,13 +141,20 @@ datasets/<config_stem>/<object_name>/scaleXXX/
 ```
 
 Notes:
-- Current `run.py` writes `grasp.h5` directly.
+- `run.py` always writes `grasp.h5` and exports `grasp.npy`.
 - Point cloud outputs are kept separate from grasp arrays.
 
 ---
 
 ## 5. Grasp Dataset Format (`grasp.h5`)
-Main datasets inside `grasp.h5`:
+Metadata datasets in H5:
+- `object_id` (string)
+- `object_name` (string)
+- `scale` (float32)
+- `hand_name` (string)
+- `rot_repr` (`wxyz+qpos`)
+
+Main qpos datasets inside H5:
 - `qpos_init`
 - `qpos_approach`
 - `qpos_prepared`
@@ -169,9 +179,9 @@ Single object-scale grasp generation.
 python run.py \
   -c configs/run_YCB_liberhand.json \
   --object-scale-key YCB_002_master_chef_can__scale080 \
-  --coacd-path datasets/run_YCB_liberhand/YCB_002_master_chef_can/scale080/coacd.obj \
-  --mjcf-path datasets/run_YCB_liberhand/YCB_002_master_chef_can/scale080/object.xml \
-  --output-dir datasets/run_YCB_liberhand/YCB_002_master_chef_can/scale080 \
+  --coacd-path datasets/graspdata_YCB_liberhand/YCB_002_master_chef_can/scale080/coacd.obj \
+  --mjcf-path datasets/graspdata_YCB_liberhand/YCB_002_master_chef_can/scale080/object.xml \
+  --output-dir datasets/graspdata_YCB_liberhand/YCB_002_master_chef_can/scale080 \
   -v
 ```
 
@@ -181,6 +191,8 @@ Args:
 - `--mjcf-path` required
 - `--output-dir` required
 - `-c/--config` optional (default `configs/run_YCB_liberhand.json`)
+- `--scale` optional (metadata; `run_multi.py` auto fills)
+- `--object-id` optional (metadata; `run_multi.py` auto fills)
 - `-v/--verbose` optional
 
 ### 6.2 `run_multi.py`
@@ -313,7 +325,8 @@ Examples:
 
 ### 8.9 `output`
 - `base_dir`, `max_cap`, `h5_name`, `npy_name`
-- Current implementation writes `grasp.h5` in `output_dir_abs` per entry.
+- Current implementation writes `grasp.h5` in each `output_dir_abs`.
+- Current implementation always exports `grasp.npy` from `grasp.h5`.
 
 ### 8.10 `warp_render`
 - Device and parallel:

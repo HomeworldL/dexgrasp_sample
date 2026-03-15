@@ -71,7 +71,7 @@ class MjHO:
     ):
         """
         Args:
-            obj_info: dict returned by DatasetObjects.get_info(name)
+            obj_info: dict returned by DatasetObjects entry query methods
             hand_xml_path: path to hand MJCF (used as base)
             friction_coef: scalar or sequence (len 2 or 3) for friction
             object_fixed: if True, weld object to world (no DOFs)

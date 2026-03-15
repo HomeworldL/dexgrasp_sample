@@ -42,7 +42,7 @@ def test_sample_surface_mesh_with_coacd_path(tmp_path: Path):
         dataset_output_root=str(tmp_path / "datasets"),
         verbose=False,
     )
-    info = ds.get_info(0)
+    info = ds.get_obj_info_by_index(0)
 
     pts, norms = ds.sample_surface_o3d(info["coacd_abs"], n_points=128, method="poisson")
     assert pts.shape == (128, 3)

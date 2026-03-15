@@ -63,13 +63,14 @@ Mainline focus is offline grasp configuration generation.
   - require sufficient hand-object contacts (>=4)
   - run external-force stability validation in a second simulator (`object_fixed=False`)
   - keep only validated grasps
-- Persist outputs as HDF5 first:
+- Persist outputs as HDF5 first (`grasp.h5`):
   - datasets: `qpos_init`, `qpos_approach`, `qpos_prepared`, `qpos_grasp`
   - use preallocated capacity + runtime truncate to final valid size
   - periodic flush/GC during long runs
 - After HDF5 is finalized, load the same arrays and convert to `grasp.npy` (values must be identical to HDF5).
 - After grasp outputs are ready, render object partial point clouds with Warp (`run_warp_render.py`) and save under:
-  - `datasets/<config_stem>/<object>/scaleXXX/<warp_render.output_subdir>/`
+  - `datasets/<dataset_tag>/<object>/scaleXXX/<warp_render.output_subdir>/`
+  - `dataset_tag` rule: replace config stem prefix `run_` with `graspdata_`
   - default subdir: `partial_pc_warp`
 - Point cloud is saved separately and is not bundled into `grasp.npy`.
 
@@ -86,12 +87,12 @@ Mainline focus is offline grasp configuration generation.
 
 ## Unified Dataset Format (Summary)
 - Internal sample representation should include:
-  - one output pair per object-scale: first `grasp.h5`, then convert to `grasp.npy`
+  - one required output per object-scale: `grasp.h5`
+  - one required derived output per object-scale: `grasp.npy`
   - `grasp.npy` must be converted from `grasp.h5` with identical stored grasp values
   - `grasp.h5` sample schema:
     - `object_id: str`
     - `object_name: str`
-    - `dataset: str`
     - `scale: float`
     - `hand_name: str`
     - `rot_repr: "wxyz+qpos"`

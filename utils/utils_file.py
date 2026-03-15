@@ -1,9 +1,23 @@
 import json
 import os
+from pathlib import Path
 from typing import Dict, Optional
 
 
 DEFAULT_RUN_CONFIG_PATH = "configs/run_YCB_liberhand.json"
+
+
+def dataset_tag_from_config(config_path: str) -> str:
+    """Map config stem to dataset output tag.
+
+    Convention:
+    - run_YCB_liberhand -> graspdata_YCB_liberhand
+    - non-run_ stems are kept as-is
+    """
+    stem = Path(config_path).stem
+    if stem.startswith("run_"):
+        return f"graspdata_{stem[len('run_'):]}"
+    return stem
 
 
 def ensure_dir_for_file(filepath: str):

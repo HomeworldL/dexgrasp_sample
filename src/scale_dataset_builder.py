@@ -29,18 +29,21 @@ class ScaleDatasetBuilder:
         if cached is not None:
             return cached
 
-        # Load coacd once; prefer scene mode to preserve OBJ groups (o convex_0/1/...).
-        loaded = trimesh.load(object_info["coacd_abs"], process=False, force="scene")
+        # For current COACD OBJ files, plain load + split preserves pieces
+        # more reliably than force="scene", which may collapse everything
+        # into a single geometry.
+        loaded = trimesh.load(object_info["coacd_abs"], process=False)
         if isinstance(loaded, trimesh.Scene):
-            convex_meshes = [g.copy() for g in loaded.geometry.values()]
+            merged = trimesh.util.concatenate(list(loaded.geometry.values()))
         else:
-            mesh = loaded if isinstance(loaded, trimesh.Trimesh) else trimesh.load(object_info["coacd_abs"], process=False)
-            if isinstance(mesh, trimesh.Scene):
-                mesh = trimesh.util.concatenate(list(mesh.geometry.values()))
-            # Fallback: split disconnected components as convex parts.
-            convex_meshes = [m.copy() for m in mesh.split(only_watertight=False)]
-            if not convex_meshes:
-                convex_meshes = [mesh.copy()]
+            merged = loaded
+
+        if not isinstance(merged, trimesh.Trimesh):
+            raise TypeError(f"Unsupported mesh type for {object_info['coacd_abs']}: {type(loaded)!r}")
+
+        convex_meshes = [m.copy() for m in merged.split(only_watertight=False)]
+        if not convex_meshes:
+            convex_meshes = [merged.copy()]
 
         merged_convex = trimesh.util.concatenate(convex_meshes)
         center = np.asarray(merged_convex.bounding_box.centroid, dtype=np.float64)
@@ -54,15 +57,11 @@ class ScaleDatasetBuilder:
             mc.vertices = (mc.vertices - center) / extent
             norm_convex.append(mc)
 
-        norm_coacd = merged_convex.copy()
-        norm_coacd.vertices = (norm_coacd.vertices - center) / extent
-
         rec = {
             "object_name": object_name,
             "norm_convex": norm_convex,
-            "norm_coacd": norm_coacd,
             "orig_coacd_volume": self._mesh_volume_safe(merged_convex),
-            "norm_volume": self._mesh_volume_safe(norm_coacd),
+            "norm_volume": self._mesh_volume_safe(trimesh.util.concatenate(norm_convex)),
         }
         self._norm_cache[object_name] = rec
         return rec
@@ -82,7 +81,7 @@ class ScaleDatasetBuilder:
             raise ValueError("Failed to compute a valid positive mesh volume.")
         return vol
 
-    def _render_object_xml(
+    def _build_object_xml(
         self,
         object_name: str,
         mass_kg_scaled: float,
@@ -151,16 +150,19 @@ class ScaleDatasetBuilder:
         convex_dir.mkdir(parents=True, exist_ok=True)
 
         scaled_convex_paths: List[Path] = []
+        scaled_coacd_parts: List[trimesh.Trimesh] = []
         for i, mesh in enumerate(norm["norm_convex"]):
             sm = mesh.copy()
             sm.vertices = sm.vertices * scale_value
             part_path = convex_dir / f"part_{i:03d}.obj"
             sm.export(part_path)
             scaled_convex_paths.append(part_path)
+            scaled_coacd_parts.append(sm)
 
-        scaled_coacd = norm["norm_coacd"].copy()
-        scaled_coacd.vertices = scaled_coacd.vertices * scale_value
-        scaled_coacd.export(coacd_path)
+        scene = trimesh.Scene()
+        for i, mesh in enumerate(scaled_coacd_parts):
+            scene.add_geometry(mesh.copy(), node_name=f"part_{i:03d}", geom_name=f"part_{i:03d}")
+        scene.export(str(coacd_path))
 
         m0 = float(mass_kg)
         p0 = np.asarray(principal_moments, dtype=np.float64).reshape(3)
@@ -176,7 +178,7 @@ class ScaleDatasetBuilder:
         inertia_scaled = p0 * (volume_ratio ** (5.0 / 3.0)) * (scale_value ** 5)
 
         convex_rel_paths = [os.path.relpath(p, scale_dir).replace("\\", "/") for p in scaled_convex_paths]
-        xml_text = self._render_object_xml(
+        xml_text = self._build_object_xml(
             object_name=object_name,
             mass_kg_scaled=mass_scaled,
             inertia_diag_scaled=inertia_scaled,

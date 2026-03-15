@@ -37,13 +37,13 @@ class DatasetObjects:
     Info format (one row per object-scale):
         {
             "global_id": int,
+            "object_scale_key": str,
             "object_name": str,
+            "output_dir_abs": str,
             "coacd_abs": str,
             "convex_parts_abs": List[str],
             "scale": float,
-            "mjcf_abs": str,
-            "output_dir_abs": str,
-            "object_scale_key": str,
+            "mjcf_abs": str,  
         }
     """
 
@@ -52,7 +52,7 @@ class DatasetObjects:
         dataset_root: str,
         dataset_names: Optional[List[str]] = None,
         scales: Optional[List[float]] = None,
-        dataset_tag: str = "run_YCB_liberhand",
+        dataset_tag: str = "graspdata_YCB_liberhand",
         dataset_output_root: str = "datasets",
         verbose: bool = False,
     ):
@@ -87,33 +87,18 @@ class DatasetObjects:
                 f"No valid object-scale entries under root={self.root} include={self.dataset_names}."
             )
 
-    @property
-    def id2name(self) -> Dict[int, str]:
-        return {i: f"{it['object_name']}__{self._scale_to_key(it['scale'])}" for i, it in enumerate(self.items)}
-
     def get_entries(self) -> List[Dict]:
         return self.items
-
-    def get_info(self, name_or_id: Union[str, int]) -> Dict:
-        if isinstance(name_or_id, int):
-            idx = int(name_or_id)
-            if idx < 0 or idx >= len(self.items):
-                raise KeyError(f"Object id '{idx}' out of range. Total={len(self.items)}")
-            return self.items[idx]
-
-        key = str(name_or_id)
-        if key in self._key_to_index:
-            return self.items[self._key_to_index[key]]
-
-        # convenience: allow object name without scale when only one match
-        matches = [it for it in self.items if it["object_name"] == key]
-        if len(matches) == 1:
-            return matches[0]
-        if len(matches) > 1:
-            raise KeyError(
-                f"Object '{key}' has multiple scales. Use obj-id or key 'object__scaleXXX'."
-            )
-        raise KeyError(f"Object '{key}' not found")
+    
+    def get_obj_info_by_index(self, obj_id: int) -> Dict:
+        if obj_id < 0 or obj_id >= len(self.items):
+            raise KeyError(f"Object id '{obj_id}' out of range. Total={len(self.items)}")
+        return self.items[obj_id]
+    
+    def get_obj_info_by_scale_key(self, obj_scale_key: str) -> Dict:
+        if obj_scale_key in self._key_to_index:
+            return self.items[self._key_to_index[obj_scale_key]]
+        raise KeyError(f"Object scale key '{obj_scale_key}' not found.")
 
     def _log(self, msg: str) -> None:
         if self.verbose:
@@ -197,13 +182,13 @@ class DatasetObjects:
                     output_dir_abs = str(Path(rec["xml_abs"]).resolve().parent)
                     info = {
                         "global_id": gid,
+                        "object_scale_key": f"{object_name}__{scale_key}",
                         "object_name": object_name,
+                        "output_dir_abs": output_dir_abs,
                         "coacd_abs": rec["coacd_abs"],
                         "convex_parts_abs": list(rec["convex_parts_abs"]),
-                        "scale": float(rec["scale"]),
                         "mjcf_abs": rec["xml_abs"],
-                        "output_dir_abs": output_dir_abs,
-                        "object_scale_key": f"{object_name}__{scale_key}",
+                        "scale": float(rec["scale"]),             
                     }
                     self.items.append(info)
                     self._key_to_index[f"{object_name}__{scale_key}"] = gid
@@ -225,7 +210,10 @@ class DatasetObjects:
         mesh_type: str = "coacd",
         alpha: float = 1.0,
     ) -> trimesh.Trimesh:
-        info = self.get_info(name_or_id)
+        if isinstance(name_or_id, int):
+            info = self.get_obj_info_by_index(int(name_or_id))
+        else:
+            info = self.get_obj_info_by_scale_key(str(name_or_id))
 
         if mesh_type == "coacd":
             mesh = self.load_mesh(info["coacd_abs"])
@@ -266,6 +254,9 @@ class DatasetObjects:
         preview_pointcloud_with_normals(pts, norms)
 
     def get_point_cloud(self, name_or_id: Union[str, int], n_points: int = 4096, method: str = "poisson"):
-        info = self.get_info(name_or_id)
+        if isinstance(name_or_id, int):
+            info = self.get_obj_info_by_index(int(name_or_id))
+        else:
+            info = self.get_obj_info_by_scale_key(str(name_or_id))
         mesh_path = info.get("coacd_abs")
         return self.sample_surface_o3d(mesh_path, n_points, method)

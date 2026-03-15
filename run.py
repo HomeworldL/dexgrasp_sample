@@ -3,7 +3,7 @@ import os
 import random
 import time
 from pathlib import Path
-from typing import Dict, Tuple
+from typing import Dict, Optional, Tuple
 
 import h5py
 import numpy as np
@@ -30,6 +30,32 @@ def object_name_from_scale_key(object_scale_key: str) -> str:
     if "__" in object_scale_key:
         return object_scale_key.split("__", 1)[0]
     return object_scale_key
+
+
+def _encode_h5_str(value: str):
+    return np.bytes_(str(value))
+
+
+def _scale_from_object_scale_key(object_scale_key: str) -> Optional[float]:
+    if "__" not in object_scale_key:
+        return None
+    suffix = object_scale_key.split("__", 1)[1]
+    if not suffix.startswith("scale"):
+        return None
+    digits = suffix[len("scale") :]
+    if not digits.isdigit():
+        return None
+    return float(int(digits)) / 1000.0
+
+
+def _write_grasp_npy_from_h5(h5_path: Path, npy_path: Path) -> None:
+    payload: Dict[str, np.ndarray] = {}
+    with h5py.File(h5_path, "r") as hf:
+        for key in ("qpos_init", "qpos_approach", "qpos_prepared", "qpos_grasp"):
+            if key not in hf:
+                raise KeyError(f"Missing dataset '{key}' in {h5_path}")
+            payload[key] = np.asarray(hf[key][:], dtype=np.float32)
+    np.save(npy_path, payload, allow_pickle=True)
 
 
 def compose_rot_grasp_to_palm(cfg: Dict) -> np.ndarray:
@@ -94,6 +120,9 @@ def make_qpos_triplets(cfg: Dict, pose: np.ndarray) -> Tuple[np.ndarray, np.ndar
 def run_sampling(
     cfg: Dict,
     object_scale_key: str,
+    object_id: str,
+    scale: Optional[float],
+    hand_name: str,
     hand_xml_path: str,
     object_mjcf_path: str,
     output_dir_abs: str,
@@ -128,6 +157,7 @@ def run_sampling(
     out_dir = Path(output_dir_abs)
     out_dir.mkdir(parents=True, exist_ok=True)
     h5_path = out_dir / "grasp.h5"
+    npy_path = out_dir / "grasp.npy"
 
     d = qpos_prepared.shape[1]
     max_cap = int(cfg["output"]["max_cap"])
@@ -143,6 +173,12 @@ def run_sampling(
     ts = time.time()
 
     with h5py.File(h5_path, "w") as hf:
+        hf.create_dataset("object_id", data=_encode_h5_str(object_id))
+        hf.create_dataset("object_name", data=_encode_h5_str(object_name))
+        hf.create_dataset("scale", data=np.float32(scale if scale is not None else np.nan))
+        hf.create_dataset("hand_name", data=_encode_h5_str(hand_name))
+        hf.create_dataset("rot_repr", data=_encode_h5_str("wxyz+qpos"))
+
         ds_init = hf.create_dataset("qpos_init", shape=(max_cap, d), maxshape=(None, d), dtype="f4")
         ds_approach = hf.create_dataset("qpos_approach", shape=(max_cap, d), maxshape=(None, d), dtype="f4")
         ds_prepared = hf.create_dataset("qpos_prepared", shape=(max_cap, d), maxshape=(None, d), dtype="f4")
@@ -202,6 +238,9 @@ def run_sampling(
             f"[{object_scale_key}] samples={num_samples} no_col={num_no_col} "
             f"valid={num_valid} time={duration:.2f}s out={h5_path}"
         )
+    _write_grasp_npy_from_h5(h5_path, npy_path)
+    if verbose:
+        print(f"[{object_scale_key}] converted {h5_path.name} -> {npy_path.name}")
     return str(h5_path)
 
 
@@ -211,6 +250,8 @@ def main():
     p.add_argument("--coacd-path", type=str, required=True, help="Path to scaled COACD mesh OBJ.")
     p.add_argument("--mjcf-path", type=str, required=True, help="Path to scaled object MJCF.")
     p.add_argument("--output-dir", type=str, required=True, help="Output directory for grasp artifacts.")
+    p.add_argument("--scale", type=float, default=None, help="Object scale metadata for grasp.h5.")
+    p.add_argument("--object-id", type=str, default=None, help="Object id metadata for grasp.h5.")
     p.add_argument("-v", "--verbose", action="store_true", help="Enable verbose logs.")
     p.add_argument("-c", "--config", type=str, default=DEFAULT_RUN_CONFIG_PATH, help="JSON config path.")
     args = p.parse_args()
@@ -222,11 +263,18 @@ def main():
         print(f"Using object-scale key: {args.object_scale_key}")
 
     hand_xml_path = os.path.abspath(cfg["hand"]["xml_path"])
+    hand_name = Path(hand_xml_path).stem
     n_points = int(cfg["sampling"]["n_points"])
     pts, norms = sample_surface_o3d(args.coacd_path, n_points=n_points, method="poisson")
+    object_name = object_name_from_scale_key(args.object_scale_key)
+    object_id = str(args.object_id) if args.object_id else object_name
+    scale = args.scale if args.scale is not None else _scale_from_object_scale_key(args.object_scale_key)
     run_sampling(
         cfg=cfg,
         object_scale_key=args.object_scale_key,
+        object_id=object_id,
+        scale=scale,
+        hand_name=hand_name,
         hand_xml_path=hand_xml_path,
         object_mjcf_path=args.mjcf_path,
         output_dir_abs=args.output_dir,

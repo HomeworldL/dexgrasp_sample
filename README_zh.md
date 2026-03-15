@@ -11,7 +11,8 @@
 3. 采样抓取候选坐标系并转换为手基座位姿。
 4. 使用 MuJoCo 执行分阶段碰撞过滤、闭合抓取与外力稳定性验证。
 5. 将有效抓取写入 `grasp.h5`。
-6. （可选后处理）使用 Warp 渲染每个 object-scale 的多视角部分点云。
+6. 从 `grasp.h5` 导出 `grasp.npy`。
+7. （可选后处理）使用 Warp 渲染每个 object-scale 的多视角部分点云。
 
 主线代码（来自 `AGENTS.md`）：
 - `run.py`
@@ -61,7 +62,8 @@ pip install -r requirements.txt
 - `src/dataset_objects.py`
   - 基于 manifest 的多数据集 object-scale 索引。
   - 读取 `manifest.process_meshes.json` 并仅保留 `process_status=success`。
-  - 在 `datasets/<config_stem>/<object>/scaleXXX/` 预构建缩放资产。
+  - 在 `datasets/<dataset_tag>/<object>/scaleXXX/` 预构建缩放资产。
+  - `dataset_tag` 由配置名 stem 派生：将前缀 `run_` 替换为 `graspdata_`。
 - `src/scale_dataset_builder.py`
   - 生成每个 scale 的：
     - `coacd.obj`
@@ -122,11 +124,12 @@ pip install -r requirements.txt
 每个 object-scale 对应：
 
 ```text
-datasets/<config_stem>/<object_name>/scaleXXX/
+datasets/<dataset_tag>/<object_name>/scaleXXX/
   coacd.obj
   object.xml
   convex_parts/part_000.obj ...
   grasp.h5
+  grasp.npy
   <warp_render.output_subdir>/
     cam_in.npy
     cam_ex_00.npy ...
@@ -134,13 +137,20 @@ datasets/<config_stem>/<object_name>/scaleXXX/
 ```
 
 说明：
-- 当前 `run.py` 实际直接写 `grasp.h5`。
+- `run.py` 固定写 `grasp.h5` 并导出 `grasp.npy`。
 - 点云数据与抓取数组分开存储。
 
 ---
 
 ## 5. 抓取数据格式（`grasp.h5`）
-核心数据集：
+H5 元信息数据集：
+- `object_id`（字符串）
+- `object_name`（字符串）
+- `scale`（float32）
+- `hand_name`（字符串）
+- `rot_repr`（`wxyz+qpos`）
+
+核心 qpos 数据集：
 - `qpos_init`
 - `qpos_approach`
 - `qpos_prepared`
@@ -165,15 +175,17 @@ datasets/<config_stem>/<object_name>/scaleXXX/
 python run.py \
   -c configs/run_YCB_liberhand.json \
   --object-scale-key YCB_002_master_chef_can__scale080 \
-  --coacd-path datasets/run_YCB_liberhand/YCB_002_master_chef_can/scale080/coacd.obj \
-  --mjcf-path datasets/run_YCB_liberhand/YCB_002_master_chef_can/scale080/object.xml \
-  --output-dir datasets/run_YCB_liberhand/YCB_002_master_chef_can/scale080 \
+  --coacd-path datasets/graspdata_YCB_liberhand/YCB_002_master_chef_can/scale080/coacd.obj \
+  --mjcf-path datasets/graspdata_YCB_liberhand/YCB_002_master_chef_can/scale080/object.xml \
+  --output-dir datasets/graspdata_YCB_liberhand/YCB_002_master_chef_can/scale080 \
   -v
 ```
 
 参数：
 - 必填：`--object-scale-key`、`--coacd-path`、`--mjcf-path`、`--output-dir`
 - 可选：`-c/--config`（默认 `configs/run_YCB_liberhand.json`）
+- 可选：`--scale`（H5 元信息；`run_multi.py` 自动传入）
+- 可选：`--object-id`（H5 元信息；`run_multi.py` 自动传入）
 - 可选：`-v/--verbose`
 
 ### 6.2 `run_multi.py`
@@ -306,7 +318,8 @@ PYTHONPATH=. python tools/visualization/plot_grasp_pose_plotly.py -c configs/run
 
 ### 8.9 `output`
 - `base_dir`, `max_cap`, `h5_name`, `npy_name`
-- 当前实现实际按条目目录写 `grasp.h5`。
+- 当前实现在每个条目目录写 `grasp.h5`。
+- 当前实现固定从 `grasp.h5` 导出 `grasp.npy`。
 
 ### 8.10 `warp_render`
 - 设备与并行：

@@ -1,14 +1,5 @@
 #!/usr/bin/env python3
 """
-parallel_run.py
-
-并行调用 run.py（每个 object-scale 一条命令）。
-默认并行数为 4。每个 object-scale 的输出写到 logs/<object_scale_key>.log。
-
-用法:
-  python parallel_run.py            # 使用默认并行 4
-  python parallel_run.py -j 4       # 并行 4 个
-  python parallel_run.py --script ./run.py  # 指定 run 脚本路径
 """
 
 import argparse
@@ -20,7 +11,7 @@ from pathlib import Path
 from typing import Dict, List
 import time
 from src.dataset_objects import DatasetObjects
-from utils.utils_file import DEFAULT_RUN_CONFIG_PATH, load_config
+from utils.utils_file import DEFAULT_RUN_CONFIG_PATH, dataset_tag_from_config, load_config
 
 # 全局进程注册（用于在主线程捕获中断时终止子进程）
 _RUN_PROCS = []
@@ -52,21 +43,6 @@ def parse_args():
     return p.parse_args()
 
 
-def get_all_entries(config_path: str, verbose: bool = False) -> List[Dict]:
-    """返回按 global_id 排序的 object-scale entries。"""
-    cfg = load_config(config_path)
-    ds = DatasetObjects(
-        cfg["dataset"]["root"],
-        dataset_names=list(cfg["dataset"].get("include", [])),
-        scales=list(cfg["dataset"].get("scales", [])),
-        dataset_tag=Path(config_path).stem,
-        dataset_output_root=cfg.get("output", {}).get("dataset_root", "datasets"),
-        verbose=verbose,
-    )
-    entries = sorted(ds.get_entries(), key=lambda it: int(it["global_id"]))
-    return entries
-
-
 def safe_filename(name: str) -> str:
     return "".join(c if c.isalnum() or c in "-_.()" else "_" for c in name)
 
@@ -94,6 +70,10 @@ def run_one(
         str(entry["mjcf_abs"]),
         "--output-dir",
         str(entry["output_dir_abs"]),
+        "--scale",
+        str(float(entry.get("scale"))),
+        "--object-id",
+        str(entry.get("object_id", entry.get("object_name", ""))),
     ]
     if verbose:
         cmd.append("-v")
@@ -144,7 +124,16 @@ def main():
     print(f"Time Stamp: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}")
 
     print("Discovering dataset object-scale entries...")
-    entries = get_all_entries(args.config, verbose=bool(args.verbose))
+    cfg = load_config(args.config)
+    ds = DatasetObjects(
+        cfg["dataset"]["root"],
+        dataset_names=list(cfg["dataset"].get("include", [])),
+        scales=list(cfg["dataset"].get("scales", [])),
+        dataset_tag=dataset_tag_from_config(args.config),
+        dataset_output_root=cfg.get("output", {}).get("dataset_root", "datasets"),
+        verbose=bool(args.verbose),
+    )
+    entries = sorted(ds.get_entries(), key=lambda it: int(it["global_id"]))
     if not entries:
         print("没有发现任何 object-scale 条目，退出。")
         return

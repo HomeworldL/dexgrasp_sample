@@ -2,7 +2,6 @@ import argparse
 import os
 import random
 import time
-from pathlib import Path
 from typing import Dict, Tuple
 
 import h5py
@@ -14,7 +13,7 @@ from tqdm import tqdm
 from src.dataset_objects import DatasetObjects
 from src.mj_ho import MjHO
 from src.sample import downsample_fps, sample_grasp_frames
-from utils.utils_file import DEFAULT_RUN_CONFIG_PATH, load_config
+from utils.utils_file import DEFAULT_RUN_CONFIG_PATH, dataset_tag_from_config, load_config
 
 
 def set_seed(random_seed: int):
@@ -209,21 +208,20 @@ def main():
 
     verbose = bool(args.verbose)
 
-    config_stem = Path(args.config).stem
     ds = DatasetObjects(
         cfg["dataset"]["root"],
         dataset_names=list(cfg["dataset"].get("include", [])),
         scales=list(cfg["dataset"].get("scales", [])),
-        dataset_tag=config_stem,
+        dataset_tag=dataset_tag_from_config(args.config),
         dataset_output_root=cfg.get("output", {}).get("dataset_root", "datasets"),
         verbose=verbose,
     )
 
     if args.obj_key:
-        info = ds.get_info(args.obj_key)
+        info = ds.get_obj_info_by_scale_key(args.obj_key)
     else:
         obj_id = int(args.obj_id) if args.obj_id is not None else int(cfg.get("object", {}).get("id", 0))
-        info = ds.get_info(obj_id)
+        info = ds.get_obj_info_by_index(obj_id)
     obj_name = info["object_name"]
     if verbose:
         print(f"Using object id={info['global_id']} name={info['object_name']} scale={info['scale']}")

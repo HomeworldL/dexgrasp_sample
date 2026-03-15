@@ -15,6 +15,10 @@ DEFAULT_FIXED_SCALES = [0.06, 0.08, 0.10, 0.12, 0.14]
 class ScaleDatasetBuilder:
     """Generate scaled convex parts + coacd + MJCF for one object/scale."""
 
+    MIN_PART_MAX_EXTENT = 1e-5
+    MIN_PART_AREA = 1e-10
+    MIN_PART_VOLUME = 1e-12
+
     def __init__(self, base_output_dir: str):
         self.base_output_dir = Path(base_output_dir)
         self._norm_cache: Dict[str, Dict] = {}
@@ -80,6 +84,30 @@ class ScaleDatasetBuilder:
         if not np.isfinite(vol) or vol <= 1e-16:
             raise ValueError("Failed to compute a valid positive mesh volume.")
         return vol
+
+    def _scaled_part_is_valid(self, mesh: trimesh.Trimesh) -> bool:
+        if not isinstance(mesh, trimesh.Trimesh):
+            return False
+        if mesh.vertices is None or mesh.faces is None:
+            return False
+        if len(mesh.vertices) < 4 or len(mesh.faces) < 4:
+            return False
+
+        extents = np.asarray(mesh.extents, dtype=np.float64)
+        if not np.all(np.isfinite(extents)):
+            return False
+        if float(np.max(extents)) <= self.MIN_PART_MAX_EXTENT:
+            return False
+
+        area = float(getattr(mesh, "area", 0.0) or 0.0)
+        if (not np.isfinite(area)) or area <= self.MIN_PART_AREA:
+            return False
+
+        try:
+            volume = self._mesh_volume_safe(mesh)
+        except Exception:
+            return False
+        return bool(np.isfinite(volume) and volume > self.MIN_PART_VOLUME)
 
     def _build_object_xml(
         self,
@@ -154,10 +182,17 @@ class ScaleDatasetBuilder:
         for i, mesh in enumerate(norm["norm_convex"]):
             sm = mesh.copy()
             sm.vertices = sm.vertices * scale_value
+            if not self._scaled_part_is_valid(sm):
+                continue
             part_path = convex_dir / f"part_{i:03d}.obj"
             sm.export(part_path)
             scaled_convex_paths.append(part_path)
             scaled_coacd_parts.append(sm)
+
+        if not scaled_coacd_parts:
+            raise ValueError(
+                f"All convex parts were filtered out as invalid for {object_name} at scale={scale_value:.6f}."
+            )
 
         scene = trimesh.Scene()
         for i, mesh in enumerate(scaled_coacd_parts):

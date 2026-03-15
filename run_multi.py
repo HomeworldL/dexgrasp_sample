@@ -39,6 +39,7 @@ def parse_args():
         default=DEFAULT_RUN_CONFIG_PATH,
         help="运行配置 JSON（默认 configs/run_YCB_liberhand.json）",
     )
+    p.add_argument("--force", action="store_true", help="即使已有 grasp.h5 和 grasp.npy 也强制重跑")
     p.add_argument("-v", "--verbose", action="store_true", help="打印详细日志并透传给 run.py")
     return p.parse_args()
 
@@ -47,10 +48,16 @@ def safe_filename(name: str) -> str:
     return "".join(c if c.isalnum() or c in "-_.()" else "_" for c in name)
 
 
+def _grasp_outputs_exist(entry: Dict) -> bool:
+    out_dir = Path(str(entry["output_dir_abs"]))
+    return (out_dir / "grasp.h5").exists() and (out_dir / "grasp.npy").exists()
+
+
 def run_one(
     entry: Dict,
     script: str,
     config_path: str,
+    force: bool = False,
     verbose: bool = False,
     python_exe: str = sys.executable,
     logs_dir: Path = Path("logs"),
@@ -75,6 +82,8 @@ def run_one(
         "--object-id",
         str(entry.get("object_id", entry.get("object_name", ""))),
     ]
+    if force:
+        cmd.append("--force")
     if verbose:
         cmd.append("-v")
     logpath = logs_dir / f"{safe_filename(object_scale_key)}.log"
@@ -138,6 +147,16 @@ def main():
         print("没有发现任何 object-scale 条目，退出。")
         return
 
+    if not args.force:
+        total_entries = len(entries)
+        entries = [it for it in entries if not _grasp_outputs_exist(it)]
+        skipped = total_entries - len(entries)
+        if skipped > 0:
+            print(f"Pre-skip existing results: {skipped}/{total_entries} entries already have grasp.h5 and grasp.npy.")
+        if not entries:
+            print("所有 object-scale 条目都已存在 grasp.h5 和 grasp.npy，退出。")
+            return
+
     print(f"Found {len(entries)} object-scale entries. Running with max parallel = {args.max_parallel}.")
     if args.verbose:
         for i, it in enumerate(entries):
@@ -154,6 +173,7 @@ def main():
                         entry,
                         args.script,
                         args.config,
+                        bool(args.force),
                         bool(args.verbose),
                         sys.executable,
                         logs_dir,

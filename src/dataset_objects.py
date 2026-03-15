@@ -169,14 +169,24 @@ class DatasetObjects:
                     pm = [1e-6, 1e-6, 1e-6]
                 principal_moments = [float(pm[0]), float(pm[1]), float(pm[2])]
 
-                scale_assets = self._builder.build_multi_scale_assets(
-                    config_stem=self.dataset_tag,
-                    object_info=base_info,
-                    scales=self.scales,
-                    mass_kg=mass_kg,
-                    principal_moments=principal_moments,
-                    overwrite=False,
-                )
+                scale_assets = {}
+                for scale in self.scales:
+                    try:
+                        rec = self._builder.build_scale_assets(
+                            config_stem=self.dataset_tag,
+                            object_info=base_info,
+                            scale=float(scale),
+                            mass_kg=mass_kg,
+                            principal_moments=principal_moments,
+                            overwrite=False,
+                        )
+                    except Exception as exc:
+                        self._log(
+                            f"[DatasetObjects] skip {object_name} scale={float(scale):.6f}: "
+                            f"{exc}"
+                        )
+                        continue
+                    scale_assets[self._builder.scale_tag(float(scale))] = rec
 
                 for scale_key, rec in sorted(scale_assets.items()):
                     output_dir_abs = str(Path(rec["xml_abs"]).resolve().parent)

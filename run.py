@@ -58,6 +58,11 @@ def _write_grasp_npy_from_h5(h5_path: Path, npy_path: Path) -> None:
     np.save(npy_path, payload, allow_pickle=True)
 
 
+def _grasp_outputs_exist(output_dir_abs: str) -> bool:
+    out_dir = Path(output_dir_abs)
+    return (out_dir / "grasp.h5").exists() and (out_dir / "grasp.npy").exists()
+
+
 def compose_rot_grasp_to_palm(cfg: Dict) -> np.ndarray:
     base = np.asarray(cfg["transform"]["base_rot_grasp_to_palm"], dtype=float)
     extra = cfg["transform"]["extra_euler"]
@@ -252,6 +257,7 @@ def main():
     p.add_argument("--output-dir", type=str, required=True, help="Output directory for grasp artifacts.")
     p.add_argument("--scale", type=float, default=None, help="Object scale metadata for grasp.h5.")
     p.add_argument("--object-id", type=str, default=None, help="Object id metadata for grasp.h5.")
+    p.add_argument("--force", action="store_true", help="Re-run even if grasp.h5 and grasp.npy already exist.")
     p.add_argument("-v", "--verbose", action="store_true", help="Enable verbose logs.")
     p.add_argument("-c", "--config", type=str, default=DEFAULT_RUN_CONFIG_PATH, help="JSON config path.")
     args = p.parse_args()
@@ -261,6 +267,10 @@ def main():
     verbose = bool(args.verbose)
     if verbose:
         print(f"Using object-scale key: {args.object_scale_key}")
+    if (not args.force) and _grasp_outputs_exist(args.output_dir):
+        if verbose:
+            print(f"[{args.object_scale_key}] skip existing grasp.h5 and grasp.npy in {args.output_dir}")
+        return
 
     hand_xml_path = os.path.abspath(cfg["hand"]["xml_path"])
     hand_name = Path(hand_xml_path).stem

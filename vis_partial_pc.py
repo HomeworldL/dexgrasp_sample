@@ -6,7 +6,7 @@ import numpy as np
 from scipy.spatial.transform import Rotation as R
 
 from src.dataset_objects import DatasetObjects
-from utils.utils_file import DEFAULT_RUN_CONFIG_PATH, load_config
+from utils.utils_file import DEFAULT_RUN_CONFIG_PATH, dataset_tag_from_config, load_config
 from utils.utils_vis import generate_ncolors, visualize_with_viser
 
 
@@ -33,6 +33,8 @@ def _cam_ex_to_wxyz_pose(cam_ex: np.ndarray) -> np.ndarray:
     mat = np.asarray(cam_ex, dtype=np.float64)
     if mat.shape != (4, 4):
         raise ValueError(f"cam_ex must be 4x4, got {mat.shape}")
+    # cam_ex uses standard homogeneous C2W convention:
+    # p_world = T_c2w @ p_camera (column-vector), last row [0,0,0,1]
     pos = mat[:3, 3]
     quat_xyzw = R.from_matrix(mat[:3, :3]).as_quat()
     quat_wxyz = np.roll(quat_xyzw, 1)
@@ -57,6 +59,13 @@ def main() -> None:
         help="Comma-separated view ids to display, e.g. '0,1,3' or '-1'. Default: all.",
     )
     parser.add_argument(
+        "--coord",
+        type=str,
+        default="world",
+        choices=["world", "cam"],
+        help="Point-cloud coordinate system to display: world (partial_pc_XX) or cam (partial_pc_cam_XX).",
+    )
+    parser.add_argument(
         "--hide-mesh",
         action="store_true",
         help="Do not display object mesh.",
@@ -73,25 +82,32 @@ def main() -> None:
         dataset_root=cfg["dataset"]["root"],
         dataset_names=list(cfg["dataset"].get("include", [])),
         scales=list(cfg["dataset"].get("scales", [])),
-        dataset_tag=Path(args.config).stem,
+        dataset_tag=dataset_tag_from_config(args.config),
         dataset_output_root=cfg.get("output", {}).get("dataset_root", "datasets"),
         verbose=bool(cfg["dataset"].get("verbose", False)),
     )
 
     if args.obj_key:
-        info = ds.get_info(args.obj_key)
+        info = ds.get_obj_info_by_scale_key(args.obj_key)
     else:
         obj_id = int(args.obj_id) if args.obj_id is not None else int(cfg.get("object", {}).get("id", 0))
-        info = ds.get_info(obj_id)
+        info = ds.get_obj_info_by_index(obj_id)
 
     subdir = args.pc_subdir or cfg.get("warp_render", {}).get("output_subdir", "partial_pc_warp")
     pc_dir = Path(info["output_dir_abs"]).resolve() / subdir
     if not pc_dir.exists():
         raise FileNotFoundError(f"Pointcloud directory not found: {pc_dir}")
 
-    pc_files = sorted(pc_dir.glob("partial_pc_*.npy"))
+    prefix = "partial_pc_cam_" if args.coord == "cam" else "partial_pc_"
+    pc_files = sorted(
+        [
+            p
+            for p in pc_dir.glob(f"{prefix}*.npy")
+            if p.stem.startswith(prefix) and p.stem[len(prefix) :].isdigit()
+        ]
+    )
     if not pc_files:
-        raise FileNotFoundError(f"No partial_pc_*.npy found under {pc_dir}")
+        raise FileNotFoundError(f"No {prefix}XX.npy found under {pc_dir}")
 
     selected = _parse_indices(args.view_ids, len(pc_files))
     if not selected:
@@ -122,7 +138,7 @@ def main() -> None:
 
     print(
         f"[vis_partial_pc] id={info['global_id']} key={info['object_scale_key']} "
-        f"pc_dir={pc_dir} views={selected}"
+        f"pc_dir={pc_dir} coord={args.coord} views={selected}"
     )
     visualize_with_viser(meshes=meshes, pointclouds=pointclouds, frames=frames, blocking=True)
 

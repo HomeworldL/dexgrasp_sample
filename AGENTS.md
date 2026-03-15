@@ -106,6 +106,7 @@ Mainline focus is offline grasp configuration generation.
     - `cam_in.npy`
     - `cam_ex_XX.npy`
     - `partial_pc_XX.npy`
+    - `partial_pc_cam_XX.npy`
 - Public references for format comparison are tracked in:
   - `docs/dataset_format_and_scale.md`
 

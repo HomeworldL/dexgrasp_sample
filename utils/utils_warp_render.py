@@ -233,6 +233,13 @@ class WarpPointCloudRenderer:
         world = camera.view(depth_image.shape[0], -1, 4) @ self._view_matrix_torch
         return world[..., :3]
 
+    def depth_to_camera_point_cloud(self, depth_image: torch.Tensor) -> torch.Tensor:
+        x = (self._xx - self.cx) * depth_image / self.fx
+        y = -(self._yy - self.cy) * depth_image / self.fy
+        z = -depth_image
+        camera = torch.cat([x, y, z], dim=-1)
+        return camera.view(depth_image.shape[0], -1, 3)
+
 
 def intrinsics_from_config(cfg: Dict, tile_width: int, tile_height: int) -> Intrinsics:
     preset = str(cfg.get("preset", "kinect"))

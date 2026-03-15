@@ -86,7 +86,7 @@ pip install -r requirements.txt
   - 在 Viser 显示物体 + 指定抓取样本（四阶段 qpos）的手 mesh。
   - 同时可用 Plotly 显示所有抓取坐标系。
 - `vis_partial_pc.py`
-  - 显示 Warp 保存的 `partial_pc_XX.npy`。
+  - 显示 Warp 保存的 `partial_pc_XX.npy`（世界系）与 `partial_pc_cam_XX.npy`（相机系）。
   - 可选显示 `cam_ex_XX.npy` 对应相机坐标系。
 
 ### 3.4 `tools/visualization` 脚本说明
@@ -134,6 +134,7 @@ datasets/<dataset_tag>/<object_name>/scaleXXX/
     cam_in.npy
     cam_ex_00.npy ...
     partial_pc_00.npy ...
+    partial_pc_cam_00.npy ...
 ```
 
 说明：
@@ -183,9 +184,9 @@ python run.py \
 
 参数：
 - 必填：`--object-scale-key`、`--coacd-path`、`--mjcf-path`、`--output-dir`
-- 可选：`-c/--config`（默认 `configs/run_YCB_liberhand.json`）
 - 可选：`--scale`（H5 元信息；`run_multi.py` 自动传入）
 - 可选：`--object-id`（H5 元信息；`run_multi.py` 自动传入）
+- 可选：`-c/--config`（默认 `configs/run_YCB_liberhand.json`）
 - 可选：`-v/--verbose`
 
 ### 6.2 `run_multi.py`
@@ -339,6 +340,7 @@ PYTHONPATH=. python tools/visualization/plot_grasp_pose_plotly.py -c configs/run
 ## 9. 部分点云说明
 - 当前 `cam_ex_XX.npy` 语义是 camera-to-world 变换。
 - `partial_pc_XX.npy` 来自 depth 反投影（内参）再经外参变换到世界坐标。
+- `partial_pc_cam_XX.npy` 保存同一批采样点在相机坐标系下的表示。
 - 因此点云几何同时依赖内参与外参。
 
 ---

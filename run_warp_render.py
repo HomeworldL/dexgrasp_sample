@@ -9,7 +9,7 @@ import torch
 from tqdm import tqdm
 
 from src.dataset_objects import DatasetObjects
-from utils.utils_file import DEFAULT_RUN_CONFIG_PATH, load_config
+from utils.utils_file import DEFAULT_RUN_CONFIG_PATH, dataset_tag_from_config, load_config
 from utils.utils_warp_render import (
     WarpPointCloudRenderer,
     get_camera_matrix,
@@ -108,11 +108,22 @@ def _ensure_devices_available(device_tokens: Sequence[Union[str, int]]) -> None:
 
 def _all_pc_exist(folder: Path, batch: int) -> bool:
     for b in range(batch):
-        path = folder / f"partial_pc_{str(b).zfill(2)}.npy"
-        if not path.exists():
+        world_path = folder / f"partial_pc_{str(b).zfill(2)}.npy"
+        cam_path = folder / f"partial_pc_cam_{str(b).zfill(2)}.npy"
+        if not world_path.exists() or not cam_path.exists():
             return False
-        arr = np.load(path, allow_pickle=True)
+        arr = np.load(world_path, allow_pickle=True)
+        arr_cam = np.load(cam_path, allow_pickle=True)
         if arr.size == 0:
+            return False
+        if arr_cam.size == 0:
+            return False
+    return True
+
+
+def _all_cam_ex_exist(folder: Path, batch: int) -> bool:
+    for b in range(batch):
+        if not (folder / f"cam_ex_{str(b).zfill(2)}.npy").exists():
             return False
     return True
 
@@ -127,8 +138,11 @@ def _render_entry(
     out_dir.mkdir(parents=True, exist_ok=True)
 
     batch = renderer.num_tiles
-    if bool(render_cfg["skip_existing"]) and _all_pc_exist(out_dir, batch):
-        return f"skip {entry['object_scale_key']}"
+    if bool(render_cfg["skip_existing"]):
+        if bool(render_cfg["save_pc"]) and _all_pc_exist(out_dir, batch):
+            return f"skip {entry['object_scale_key']}"
+        if (not bool(render_cfg["save_pc"])) and _all_cam_ex_exist(out_dir, batch):
+            return f"skip {entry['object_scale_key']}"
 
     mesh = mesh_from_path(str(entry["coacd_abs"]))
     camera_view = get_camera_matrix(render_cfg["camera"], sample_num=batch, rng=rng)
@@ -149,17 +163,24 @@ def _render_entry(
         depth = None
 
     if bool(render_cfg["save_pc"]):
-        all_pc = renderer.depth_to_world_point_cloud(depth)
+        all_pc_world = renderer.depth_to_world_point_cloud(depth)
+        all_pc_cam = renderer.depth_to_camera_point_cloud(depth)
         depth_mask = (depth.reshape(batch, -1) > 0) & (
             depth.reshape(batch, -1) < float(render_cfg["depth_max"])
         )
     else:
-        all_pc = None
+        all_pc_world = None
+        all_pc_cam = None
         depth_mask = None
 
     for b in range(batch):
         data_id = str(b).zfill(2)
-        np.save(out_dir / f"cam_ex_{data_id}.npy", view_matrix[b].detach().cpu().numpy())
+        # Convert row-vector C2W matrix to standard homogeneous matrix:
+        # p_w = T_c2w @ p_c (column-vector), with [0,0,0,1] as last row.
+        cam_ex_row = view_matrix[b].detach().cpu().numpy()
+        cam_ex_h = cam_ex_row.T.astype(np.float32, copy=True)
+        cam_ex_h[3, :] = np.array([0.0, 0.0, 0.0, 1.0], dtype=np.float32)
+        np.save(out_dir / f"cam_ex_{data_id}.npy", cam_ex_h)
 
         if rgb is not None:
             np.save(out_dir / f"rgb_{data_id}.npy", rgb[b].detach().cpu().numpy().astype(np.float32))
@@ -167,12 +188,15 @@ def _render_entry(
         if bool(render_cfg["save_depth"]) and depth is not None:
             np.save(out_dir / f"depth_{data_id}.npy", depth[b].detach().cpu().numpy().astype(np.float32))
 
-        if bool(render_cfg["save_pc"]) and all_pc is not None and depth_mask is not None:
-            pc = all_pc[b, depth_mask[b]]
-            if pc.shape[0] > int(render_cfg["max_point_num"]):
-                idx = torch.randperm(pc.shape[0], device=pc.device)[: int(render_cfg["max_point_num"])]
-                pc = pc[idx]
-            np.save(out_dir / f"partial_pc_{data_id}.npy", pc.detach().cpu().numpy().astype(np.float16))
+        if bool(render_cfg["save_pc"]) and all_pc_world is not None and all_pc_cam is not None and depth_mask is not None:
+            pc_world = all_pc_world[b, depth_mask[b]]
+            pc_cam = all_pc_cam[b, depth_mask[b]]
+            if pc_world.shape[0] > int(render_cfg["max_point_num"]):
+                idx = torch.randperm(pc_world.shape[0], device=pc_world.device)[: int(render_cfg["max_point_num"])]
+                pc_world = pc_world[idx]
+                pc_cam = pc_cam[idx]
+            np.save(out_dir / f"partial_pc_{data_id}.npy", pc_world.detach().cpu().numpy().astype(np.float16))
+            np.save(out_dir / f"partial_pc_cam_{data_id}.npy", pc_cam.detach().cpu().numpy().astype(np.float16))
 
     return f"done {entry['object_scale_key']}"
 
@@ -253,7 +277,7 @@ def main() -> None:
         render_cfg = dict(render_cfg)
         render_cfg["gpu_lst"] = [_parse_device_token(x) for x in args.gpu_lst.split(",") if x.strip()]
 
-    config_stem = Path(args.config).stem
+    config_stem = dataset_tag_from_config(args.config)
     ds = DatasetObjects(
         dataset_root=cfg["dataset"]["root"],
         dataset_names=list(cfg["dataset"].get("include", [])),
@@ -264,9 +288,9 @@ def main() -> None:
     )
 
     if args.obj_key:
-        entries = [ds.get_info(args.obj_key)]
+        entries = [ds.get_obj_info_by_scale_key(args.obj_key)]
     elif args.obj_id is not None:
-        entries = [ds.get_info(int(args.obj_id))]
+        entries = [ds.get_obj_info_by_index(int(args.obj_id))]
     else:
         entries = sorted(ds.get_entries(), key=lambda x: int(x["global_id"]))
 

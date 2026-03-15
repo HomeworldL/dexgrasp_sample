@@ -87,7 +87,7 @@ Optional dependencies by feature:
   - Visualize object + selected grasp hand meshes (4 qpos stages) in Viser.
   - Also visualize all grasp frames in Plotly.
 - `vis_partial_pc.py`
-  - Visualize saved Warp partial point clouds (`partial_pc_XX.npy`) for one object-scale.
+  - Visualize saved Warp partial point clouds (`partial_pc_XX.npy` world, `partial_pc_cam_XX.npy` camera) for one object-scale.
   - Optional camera frame display from `cam_ex_XX.npy`.
 
 ### 3.4 Extra Visualization Scripts
@@ -138,6 +138,7 @@ datasets/<dataset_tag>/<object_name>/scaleXXX/
     cam_in.npy
     cam_ex_00.npy ...
     partial_pc_00.npy ...
+    partial_pc_cam_00.npy ...
 ```
 
 Notes:
@@ -190,9 +191,9 @@ Args:
 - `--coacd-path` required
 - `--mjcf-path` required
 - `--output-dir` required
-- `-c/--config` optional (default `configs/run_YCB_liberhand.json`)
 - `--scale` optional (metadata; `run_multi.py` auto fills)
 - `--object-id` optional (metadata; `run_multi.py` auto fills)
+- `-c/--config` optional (default `configs/run_YCB_liberhand.json`)
 - `-v/--verbose` optional
 
 ### 6.2 `run_multi.py`
@@ -345,7 +346,8 @@ Examples:
 
 ## 9. Notes on Partial Point Clouds
 - Saved `cam_ex_XX.npy` is camera-to-world transform in current implementation.
-- `partial_pc_XX.npy` is reconstructed from rendered depth + intrinsics + extrinsics.
+- `partial_pc_XX.npy` is reconstructed from rendered depth + intrinsics + extrinsics in world frame.
+- `partial_pc_cam_XX.npy` stores the same sampled points in camera frame.
 - Point cloud geometry depends on both intrinsics and extrinsics.
 
 ---

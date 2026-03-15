@@ -90,12 +90,6 @@ Optional dependencies by feature:
   - Visualize saved Warp partial point clouds (`partial_pc_XX.npy` world, `partial_pc_cam_XX.npy` camera) for one object-scale.
   - Optional camera frame display from `cam_ex_XX.npy`.
 
-### 3.4 Extra Visualization Scripts
-- `tools/visualization/`
-  - Research/debug scripts.
-  - `plot_grasp_pose_plotly.py` is config-driven.
-  - Several other scripts are legacy hard-coded experiments (usually need manual path edits).
-
 ---
 
 ## 4. Dataset Interface and Output Layout

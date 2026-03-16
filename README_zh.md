@@ -265,6 +265,7 @@ python eval_dataset.py \
 ```
 
 说明：
+- split 文件路径由 `config` 与 `--split` 自动解析到 `datasets/<dataset_tag>/<split>.json`。
 - 每个 obj-scale 直接读取 `grasp.h5` 中的 `qpos_grasp`。
 - 对每条 `qpos_grasp` 先检查 `qpos_init` 与 `qpos_prepared` 是否接触；任一接触即判失败。
 - 若前置检查通过，再调用 `MjHO.sim_under_extforce`。

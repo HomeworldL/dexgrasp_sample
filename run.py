@@ -1,6 +1,5 @@
 import argparse
 import os
-import random
 import time
 from pathlib import Path
 from typing import Dict, Optional, Tuple
@@ -15,15 +14,7 @@ from src.mj_ho import MjHO
 from src.sample import downsample_fps, sample_grasp_frames
 from utils.utils_file import DEFAULT_RUN_CONFIG_PATH, load_config
 from utils.utils_pointcloud import sample_surface_o3d
-
-
-def set_seed(random_seed: int):
-    np.random.seed(random_seed)
-    random.seed(random_seed)
-    torch.manual_seed(random_seed)
-    torch.cuda.manual_seed_all(random_seed)
-    torch.backends.cudnn.deterministic = True
-    torch.backends.cudnn.benchmark = False
+from utils.utils_seed import set_seed
 
 
 def object_name_from_scale_key(object_scale_key: str) -> str:

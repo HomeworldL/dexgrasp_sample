@@ -266,6 +266,7 @@ python eval_dataset.py \
 ```
 
 Notes:
+- The split manifest is resolved automatically from `config` and `--split` as `datasets/<dataset_tag>/<split>.json`.
 - Each object-scale loads `qpos_grasp` directly from `grasp.h5`.
 - Each `qpos_grasp` is first rejected if `qpos_init` or `qpos_prepared` is already in contact.
 - Only grasps that pass the pre-contact checks are evaluated with `MjHO.sim_under_extforce`.

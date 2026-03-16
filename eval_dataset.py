@@ -10,9 +10,9 @@ from typing import Dict, List, Optional
 import h5py
 import numpy as np
 
-from run import set_seed
 from src.mj_ho import MjHO
-from utils.utils_file import DEFAULT_RUN_CONFIG_PATH, dataset_tag_from_config, load_config
+from utils.utils_file import DEFAULT_RUN_CONFIG_PATH, load_config, resolve_split_manifest_path
+from utils.utils_seed import set_seed
 
 
 LOGGER = logging.getLogger(__name__)
@@ -20,19 +20,6 @@ LOGGER = logging.getLogger(__name__)
 
 def _load_json(path: Path) -> List[Dict]:
     return json.loads(path.read_text(encoding="utf-8"))
-
-
-def _resolve_manifest_path(
-    run_cfg: Dict,
-    run_config_path: str,
-    split: str,
-    manifest_path: Optional[str],
-) -> Path:
-    if manifest_path:
-        return Path(manifest_path).resolve()
-    dataset_root = Path(run_cfg.get("output", {}).get("dataset_root", "datasets")).resolve()
-    dataset_tag = dataset_tag_from_config(run_config_path)
-    return dataset_root / dataset_tag / f"{split}.json"
 
 
 def _load_qpos_grasp(grasp_h5_path: Path) -> Dict[str, np.ndarray]:
@@ -52,37 +39,17 @@ def _load_qpos_grasp(grasp_h5_path: Path) -> Dict[str, np.ndarray]:
     return arrays
 
 
-def _build_mjho(cfg: Dict, mjcf_abs_path: Path, object_name: str, object_fixed: bool, visualize: bool) -> MjHO:
-    return MjHO(
-        {"name": str(object_name), "xml_abs": str(mjcf_abs_path.resolve())},
-        cfg["hand"]["xml_path"],
-        target_body_params=cfg["hand"]["target_body_params"],
-        object_fixed=object_fixed,
-        visualize=visualize,
-    )
-
-
-def _has_contact(mjho: MjHO, hand_qpos: np.ndarray, visualize: bool) -> bool:
-    mjho.reset()
-    mjho.set_hand_qpos(hand_qpos.copy())
-    if visualize:
-        mjho._render_viewer()
-    return bool(mjho.is_contact())
-
-
 def evaluate_dataset_manifest(
     run_config_path: str,
     split: str,
-    manifest_path: Optional[str] = None,
     seed: Optional[int] = None,
-    max_grasps_per_object_scale: Optional[int] = None,
     visualize: bool = False,
 ) -> Dict:
     cfg = load_config(run_config_path)
     eval_seed = int(cfg["seed"] if seed is None else seed)
     set_seed(eval_seed)
 
-    manifest_file = _resolve_manifest_path(cfg, run_config_path, split, manifest_path)
+    manifest_file = resolve_split_manifest_path(cfg, run_config_path, split)
     if not manifest_file.exists():
         raise FileNotFoundError(f"Split manifest not found: {manifest_file}")
 
@@ -106,14 +73,23 @@ def evaluate_dataset_manifest(
 
         try:
             grasp_arrays = _load_qpos_grasp(grasp_h5_path)
-            if max_grasps_per_object_scale is not None:
-                keep = max(0, int(max_grasps_per_object_scale))
-                grasp_arrays = {key: value[:keep] for key, value in grasp_arrays.items()}
             qpos_grasp = grasp_arrays["qpos_grasp"]
             if qpos_grasp.shape[0] <= 0:
                 raise ValueError("no grasps selected for evaluation")
-            mjho_collision = _build_mjho(cfg, mjcf_path, object_name, object_fixed=True, visualize=visualize)
-            mjho_valid = _build_mjho(cfg, mjcf_path, object_name, object_fixed=False, visualize=visualize)
+            mjho_collision = MjHO(
+                {"name": object_name, "xml_abs": str(mjcf_path.resolve())},
+                cfg["hand"]["xml_path"],
+                target_body_params=cfg["hand"]["target_body_params"],
+                object_fixed=True,
+                visualize=visualize,
+            )
+            mjho_valid = MjHO(
+                {"name": object_name, "xml_abs": str(mjcf_path.resolve())},
+                cfg["hand"]["xml_path"],
+                target_body_params=cfg["hand"]["target_body_params"],
+                object_fixed=False,
+                visualize=visualize,
+            )
         except Exception as exc:
             skipped = {"object_scale_key": object_scale_key, "reason": str(exc)}
             skipped_items.append(skipped)
@@ -124,9 +100,14 @@ def evaluate_dataset_manifest(
         attempt_details: List[Dict] = []
         for grasp_idx, grasp_qpos in enumerate(qpos_grasp):
             try:
+                # Pre-check stored init/prepared states before running extforce validation.
                 init_qpos = grasp_arrays["qpos_init"][grasp_idx]
                 prepared_qpos = grasp_arrays["qpos_prepared"][grasp_idx]
-                if _has_contact(mjho_collision, init_qpos, visualize=visualize):
+                mjho_collision.reset()
+                mjho_collision.set_hand_qpos(init_qpos.copy())
+                if visualize:
+                    mjho_collision._render_viewer()
+                if mjho_collision.is_contact():
                     total_attempts += 1
                     attempt_details.append(
                         {
@@ -136,7 +117,11 @@ def evaluate_dataset_manifest(
                         }
                     )
                     continue
-                if _has_contact(mjho_collision, prepared_qpos, visualize=visualize):
+                mjho_collision.reset()
+                mjho_collision.set_hand_qpos(prepared_qpos.copy())
+                if visualize:
+                    mjho_collision._render_viewer()
+                if mjho_collision.is_contact():
                     total_attempts += 1
                     attempt_details.append(
                         {
@@ -200,7 +185,6 @@ def evaluate_dataset_manifest(
         "total_success": int(total_success),
         "total_attempts": int(total_attempts),
         "success_rate": float(total_success / max(1, total_attempts)),
-        "max_grasps_per_object_scale": None if max_grasps_per_object_scale is None else int(max_grasps_per_object_scale),
         "items": summary_items,
     }
 
@@ -211,14 +195,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("-c", "--config", type=str, default=DEFAULT_RUN_CONFIG_PATH)
     parser.add_argument("--split", type=str, choices=["train", "test"], default="test")
-    parser.add_argument("--manifest-path", type=str, default=None)
     parser.add_argument("--seed", type=int, default=None)
-    parser.add_argument(
-        "--max-grasps-per-object-scale",
-        type=int,
-        default=None,
-        help="Optional cap for grasps evaluated per object-scale.",
-    )
     parser.add_argument(
         "--visualize",
         action="store_true",
@@ -237,9 +214,7 @@ def main() -> None:
     summary = evaluate_dataset_manifest(
         run_config_path=args.config,
         split=args.split,
-        manifest_path=args.manifest_path,
         seed=args.seed,
-        max_grasps_per_object_scale=args.max_grasps_per_object_scale,
         visualize=bool(args.visualize),
     )
     print(json.dumps(summary, indent=2, ensure_ascii=False))

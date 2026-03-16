@@ -70,8 +70,7 @@ def test_evaluate_dataset_manifest_counts_successes(tmp_path: Path, monkeypatch)
             dtype="f4",
         )
 
-    manifest_path = dataset_dir / "test.json"
-    manifest_path.write_text(
+    (dataset_dir / "test.json").write_text(
         json.dumps(
             [
                 {
@@ -94,7 +93,7 @@ def test_evaluate_dataset_manifest_counts_successes(tmp_path: Path, monkeypatch)
         encoding="utf-8",
     )
 
-    config_path = tmp_path / "run.json"
+    config_path = tmp_path / "run_YCB_liberhand.json"
     config_path.write_text(
         json.dumps(
             {
@@ -126,7 +125,6 @@ def test_evaluate_dataset_manifest_counts_successes(tmp_path: Path, monkeypatch)
     summary = eval_dataset.evaluate_dataset_manifest(
         run_config_path=str(config_path),
         split="test",
-        manifest_path=str(manifest_path),
     )
 
     assert summary["evaluated_items"] == 1

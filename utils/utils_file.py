@@ -26,6 +26,12 @@ def ensure_dir_for_file(filepath: str):
         os.makedirs(d, exist_ok=True)
 
 
+def resolve_split_manifest_path(cfg: Dict, config_path: str, split: str) -> Path:
+    dataset_root = Path(cfg.get("output", {}).get("dataset_root", "datasets")).resolve()
+    dataset_tag = dataset_tag_from_config(config_path)
+    return dataset_root / dataset_tag / f"{split}.json"
+
+
 def _require(cfg: Dict, path: str):
     cur = cfg
     for key in path.split("."):

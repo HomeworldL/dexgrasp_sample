@@ -253,6 +253,25 @@ python run_warp_render.py -c configs/run_YCB_liberhand.json -k YCB_002_master_ch
 - 按 object-scale 分给 worker。
 - 每个条目的多视角在同一 worker 内完成。
 
+### 6.4 `eval_dataset.py`
+直接验证数据集 `train.json` 或 `test.json` 里已有 `qpos_grasp` 的仿真成功率，不经过网络。
+
+```bash
+python eval_dataset.py \
+  -c configs/run_YCB_liberhand.json \
+  --split test \
+  --visualize \
+  -v
+```
+
+说明：
+- 每个 obj-scale 直接读取 `grasp.h5` 中的 `qpos_grasp`。
+- 对每条 `qpos_grasp` 先检查 `qpos_init` 与 `qpos_prepared` 是否接触；任一接触即判失败。
+- 若前置检查通过，再调用 `MjHO.sim_under_extforce`。
+- `--visualize` 会打开 MuJoCo viewer，显示前置接触检查与外力稳定性验证过程。
+- 输出每个 obj-scale 和整个 split 的成功数、总数、成功率。
+- 不保存新的抓取结果文件。
+
 ---
 
 ## 7. 可视化脚本与使用方法

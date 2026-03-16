@@ -254,6 +254,25 @@ Parallel semantics:
 - Worker granularity is object-scale entries.
 - One entry renders `n_cols * n_rows` views in one worker.
 
+### 6.4 `eval_dataset.py`
+Evaluate the existing `qpos_grasp` entries already stored in `train.json` or `test.json`, without using a network.
+
+```bash
+python eval_dataset.py \
+  -c configs/run_YCB_liberhand.json \
+  --split test \
+  --visualize \
+  -v
+```
+
+Notes:
+- Each object-scale loads `qpos_grasp` directly from `grasp.h5`.
+- Each `qpos_grasp` is first rejected if `qpos_init` or `qpos_prepared` is already in contact.
+- Only grasps that pass the pre-contact checks are evaluated with `MjHO.sim_under_extforce`.
+- `--visualize` opens the MuJoCo viewer for both the pre-contact checks and the extforce validation.
+- The script reports per-object-scale and whole-split success counts and rates.
+- No new grasp artifact files are written.
+
 ---
 
 ## 7. Visualization Usage

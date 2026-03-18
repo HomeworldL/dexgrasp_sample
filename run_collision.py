@@ -93,6 +93,7 @@ def main() -> None:
     parser.add_argument("--device", type=str, default="cuda:0")
     parser.add_argument("--nconmax", type=int, default=512)
     parser.add_argument("--naconmax", type=int, default=512)
+    parser.add_argument("--ccd-iterations", type=int, default=200)
     parser.add_argument("-v", "--verbose", action="store_true")
     args = parser.parse_args()
 
@@ -142,6 +143,7 @@ def main() -> None:
         device=str(args.device),
         nconmax=int(args.nconmax),
         naconmax=int(args.naconmax),
+        ccd_iterations=int(args.ccd_iterations),
     )
     backend_init_time = time.perf_counter() - ts_backend
     print(

@@ -97,6 +97,7 @@ def main() -> None:
     parser.add_argument("--device", type=str, default="cuda:0")
     parser.add_argument("--nconmax", type=int, default=512)
     parser.add_argument("--naconmax", type=int, default=512)
+    parser.add_argument("--ccd-iterations", type=int, default=200)
     args = parser.parse_args()
 
     cfg = load_config(args.config)
@@ -120,7 +121,6 @@ def main() -> None:
     transforms_np = sample_frames_from_points(cfg, pts, norms)
     pose = build_pose_candidates(cfg, transforms_np)
     qpos_init, qpos_approach, qpos_prepared = make_qpos_triplets(cfg, pose)
-
     max_candidates = min(int(args.max_candidates), int(qpos_prepared.shape[0]))
     if max_candidates <= 0:
         raise RuntimeError("No candidate qpos generated for run_mjw_no_save.")
@@ -147,6 +147,7 @@ def main() -> None:
         device=str(args.device),
         nconmax=int(args.nconmax),
         naconmax=int(args.naconmax),
+        ccd_iterations=int(args.ccd_iterations),
     )
     mjw_valid = MjWarpHO(
         obj_info=obj_info,
@@ -157,6 +158,7 @@ def main() -> None:
         device=str(args.device),
         nconmax=int(args.nconmax),
         naconmax=int(args.naconmax),
+        ccd_iterations=int(args.ccd_iterations),
     )
     backend_init_time = time.perf_counter() - ts_backend
 
@@ -170,9 +172,6 @@ def main() -> None:
     mjw_grasp._set_obj_pts_norms(pts_for_sim, norms_for_sim)
     mjw_valid._set_obj_pts_norms(pts_for_sim, norms_for_sim)
 
-    pending_grasp: list[np.ndarray] = []
-    pending_extforce: list[np.ndarray] = []
-
     num_no_col = 0
     num_grasp_contact_ok = 0
     num_valid = 0
@@ -183,7 +182,8 @@ def main() -> None:
     sim_grasp_time = 0.0
     extforce_time = 0.0
 
-    pbar = tqdm(total=max_candidates, desc=f"sampling-{info['object_scale_key']}", miniters=1)
+    collision_mask = np.zeros((max_candidates,), dtype=bool)
+    pbar = tqdm(total=max_candidates, desc=f"collision-{info['object_scale_key']}", miniters=1)
     for start in range(0, max_candidates, batch_size):
         end = min(start + batch_size, max_candidates)
         valid_count = end - start
@@ -199,39 +199,75 @@ def main() -> None:
         collision_batches += 1
 
         no_col_mask = ~(prepared_result.has_contact | approach_result.has_contact | init_result.has_contact)
+        collision_mask[start:end] = no_col_mask
         num_no_col += int(no_col_mask.sum())
-        for sample in batch_prepared[no_col_mask]:
-            pending_grasp.append(sample.copy())
-
-        while len(pending_grasp) >= batch_size:
-            sim_grasp_batches += 1
-            grasp_input = take_full_batch(pending_grasp, batch_size)
-            ts = time.perf_counter()
-            grasp_result = mjw_grasp.sim_grasp_batch(grasp_input, valid_count=batch_size, **sim_grasp_cfg)
-            sim_grasp_time += time.perf_counter() - ts
-
-            contact_ok_mask = grasp_result.ho_contact_counts >= contact_min_count
-            num_grasp_contact_ok += int(contact_ok_mask.sum())
-            for sample in grasp_result.qpos_grasp[contact_ok_mask]:
-                pending_extforce.append(sample.copy())
-
-            while len(pending_extforce) >= batch_size:
-                extforce_batches += 1
-                extforce_input = take_full_batch(pending_extforce, batch_size)
-                ts = time.perf_counter()
-                extforce_result = mjw_valid.sim_under_extforce_batch(
-                    extforce_input,
-                    valid_count=batch_size,
-                    **extforce_cfg,
-                )
-                extforce_time += time.perf_counter() - ts
-                num_valid += int(extforce_result.is_valid.sum())
 
         pbar.update(valid_count)
     pbar.close()
 
-    dropped_after_collision = len(pending_grasp)
-    dropped_after_grasp = len(pending_extforce)
+    qpos_prepared_no_col = qpos_prepared[collision_mask]
+    no_col_count = int(qpos_prepared_no_col.shape[0])
+    processed_no_col = (no_col_count // batch_size) * batch_size
+    dropped_after_collision = no_col_count - processed_no_col
+
+    grasp_results = []
+    grasp_contact_counts = []
+    if processed_no_col > 0:
+        pbar = tqdm(
+            total=processed_no_col,
+            desc=f"simgrasp-{info['object_scale_key']}",
+            miniters=1,
+        )
+        for start in range(0, processed_no_col, batch_size):
+            end = start + batch_size
+            sim_grasp_batches += 1
+            grasp_input = qpos_prepared_no_col[start:end]
+            ts = time.perf_counter()
+            grasp_result = mjw_grasp.sim_grasp_batch(grasp_input, valid_count=batch_size, **sim_grasp_cfg)
+            sim_grasp_time += time.perf_counter() - ts
+            grasp_results.append(grasp_result.qpos_grasp.copy())
+            grasp_contact_counts.append(grasp_result.ho_contact_counts.copy())
+            pbar.update(batch_size)
+        pbar.close()
+
+    if grasp_results:
+        qpos_grasp_all = np.concatenate(grasp_results, axis=0)
+        ho_contact_counts_all = np.concatenate(grasp_contact_counts, axis=0)
+    else:
+        qpos_grasp_all = np.zeros((0, qpos_prepared.shape[1]), dtype=np.float32)
+        ho_contact_counts_all = np.zeros((0,), dtype=np.int32)
+
+    contact_ok_mask = ho_contact_counts_all >= contact_min_count
+    num_grasp_contact_ok = int(contact_ok_mask.sum())
+    qpos_grasp_contact_ok = qpos_grasp_all[contact_ok_mask]
+
+    contact_ok_count = int(qpos_grasp_contact_ok.shape[0])
+    processed_contact_ok = (contact_ok_count // batch_size) * batch_size
+    dropped_after_grasp = contact_ok_count - processed_contact_ok
+
+    if processed_contact_ok > 0:
+        pbar = tqdm(
+            total=processed_contact_ok,
+            desc=f"extforce-{info['object_scale_key']}",
+            miniters=1,
+        )
+        for start in range(0, processed_contact_ok, batch_size):
+            end = start + batch_size
+            extforce_batches += 1
+            extforce_input = qpos_grasp_contact_ok[start:end]
+            ts = time.perf_counter()
+            extforce_result = mjw_valid.sim_under_extforce_batch(
+                extforce_input,
+                valid_count=batch_size,
+                **extforce_cfg,
+            )
+            extforce_time += time.perf_counter() - ts
+            num_valid += int(extforce_result.is_valid.sum())
+            if num_valid >= 100:
+                break
+            pbar.update(batch_size)
+        pbar.close()
+
     total_time = backend_init_time + collision_time + sim_grasp_time + extforce_time
 
     print(

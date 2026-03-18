@@ -93,6 +93,7 @@ class MjWarpHO:
         naconmax: int = 512,
         njmax: Optional[int] = None,
         njmax_nnz: Optional[int] = None,
+        ccd_iterations: int = 200,
     ):
         if int(nworld) <= 0:
             raise ValueError(f"nworld must be positive, got {nworld}.")
@@ -107,6 +108,7 @@ class MjWarpHO:
         self.nworld = int(nworld)
         self.device = str(device)
         self.target_body_params = dict(target_body_params or {})
+        self.ccd_iterations = int(ccd_iterations)
 
         profiles = _default_hand_profiles()
         self.hand_profile = dict(profiles.get(self.hand_name, {}))
@@ -118,8 +120,12 @@ class MjWarpHO:
         self._add_object(self.obj_info, fixed=self.object_fixed)
         self._set_friction(self.friction_coef)
         self._set_sol()
+        self._set_ccd_iterations()
 
         self.mj_model = self.spec.compile()
+        self.mj_model.opt.ccd_iterations = max(
+            int(self.mj_model.opt.ccd_iterations), self.ccd_iterations
+        )
         self.mjw_model = mjw.put_model(self.mj_model)
         self.cpu_data = mujoco.MjData(self.mj_model)
 
@@ -238,6 +244,13 @@ class MjWarpHO:
         for geom in self.spec.geoms:
             geom.solimp[:3] = solimp[:3]
             geom.solref[:2] = solref[:2]
+
+    def _set_ccd_iterations(self) -> None:
+        if self.ccd_iterations <= 0:
+            raise ValueError(f"ccd_iterations must be positive, got {self.ccd_iterations}.")
+        self.spec.option.ccd_iterations = max(
+            int(self.spec.option.ccd_iterations), self.ccd_iterations
+        )
 
     def _build_default_qpos(self) -> np.ndarray:
         qpos = np.zeros((self.nworld, self.nq), dtype=np.float32)

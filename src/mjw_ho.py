@@ -148,13 +148,16 @@ class MjWarpHO:
         else:
             self.object_root_body_id = self.nbody - 1
         self.object_body_ids = self._collect_descendant_body_ids(self.object_root_body_id)
+        self.nconmax = int(nconmax)
+        self.naconmax = int(naconmax)
+        self.njmax = self._resolve_njmax(njmax=njmax, nconmax=self.nconmax)
 
         self.data = mjw.make_data(
             self.mj_model,
             nworld=self.nworld,
-            nconmax=int(nconmax),
-            naconmax=int(naconmax),
-            njmax=njmax,
+            nconmax=self.nconmax,
+            naconmax=self.naconmax,
+            njmax=self.njmax,
             njmax_nnz=njmax_nnz,
         )
 
@@ -251,6 +254,17 @@ class MjWarpHO:
         self.spec.option.ccd_iterations = max(
             int(self.spec.option.ccd_iterations), self.ccd_iterations
         )
+
+    @staticmethod
+    def _resolve_njmax(njmax: Optional[int], nconmax: int) -> int:
+        if njmax is not None:
+            resolved = int(njmax)
+            if resolved <= 0:
+                raise ValueError(f"njmax must be positive, got {resolved}.")
+            return resolved
+        if int(nconmax) <= 0:
+            raise ValueError(f"nconmax must be positive when njmax is unset, got {nconmax}.")
+        return max(128, int(nconmax) * 4)
 
     def _build_default_qpos(self) -> np.ndarray:
         qpos = np.zeros((self.nworld, self.nq), dtype=np.float32)
@@ -405,12 +419,20 @@ class MjWarpHO:
             raise ValueError(
                 f"body_force_batch must have shape ({valid_count}, 6), got {body_force_batch.shape}."
             )
-        self._sync_host_from_device()
         self._host_xfrc[:] = 0.0
         self._host_xfrc[:valid_count, int(body_id), :] = body_force_batch
         self.data.xfrc_applied = wp.array(
             self._host_xfrc, dtype=wp.spatial_vectorf, device=self.device
         )
+
+    def set_ctrl_batch(self, ctrl_batch: np.ndarray) -> None:
+        ctrl_batch = np.asarray(ctrl_batch, dtype=np.float32)
+        if ctrl_batch.shape != (self.nworld, self.nu):
+            raise ValueError(
+                f"ctrl_batch must have shape ({self.nworld}, {self.nu}), got {ctrl_batch.shape}."
+            )
+        self._host_ctrl = ctrl_batch.copy()
+        self.data.ctrl = wp.array(self._host_ctrl, dtype=wp.float32, device=self.device)
 
     def read_contact_batch(
         self,
@@ -536,7 +558,6 @@ class MjWarpHO:
                 ctrl_batch[:valid_count] = self.qpos_to_ctrl_batch(target_qpos[:valid_count])
             self.step_batch(1, ctrl_batch=ctrl_batch)
 
-        self._sync_host_from_device()
         qpos_grasp = self.get_hand_qpos_batch(valid_count=valid_count)
         ho_contact_counts = self.count_ho_contacts_batch(valid_count=valid_count)
         return GraspBatchResult(qpos_grasp=qpos_grasp, ho_contact_counts=ho_contact_counts)
@@ -587,7 +608,13 @@ class MjWarpHO:
 
         dt = float(self.mj_model.opt.timestep)
         n_steps = max(1, int(duration / max(dt, 1e-8)))
-        n_chunks = max(1, n_steps // max(int(check_step), 1))
+        chunk_size = max(int(check_step), 1)
+        full_chunks, remainder = divmod(n_steps, chunk_size)
+        chunk_steps = [chunk_size] * full_chunks
+        if remainder > 0:
+            chunk_steps.append(remainder)
+        if not chunk_steps:
+            chunk_steps = [chunk_size]
 
         external_force_dirs = np.array(
             [
@@ -610,11 +637,12 @@ class MjWarpHO:
             body_force_batch = np.zeros((valid_count, 6), dtype=np.float32)
             body_force_batch[:, :3] = dir_vec[:3] * float(force_mag)
             self.set_object_force_batch(body_force_batch, valid_count=valid_count)
+            if self.nu > 0:
+                self.set_ctrl_batch(hand_ctrl_batch)
 
             dir_alive = valid_mask.copy()
-            for _ in range(n_chunks):
-                self.step_batch(int(check_step), ctrl_batch=hand_ctrl_batch)
-                self._sync_host_from_device()
+            for steps_this_chunk in chunk_steps:
+                self.step_batch(int(steps_this_chunk))
 
                 has_contact = self.read_contact_batch(valid_count=valid_count).has_contact
                 current_obj_pose = self.get_obj_pose_batch(valid_count=valid_count)

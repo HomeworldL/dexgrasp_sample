@@ -80,23 +80,19 @@ def resolve_object_info(ds: DatasetObjects, obj_id: Optional[int], obj_key: Opti
     return ds.get_obj_info_by_index(resolved_id)
 
 
-def take_full_batch(queue: list[np.ndarray], batch_size: int) -> np.ndarray:
-    batch = np.asarray(queue[:batch_size], dtype=np.float32)
-    del queue[:batch_size]
-    return batch
-
-
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run MJWarp end-to-end grasp validation without saving outputs.")
     parser.add_argument("-c", "--config", type=str, default=DEFAULT_RUN_CONFIG_PATH)
     parser.add_argument("-i", "--obj-id", type=int, default=None)
     parser.add_argument("-k", "--obj-key", type=str, default=None)
     parser.add_argument("--batch-size", type=int, default=8)
+    parser.add_argument("--extforce-batch-size", type=int, default=None)
     parser.add_argument("--max-candidates", type=int, default=512)
     parser.add_argument("--n-points", type=int, default=1024)
     parser.add_argument("--device", type=str, default="cuda:0")
     parser.add_argument("--nconmax", type=int, default=512)
     parser.add_argument("--naconmax", type=int, default=512)
+    parser.add_argument("--njmax", type=int, default=None)
     parser.add_argument("--ccd-iterations", type=int, default=200)
     args = parser.parse_args()
 
@@ -131,6 +127,11 @@ def main() -> None:
     hand_xml_path = os.path.abspath(cfg["hand"]["xml_path"])
     obj_info = {"name": info["object_name"], "xml_abs": info["mjcf_abs"], "scale": float(info["scale"])}
     batch_size = int(args.batch_size)
+    extforce_batch_size = (
+        int(args.extforce_batch_size) if args.extforce_batch_size is not None else batch_size
+    )
+    if extforce_batch_size <= 0:
+        raise ValueError(f"extforce_batch_size must be positive, got {extforce_batch_size}.")
     sim_grasp_cfg = dict(cfg.get("sim_grasp", {}))
     extforce_cfg = dict(cfg.get("extforce", {}))
     sim_grasp_cfg.pop("visualize", None)
@@ -147,6 +148,7 @@ def main() -> None:
         device=str(args.device),
         nconmax=int(args.nconmax),
         naconmax=int(args.naconmax),
+        njmax=int(args.njmax) if args.njmax is not None else None,
         ccd_iterations=int(args.ccd_iterations),
     )
     mjw_valid = MjWarpHO(
@@ -154,10 +156,11 @@ def main() -> None:
         hand_xml_path=hand_xml_path,
         target_body_params=cfg["hand"].get("target_body_params"),
         object_fixed=False,
-        nworld=batch_size,
+        nworld=extforce_batch_size,
         device=str(args.device),
         nconmax=int(args.nconmax),
         naconmax=int(args.naconmax),
+        njmax=int(args.njmax) if args.njmax is not None else None,
         ccd_iterations=int(args.ccd_iterations),
     )
     backend_init_time = time.perf_counter() - ts_backend
@@ -242,7 +245,7 @@ def main() -> None:
     qpos_grasp_contact_ok = qpos_grasp_all[contact_ok_mask]
 
     contact_ok_count = int(qpos_grasp_contact_ok.shape[0])
-    processed_contact_ok = (contact_ok_count // batch_size) * batch_size
+    processed_contact_ok = (contact_ok_count // extforce_batch_size) * extforce_batch_size
     dropped_after_grasp = contact_ok_count - processed_contact_ok
 
     if processed_contact_ok > 0:
@@ -251,21 +254,21 @@ def main() -> None:
             desc=f"extforce-{info['object_scale_key']}",
             miniters=1,
         )
-        for start in range(0, processed_contact_ok, batch_size):
-            end = start + batch_size
+        for start in range(0, processed_contact_ok, extforce_batch_size):
+            end = start + extforce_batch_size
             extforce_batches += 1
             extforce_input = qpos_grasp_contact_ok[start:end]
             ts = time.perf_counter()
             extforce_result = mjw_valid.sim_under_extforce_batch(
                 extforce_input,
-                valid_count=batch_size,
+                valid_count=extforce_batch_size,
                 **extforce_cfg,
             )
             extforce_time += time.perf_counter() - ts
             num_valid += int(extforce_result.is_valid.sum())
             if num_valid >= 100:
                 break
-            pbar.update(batch_size)
+            pbar.update(extforce_batch_size)
         pbar.close()
 
     total_time = backend_init_time + collision_time + sim_grasp_time + extforce_time
@@ -278,6 +281,7 @@ def main() -> None:
     print(
         f"[run_mjw_no_save] batches collision={collision_batches} "
         f"sim_grasp={sim_grasp_batches} extforce={extforce_batches} "
+        f"extforce_batch_size={extforce_batch_size} "
         f"dropped_after_collision={dropped_after_collision} "
         f"dropped_after_grasp={dropped_after_grasp}"
     )

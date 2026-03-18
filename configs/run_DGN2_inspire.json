@@ -21,7 +21,7 @@
     "id": 0
   },
   "sampling": {
-    "n_points": 1024,
+    "n_points": 4096,
     "downsample_for_sim": 512,
     "Nd": 1,
     "rot_n": 8,

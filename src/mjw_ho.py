@@ -169,6 +169,7 @@ class MjWarpHO:
         self._host_qvel = self._default_qvel.copy()
         self._host_ctrl = self._default_ctrl.copy()
         self._host_xfrc = self._default_xfrc.copy()
+        self._reset_mask_host = np.zeros((self.nworld,), dtype=bool)
 
         self.tip_body_ids = []
         self.target_body_weights = np.zeros((0,), dtype=np.float32)
@@ -288,6 +289,26 @@ class MjWarpHO:
         self._host_qvel = np.asarray(self.data.qvel.numpy(), dtype=np.float32)
         self._host_ctrl = np.asarray(self.data.ctrl.numpy(), dtype=np.float32)
         self._host_xfrc = np.asarray(self.data.xfrc_applied.numpy(), dtype=np.float32)
+
+    def _copy_world_row(
+        self,
+        dest: wp.array,
+        row_value: np.ndarray,
+        row_idx: int,
+        row_width: int,
+        dtype,
+    ) -> None:
+        src = wp.array(np.ascontiguousarray(row_value), dtype=dtype, device=self.device)
+        wp.copy(dest, src, dest_offset=int(row_idx) * int(row_width), count=int(row_width))
+
+    @staticmethod
+    def _normalize_world_ids(world_ids: np.ndarray | Sequence[int]) -> np.ndarray:
+        world_ids = np.asarray(world_ids, dtype=np.int32).reshape(-1)
+        if world_ids.size == 0:
+            return world_ids
+        if np.any(world_ids < 0):
+            raise ValueError(f"world_ids must be non-negative, got {world_ids}.")
+        return world_ids
 
     def reset_batch(self) -> None:
         self._host_qpos = self._default_qpos.copy()
@@ -433,6 +454,178 @@ class MjWarpHO:
             )
         self._host_ctrl = ctrl_batch.copy()
         self.data.ctrl = wp.array(self._host_ctrl, dtype=wp.float32, device=self.device)
+
+    def reset_worlds(self, world_ids: np.ndarray | Sequence[int], do_forward: bool = False) -> None:
+        world_ids = self._normalize_world_ids(world_ids)
+        if world_ids.size == 0:
+            return
+        if np.any(world_ids >= self.nworld):
+            raise ValueError(f"world_ids must be < {self.nworld}, got {world_ids}.")
+        self._reset_mask_host.fill(False)
+        self._reset_mask_host[world_ids] = True
+        reset_mask = wp.array(self._reset_mask_host, dtype=bool, device=self.device)
+        mjw.reset_data(self.mjw_model, self.data, reset=reset_mask)
+        if do_forward:
+            self.forward_batch()
+
+    def load_hand_qpos_to_worlds(
+        self,
+        world_ids: np.ndarray | Sequence[int],
+        hand_qpos_batch: np.ndarray,
+        ctrl_batch: Optional[np.ndarray] = None,
+        do_forward: bool = False,
+    ) -> None:
+        world_ids = self._normalize_world_ids(world_ids)
+        hand_qpos_batch = np.asarray(hand_qpos_batch, dtype=np.float32)
+        if hand_qpos_batch.ndim == 1:
+            hand_qpos_batch = hand_qpos_batch[None, :]
+        if hand_qpos_batch.shape != (world_ids.size, self.nq_hand):
+            raise ValueError(
+                f"hand_qpos_batch must have shape ({world_ids.size}, {self.nq_hand}), "
+                f"got {hand_qpos_batch.shape}."
+            )
+        if ctrl_batch is None:
+            if self.nu > 0:
+                ctrl_batch = self.qpos_to_ctrl_batch(hand_qpos_batch)
+            else:
+                ctrl_batch = np.zeros((world_ids.size, 0), dtype=np.float32)
+        ctrl_batch = np.asarray(ctrl_batch, dtype=np.float32)
+        if ctrl_batch.shape != (world_ids.size, self.nu):
+            raise ValueError(
+                f"ctrl_batch must have shape ({world_ids.size}, {self.nu}), got {ctrl_batch.shape}."
+            )
+
+        for local_idx, world_id in enumerate(world_ids):
+            qpos_row = self._default_qpos[int(world_id)].copy()
+            qvel_row = self._default_qvel[int(world_id)].copy()
+            ctrl_row = self._default_ctrl[int(world_id)].copy()
+            xfrc_row = self._default_xfrc[int(world_id)].copy()
+
+            qpos_row[: self.nq_hand] = hand_qpos_batch[local_idx]
+            ctrl_row[:] = ctrl_batch[local_idx]
+
+            self._copy_world_row(self.data.qpos, qpos_row, int(world_id), self.nq, wp.float32)
+            self._copy_world_row(self.data.qvel, qvel_row, int(world_id), self.nv, wp.float32)
+            self._copy_world_row(self.data.ctrl, ctrl_row, int(world_id), self.nu, wp.float32)
+            self._copy_world_row(
+                self.data.xfrc_applied, xfrc_row, int(world_id), self.nbody, wp.spatial_vectorf
+            )
+
+        if do_forward:
+            self.forward_batch()
+
+    def set_object_force_to_worlds(
+        self,
+        world_ids: np.ndarray | Sequence[int],
+        body_force_batch: np.ndarray,
+        body_id: Optional[int] = None,
+    ) -> None:
+        world_ids = self._normalize_world_ids(world_ids)
+        if body_id is None:
+            body_id = self.object_root_body_id
+        body_force_batch = np.asarray(body_force_batch, dtype=np.float32)
+        if body_force_batch.shape != (world_ids.size, 6):
+            raise ValueError(
+                f"body_force_batch must have shape ({world_ids.size}, 6), got {body_force_batch.shape}."
+            )
+        for local_idx, world_id in enumerate(world_ids):
+            xfrc_row = self._default_xfrc[int(world_id)].copy()
+            xfrc_row[int(body_id), :] = body_force_batch[local_idx]
+            self._copy_world_row(
+                self.data.xfrc_applied, xfrc_row, int(world_id), self.nbody, wp.spatial_vectorf
+            )
+
+    def get_obj_pose_for_worlds(self, world_ids: np.ndarray | Sequence[int]) -> np.ndarray:
+        world_ids = self._normalize_world_ids(world_ids)
+        if world_ids.size == 0:
+            return np.zeros((0, 7), dtype=np.float32)
+        if self.object_fixed:
+            pose = np.zeros((world_ids.size, 7), dtype=np.float32)
+            pose[:, 3] = 1.0
+            return pose
+        return np.asarray(self.data.qpos.numpy()[world_ids, -7:], dtype=np.float32)
+
+    def read_contact_mask_for_worlds(
+        self,
+        world_ids: np.ndarray | Sequence[int],
+        dist_threshold: float = 0.0,
+    ) -> np.ndarray:
+        world_ids = self._normalize_world_ids(world_ids)
+        if world_ids.size == 0:
+            return np.zeros((0,), dtype=bool)
+        active_contact_count = int(np.asarray(self.data.nacon.numpy()).reshape(-1)[0])
+        if active_contact_count <= 0:
+            return np.zeros((world_ids.size,), dtype=bool)
+
+        contact_world_ids = np.asarray(
+            self.data.contact.worldid.numpy()[:active_contact_count], dtype=np.int32
+        )
+        distances = np.asarray(self.data.contact.dist.numpy()[:active_contact_count], dtype=np.float32)
+        valid = distances <= float(dist_threshold)
+        contact_world_ids = contact_world_ids[valid]
+        if contact_world_ids.size == 0:
+            return np.zeros((world_ids.size,), dtype=bool)
+        contact_set = set(np.unique(contact_world_ids).tolist())
+        return np.asarray([int(world_id) in contact_set for world_id in world_ids], dtype=bool)
+
+    def get_qpos_for_worlds(self, world_ids: np.ndarray | Sequence[int]) -> np.ndarray:
+        world_ids = self._normalize_world_ids(world_ids)
+        if world_ids.size == 0:
+            return np.zeros((0, self.nq), dtype=np.float32)
+        return np.asarray(self.data.qpos.numpy()[world_ids], dtype=np.float32)
+
+    def get_qvel_for_worlds(self, world_ids: np.ndarray | Sequence[int]) -> np.ndarray:
+        world_ids = self._normalize_world_ids(world_ids)
+        if world_ids.size == 0:
+            return np.zeros((0, self.nv), dtype=np.float32)
+        return np.asarray(self.data.qvel.numpy()[world_ids], dtype=np.float32)
+
+    def get_ctrl_for_worlds(self, world_ids: np.ndarray | Sequence[int]) -> np.ndarray:
+        world_ids = self._normalize_world_ids(world_ids)
+        if world_ids.size == 0:
+            return np.zeros((0, self.nu), dtype=np.float32)
+        return np.asarray(self.data.ctrl.numpy()[world_ids], dtype=np.float32)
+
+    def load_state_to_worlds(
+        self,
+        world_ids: np.ndarray | Sequence[int],
+        qpos_batch: np.ndarray,
+        qvel_batch: Optional[np.ndarray] = None,
+        ctrl_batch: Optional[np.ndarray] = None,
+        do_forward: bool = False,
+    ) -> None:
+        world_ids = self._normalize_world_ids(world_ids)
+        qpos_batch = np.asarray(qpos_batch, dtype=np.float32)
+        if qpos_batch.shape != (world_ids.size, self.nq):
+            raise ValueError(
+                f"qpos_batch must have shape ({world_ids.size}, {self.nq}), got {qpos_batch.shape}."
+            )
+        if qvel_batch is None:
+            qvel_batch = np.zeros((world_ids.size, self.nv), dtype=np.float32)
+        qvel_batch = np.asarray(qvel_batch, dtype=np.float32)
+        if qvel_batch.shape != (world_ids.size, self.nv):
+            raise ValueError(
+                f"qvel_batch must have shape ({world_ids.size}, {self.nv}), got {qvel_batch.shape}."
+            )
+        if ctrl_batch is None:
+            ctrl_batch = np.zeros((world_ids.size, self.nu), dtype=np.float32)
+        ctrl_batch = np.asarray(ctrl_batch, dtype=np.float32)
+        if ctrl_batch.shape != (world_ids.size, self.nu):
+            raise ValueError(
+                f"ctrl_batch must have shape ({world_ids.size}, {self.nu}), got {ctrl_batch.shape}."
+            )
+
+        for local_idx, world_id in enumerate(world_ids):
+            xfrc_row = self._default_xfrc[int(world_id)].copy()
+            self._copy_world_row(self.data.qpos, qpos_batch[local_idx], int(world_id), self.nq, wp.float32)
+            self._copy_world_row(self.data.qvel, qvel_batch[local_idx], int(world_id), self.nv, wp.float32)
+            self._copy_world_row(self.data.ctrl, ctrl_batch[local_idx], int(world_id), self.nu, wp.float32)
+            self._copy_world_row(
+                self.data.xfrc_applied, xfrc_row, int(world_id), self.nbody, wp.spatial_vectorf
+            )
+
+        if do_forward:
+            self.forward_batch()
 
     def read_contact_batch(
         self,

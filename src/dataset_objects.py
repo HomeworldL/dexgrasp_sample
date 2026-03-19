@@ -10,6 +10,7 @@ Design notes
 from __future__ import annotations
 
 import json
+import time
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Union
 
@@ -119,6 +120,7 @@ class DatasetObjects:
         gid = 0
 
         for dataset_name in self.dataset_names:
+            dataset_start = time.perf_counter()
             dataset_dir = self.root / dataset_name
             if not dataset_dir.is_dir():
                 raise FileNotFoundError(f"Dataset directory not found: {dataset_dir}")
@@ -133,12 +135,19 @@ class DatasetObjects:
                 raise ValueError(f"Invalid manifest objects list: {manifest_path}")
 
             default_mass = float(manifest.get("summary", {}).get("default_mass_kg", 0.1))
+            expected_entries = len(objects) * len(self.scales)
+            print(
+                f"[DatasetObjects] indexing dataset={dataset_name} "
+                f"objects={len(objects)} scales={len(self.scales)} "
+                f"expected_entries<={expected_entries}"
+            )
 
             obj_iter = objects
             if self.verbose:
                 obj_iter = tqdm(objects, desc=f"dataset:{dataset_name}", leave=False)
 
-            for obj in obj_iter:
+            built_before = gid
+            for obj_idx, obj in enumerate(obj_iter, start=1):
                 if not isinstance(obj, dict):
                     continue
                 if str(obj.get("process_status", "")).lower() != "success":
@@ -207,6 +216,23 @@ class DatasetObjects:
                     self.items.append(info)
                     self._key_to_index[f"{object_name}__{scale_key}"] = gid
                     gid += 1
+
+                if (
+                    not self.verbose
+                    and obj_idx % 200 == 0
+                    and len(objects) >= 500
+                ):
+                    elapsed = time.perf_counter() - dataset_start
+                    print(
+                        f"[DatasetObjects] dataset={dataset_name} progress={obj_idx}/{len(objects)} "
+                        f"indexed={gid - built_before} elapsed={elapsed:.1f}s"
+                    )
+
+            elapsed = time.perf_counter() - dataset_start
+            print(
+                f"[DatasetObjects] done dataset={dataset_name} "
+                f"indexed={gid - built_before} elapsed={elapsed:.1f}s"
+            )
 
     def _existing_scale_assets(self, object_name: str, scale: float) -> Optional[Dict]:
         scale_tag = self._builder.scale_tag(float(scale))

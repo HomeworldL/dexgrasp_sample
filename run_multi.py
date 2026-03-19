@@ -123,11 +123,15 @@ def main():
     args = parse_args()
     print(f"Time Stamp: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}")
 
-    print("Discovering dataset object-scale entries...")
+    print(
+        "Discovering dataset object-scale entries... "
+        "(manifest scan + per-scale existing-asset checks)"
+    )
     cfg = load_config(args.config)
     dataset_tag = dataset_tag_from_config(args.config)
     logs_dir = build_logs_dir(args.script, dataset_tag)
     logs_dir.mkdir(parents=True, exist_ok=True)
+    discover_start = time.perf_counter()
     ds = DatasetObjects(
         cfg["dataset"]["root"],
         dataset_names=list(cfg["dataset"].get("include", [])),
@@ -135,6 +139,11 @@ def main():
         dataset_tag=dataset_tag,
         dataset_output_root=cfg.get("output", {}).get("dataset_root", "datasets"),
         verbose=bool(args.verbose),
+    )
+    discover_elapsed = time.perf_counter() - discover_start
+    print(
+        f"Discovery finished: entries={len(ds.get_entries())} "
+        f"elapsed={discover_elapsed:.1f}s"
     )
     entries = sorted(ds.get_entries(), key=lambda it: int(it["global_id"]))
     if not entries:

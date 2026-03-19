@@ -15,6 +15,7 @@ Mainline focus is offline grasp configuration generation.
   - `方案`
   - `调研`
 - Keep the date first, then category, then a short summary title.
+- `docs/` is reference-only in this repo workflow and should not be uploaded to git; keep docs ignored and local unless the user explicitly requests otherwise.
 - Exported scan/data artifacts (for example `github_dexterous_grasp_scan.*`) do not need to follow this rule.
 
 ## TODO Lifecycle (Mandatory)
@@ -37,6 +38,14 @@ Mainline focus is offline grasp configuration generation.
 ## Architecture Notes
 - Main data flow: object mesh -> surface points/normals -> grasp frame sampling -> MuJoCo collision/stability filtering -> HDF5 grasp states.
 - Post-sampling vision flow: after grasp sampling for each object-scale, run `run_warp_render.py` to render multi-view partial point clouds from scaled `coacd.obj`.
+
+## MJWarp Sampling Notes
+- For `run_mjw.py`, keep `output.max_cap=100` and cap extforce wall-clock time with `output.max_time_sec` (current default: `90s`).
+- If the goal is to collect about `100` valid grasps per object-scale quickly, prefer `batch_size` near `max_cap`, typically `128`, `256`, or `512`.
+- Do not default to overly large `batch_size` such as `4096` for small-cap collection: one MJWarp step becomes too heavy and the extforce stage slows down noticeably.
+- `batch_size=4096` is more appropriate for large-scale grasp harvesting, not for quickly reaching `max_cap=100`.
+- Because reducing `batch_size` also reduces total sampled candidates flowing into later stages, `sampling.n_points` should also be moderated.
+- For the current `max_cap=100` target, `sampling.n_points=1024` is the recommended default; it avoids excessive waiting in collision filtering and `sim_grasp` while still producing enough candidates.
 
 ## Dataset Interface
 - Preferred dataset root is `assets/objects/processed`.

@@ -150,6 +150,7 @@
   "output": {
     "base_dir": "outputs",
     "max_cap": 100,
+    "max_time_sec": 90.0,
     "h5_name": "grasp_data.h5",
     "npy_name": "grasp_data.npy"
   },

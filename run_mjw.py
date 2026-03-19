@@ -144,6 +144,65 @@ def build_valid_backend(
     return backend
 
 
+def shrink_tail_pool(
+    active_world_ids: np.ndarray,
+    mjw_valid_backend: MjWarpHO,
+    world_candidate_ids: np.ndarray,
+    world_dir_idx: np.ndarray,
+    world_chunk_idx: np.ndarray,
+    world_initial_pose: np.ndarray,
+    world_pos_delta: np.ndarray,
+    world_angle_delta: np.ndarray,
+    obj_info: Dict,
+    hand_xml_path: str,
+    target_body_params: Optional[Dict],
+    device: str,
+    nconmax: int,
+    naconmax: int,
+    njmax: Optional[int],
+    ccd_iterations: int,
+    pts_for_sim: np.ndarray,
+    norms_for_sim: np.ndarray,
+) -> tuple[MjWarpHO, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, int]:
+    new_pool_size = int(active_world_ids.size)
+    next_backend = build_valid_backend(
+        obj_info=obj_info,
+        hand_xml_path=hand_xml_path,
+        target_body_params=target_body_params,
+        device=device,
+        nworld=new_pool_size,
+        nconmax=nconmax,
+        naconmax=naconmax,
+        njmax=njmax,
+        ccd_iterations=ccd_iterations,
+        pts_for_sim=pts_for_sim,
+        norms_for_sim=norms_for_sim,
+    )
+
+    next_world_ids = np.arange(new_pool_size, dtype=np.int32)
+    next_qpos = mjw_valid_backend.get_qpos_for_worlds(active_world_ids)
+    next_qvel = mjw_valid_backend.get_qvel_for_worlds(active_world_ids)
+    next_ctrl = mjw_valid_backend.get_ctrl_for_worlds(active_world_ids)
+    next_backend.load_state_to_worlds(
+        next_world_ids,
+        qpos_batch=next_qpos,
+        qvel_batch=next_qvel,
+        ctrl_batch=next_ctrl,
+        do_forward=True,
+    )
+
+    return (
+        next_backend,
+        world_candidate_ids[active_world_ids].copy(),
+        world_dir_idx[active_world_ids].copy(),
+        world_chunk_idx[active_world_ids].copy(),
+        world_initial_pose[active_world_ids].copy(),
+        world_pos_delta[active_world_ids].copy(),
+        world_angle_delta[active_world_ids].copy(),
+        new_pool_size,
+    )
+
+
 def run_sampling(
     cfg: Dict,
     object_scale_key: str,
@@ -222,6 +281,7 @@ def run_sampling(
     collision_batches = 0
     sim_grasp_batches = 0
     extforce_batches = 0
+    extforce_shrinks = 0
     collision_time = 0.0
     sim_grasp_time = 0.0
     extforce_time = 0.0
@@ -439,6 +499,44 @@ def run_sampling(
             )
             while np.any(world_active):
                 active_world_ids = np.flatnonzero(world_active).astype(np.int32)
+                if (
+                    next_candidate >= contact_ok_count
+                    and active_world_ids.size > 0
+                    and active_world_ids.size <= max(1, current_pool_size // 2)
+                ):
+                    (
+                        mjw_valid,
+                        world_candidate_ids,
+                        world_dir_idx,
+                        world_chunk_idx,
+                        world_initial_pose,
+                        world_pos_delta,
+                        world_angle_delta,
+                        current_pool_size,
+                    ) = shrink_tail_pool(
+                        active_world_ids=active_world_ids,
+                        mjw_valid_backend=mjw_valid,
+                        world_candidate_ids=world_candidate_ids,
+                        world_dir_idx=world_dir_idx,
+                        world_chunk_idx=world_chunk_idx,
+                        world_initial_pose=world_initial_pose,
+                        world_pos_delta=world_pos_delta,
+                        world_angle_delta=world_angle_delta,
+                        obj_info=obj_info,
+                        hand_xml_path=hand_xml_path,
+                        target_body_params=target_body_params,
+                        device=device,
+                        nconmax=nconmax,
+                        naconmax=naconmax,
+                        njmax=njmax,
+                        ccd_iterations=ccd_iterations,
+                        pts_for_sim=pts_for_sim,
+                        norms_for_sim=norms_for_sim,
+                    )
+                    extforce_shrinks += 1
+                    world_active = np.ones((current_pool_size,), dtype=bool)
+                    active_world_ids = np.arange(current_pool_size, dtype=np.int32)
+
                 active_force = np.zeros((active_world_ids.size, 6), dtype=np.float32)
                 active_force[:, :3] = force_dirs[world_dir_idx[active_world_ids], :3] * force_mag
                 mjw_valid.set_object_force_to_worlds(active_world_ids, active_force)
@@ -539,7 +637,7 @@ def run_sampling(
         print(
             f"[{object_scale_key}] batches collision={collision_batches} "
             f"sim_grasp={sim_grasp_batches} extforce_loops={extforce_batches} "
-            f"contact_ok={num_grasp_contact_ok}"
+            f"extforce_shrinks={extforce_shrinks}"
         )
         print(
             f"[{object_scale_key}] time backend_init={backend_init_time:.3f}s "

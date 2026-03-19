@@ -8,7 +8,7 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
-from typing import Dict, Optional, Tuple
+from typing import Dict
 
 from src.dataset_objects import DatasetObjects
 from utils.utils_file import DEFAULT_RUN_CONFIG_PATH, dataset_tag_from_config, load_config
@@ -33,74 +33,10 @@ def parse_args():
     p.add_argument("--batch-size", type=int, default=4096)
     p.add_argument("--device", type=str, default="cuda:0")
     p.add_argument("--nconmax", type=int, default=32)
-    p.add_argument("--naconmax", type=int, default=131072)
+    p.add_argument("--naconmax", type=int, default=85000)
     p.add_argument("--njmax", type=int, default=None)
     p.add_argument("--ccd-iterations", type=int, default=200)
     return p.parse_args()
-
-
-def _parse_cuda_device_index(device: str) -> Optional[int]:
-    if not device.startswith("cuda"):
-        return None
-    if ":" not in device:
-        return 0
-    _, suffix = device.split(":", 1)
-    if not suffix.isdigit():
-        raise ValueError(f"Unsupported CUDA device format: {device}")
-    return int(suffix)
-
-
-def _query_gpu_memory_mib(device: str) -> Optional[Tuple[int, int]]:
-    device_index = _parse_cuda_device_index(device)
-    if device_index is None:
-        return None
-    try:
-        out = subprocess.check_output(
-            [
-                "nvidia-smi",
-                "--id",
-                str(device_index),
-                "--query-gpu=memory.total,memory.used",
-                "--format=csv,noheader,nounits",
-            ],
-            text=True,
-        ).strip()
-    except Exception:
-        return None
-    if not out:
-        return None
-    total_str, used_str = [item.strip() for item in out.split(",", 1)]
-    return int(total_str), int(used_str)
-
-
-def _estimate_worker_memory_mib(batch_size: int, naconmax: int) -> int:
-    if batch_size >= 4096 or naconmax >= 131072:
-        return 6000
-    if batch_size >= 2048 or naconmax >= 65536:
-        return 4500
-    if batch_size >= 1024 or naconmax >= 32768:
-        return 3000
-    return 2000
-
-
-def _resolve_effective_parallel(args: argparse.Namespace) -> int:
-    memory = _query_gpu_memory_mib(args.device)
-    if memory is None:
-        return int(args.max_parallel)
-    total_mib, used_mib = memory
-    free_mib = max(0, total_mib - used_mib)
-    reserve_mib = max(2048, int(total_mib * 0.15))
-    worker_mib = _estimate_worker_memory_mib(int(args.batch_size), int(args.naconmax))
-    usable_mib = max(0, free_mib - reserve_mib)
-    safe_parallel = max(1, usable_mib // worker_mib) if worker_mib > 0 else 1
-    effective_parallel = max(1, min(int(args.max_parallel), int(safe_parallel)))
-    if effective_parallel < int(args.max_parallel):
-        print(
-            f"Auto-limiting MJWarp parallelism on {args.device}: "
-            f"requested={args.max_parallel} effective={effective_parallel} "
-            f"(free={free_mib} MiB reserve={reserve_mib} MiB est_per_worker={worker_mib} MiB)"
-        )
-    return effective_parallel
 
 
 def safe_filename(name: str) -> str:
@@ -223,10 +159,9 @@ def main():
             print("所有 object-scale 条目都已存在 grasp.h5 和 grasp.npy，跳过执行。")
             return
 
-    effective_parallel = _resolve_effective_parallel(args)
     print(
         f"Found {len(entries)} object-scale entries to run. "
-        f"Running with max parallel = {effective_parallel}."
+        f"Running with max parallel = {args.max_parallel}."
     )
     if args.verbose:
         for i, entry in enumerate(entries):
@@ -234,7 +169,7 @@ def main():
 
     futures = []
     try:
-        with ThreadPoolExecutor(max_workers=effective_parallel) as executor:
+        with ThreadPoolExecutor(max_workers=args.max_parallel) as executor:
             for entry in entries:
                 futures.append(
                     executor.submit(

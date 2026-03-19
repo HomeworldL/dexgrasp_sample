@@ -11,7 +11,14 @@ from pathlib import Path
 from typing import Dict
 
 from src.dataset_objects import DatasetObjects
-from utils.utils_file import DEFAULT_RUN_CONFIG_PATH, dataset_tag_from_config, load_config
+from utils.utils_file import (
+    DEFAULT_RUN_CONFIG_PATH,
+    build_logs_dir,
+    dataset_tag_from_config,
+    load_config,
+    safe_filename,
+)
+from utils.utils_sample import grasp_outputs_exist
 
 _RUN_PROCS = []
 _RUN_PROCS_LOCK = threading.Lock()
@@ -29,7 +36,7 @@ def parse_args():
         help="运行配置 JSON（默认 configs/run_YCB_liberhand.json）",
     )
     p.add_argument("--force", action="store_true", help="即使已有 grasp.h5 和 grasp.npy 也强制重跑")
-    p.add_argument("-v", "--verbose", action="store_true", help="打印详细日志并透传给 run_mjw.py")
+    p.add_argument("-v", "--verbose", action="store_true", help="仅透传详细日志给子进程 run_mjw.py")
     p.add_argument("--batch-size", type=int, default=512)
     p.add_argument("--device", type=str, default="cuda:0")
     p.add_argument("--nconmax", type=int, default=32)
@@ -37,16 +44,6 @@ def parse_args():
     p.add_argument("--njmax", type=int, default=None)
     p.add_argument("--ccd-iterations", type=int, default=200)
     return p.parse_args()
-
-
-def safe_filename(name: str) -> str:
-    return "".join(c if c.isalnum() or c in "-_.()" else "_" for c in name)
-
-
-def _grasp_outputs_exist(entry: Dict) -> bool:
-    out_dir = Path(str(entry["output_dir_abs"]))
-    return (out_dir / "grasp.h5").exists() and (out_dir / "grasp.npy").exists()
-
 
 def run_one(
     entry: Dict,
@@ -70,10 +67,6 @@ def run_one(
         str(entry["mjcf_abs"]),
         "--output-dir",
         str(entry["output_dir_abs"]),
-        "--scale",
-        str(float(entry.get("scale"))),
-        "--object-id",
-        str(entry.get("object_id", entry.get("object_name", ""))),
         "--batch-size",
         str(int(args.batch_size)),
         "--device",
@@ -128,21 +121,20 @@ def terminate_all_running():
 
 def main():
     args = parse_args()
-    logs_dir = Path("logs")
-    logs_dir.mkdir(parents=True, exist_ok=True)
-
     print(f"Time Stamp: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}")
     print("Discovering dataset object-scale entries...")
 
     cfg = load_config(args.config)
     dataset_tag = dataset_tag_from_config(args.config)
+    logs_dir = build_logs_dir(args.script, dataset_tag)
+    logs_dir.mkdir(parents=True, exist_ok=True)
     ds = DatasetObjects(
         cfg["dataset"]["root"],
         dataset_names=list(cfg["dataset"].get("include", [])),
         scales=list(cfg["dataset"].get("scales", [])),
         dataset_tag=dataset_tag,
         dataset_output_root=cfg.get("output", {}).get("dataset_root", "datasets"),
-        verbose=bool(args.verbose),
+        verbose=bool(cfg["dataset"].get("verbose", False)),
     )
     entries = sorted(ds.get_entries(), key=lambda it: int(it["global_id"]))
     if not entries:
@@ -151,7 +143,7 @@ def main():
 
     if not args.force:
         total_entries = len(entries)
-        entries = [it for it in entries if not _grasp_outputs_exist(it)]
+        entries = [it for it in entries if not grasp_outputs_exist(str(it["output_dir_abs"]))]
         skipped = total_entries - len(entries)
         if skipped > 0:
             print(f"Pre-skip existing results: {skipped}/{total_entries} entries already have grasp.h5 and grasp.npy.")
@@ -163,9 +155,9 @@ def main():
         f"Found {len(entries)} object-scale entries to run. "
         f"Running with max parallel = {args.max_parallel}."
     )
-    if args.verbose:
-        for i, entry in enumerate(entries):
-            print(f"  [{i}] {entry['object_scale_key']}")
+    print(f"Logs directory: {logs_dir}")
+    for i, entry in enumerate(entries):
+        print(f"  [{i}] {entry['object_scale_key']}")
 
     futures = []
     try:

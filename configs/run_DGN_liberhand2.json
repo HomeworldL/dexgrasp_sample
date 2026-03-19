@@ -14,41 +14,6 @@
     ],
     "verbose": false
   },
-  "object": {
-    "id": 0
-  },
-  "sampling": {
-    "n_points": 1024,
-    "downsample_for_sim": 512,
-    "Nd": 1,
-    "rot_n": 8,
-    "d_min": 0.02,
-    "d_max": 0.06,
-    "max_points": null
-  },
-  "transform": {
-    "base_rot_grasp_to_palm": [
-      [
-        0,
-        0,
-        1
-      ],
-      [
-        0,
-        -1,
-        0
-      ],
-      [
-        1,
-        0,
-        0
-      ]
-    ],
-    "extra_euler": {
-      "axis": "y",
-      "degrees": 45.0
-    }
-  },
   "hand": {
     "xml_path": "./assets/hands/liberhand2/liberhand2_right.xml",
     "prepared_joints": [
@@ -141,16 +106,46 @@
         0.3,
         0.2
       ]
+    },
+    "transform": {
+      "base_rot_grasp_to_palm": [
+        [
+          0,
+          0,
+          1
+        ],
+        [
+          0,
+          -1,
+          0
+        ],
+        [
+          1,
+          0,
+          0
+        ]
+      ],
+      "extra_euler": {
+        "axis": "y",
+        "degrees": 45.0
+      }
     }
   },
-  "validation": {
-    "contact_min_count": 4
+  "sampling": {
+    "n_points": 1024,
+    "downsample_for_sim": 512,
+    "Nd": 1,
+    "rot_n": 8,
+    "d_min": 0.02,
+    "d_max": 0.06,
+    "max_points": null
   },
   "sim_grasp": {
     "Mp": 20,
     "steps": 40,
     "speed_gain": 1.5,
-    "max_tip_speed": 0.05
+    "max_tip_speed": 0.05,
+    "contact_min_count": 4
   },
   "extforce": {
     "duration": 0.5,
@@ -161,7 +156,6 @@
     "check_step": 50
   },
   "output": {
-    "base_dir": "outputs",
     "max_cap": 100,
     "max_time_sec": 90.0,
     "h5_name": "grasp_data.h5",

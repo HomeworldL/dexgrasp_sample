@@ -171,6 +171,10 @@ class DatasetObjects:
 
                 scale_assets = {}
                 for scale in self.scales:
+                    existing_rec = self._existing_scale_assets(object_name=object_name, scale=float(scale))
+                    if existing_rec is not None:
+                        scale_assets[self._builder.scale_tag(float(scale))] = existing_rec
+                        continue
                     try:
                         rec = self._builder.build_scale_assets(
                             config_stem=self.dataset_tag,
@@ -203,6 +207,29 @@ class DatasetObjects:
                     self.items.append(info)
                     self._key_to_index[f"{object_name}__{scale_key}"] = gid
                     gid += 1
+
+    def _existing_scale_assets(self, object_name: str, scale: float) -> Optional[Dict]:
+        scale_tag = self._builder.scale_tag(float(scale))
+        scale_dir = self._builder.base_output_dir / self.dataset_tag / object_name / scale_tag
+        convex_dir = scale_dir / "convex_parts"
+        coacd_path = scale_dir / "coacd.obj"
+        xml_path = scale_dir / "object.xml"
+
+        if (not xml_path.exists()) or (not coacd_path.exists()) or (not convex_dir.is_dir()):
+            return None
+
+        convex_parts_abs = [str(p.resolve()) for p in sorted(convex_dir.glob("*.obj")) if p.is_file()]
+        if not convex_parts_abs:
+            return None
+
+        return {
+            "object_name": object_name,
+            "scale": float(scale),
+            "scale_tag": scale_tag,
+            "coacd_abs": str(coacd_path.resolve()),
+            "convex_parts_abs": convex_parts_abs,
+            "xml_abs": str(xml_path.resolve()),
+        }
 
     def load_mesh(self, mesh_or_path: Union[str, trimesh.Trimesh]) -> trimesh.Trimesh:
         if isinstance(mesh_or_path, trimesh.Trimesh):

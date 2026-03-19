@@ -100,20 +100,20 @@ def test_evaluate_dataset_manifest_counts_successes(tmp_path: Path, monkeypatch)
                 "seed": 0,
                 "dataset": {"include": ["YCB"], "root": "unused", "verbose": False, "scales": [0.08]},
                 "object": {"id": 0},
-                "sampling": {"n_points": 1, "downsample_for_sim": 1, "Nd": 1, "rot_n": 1, "d_min": 0.01, "d_max": 0.02},
-                "transform": {
-                    "base_rot_grasp_to_palm": [[1, 0, 0], [0, 1, 0], [0, 0, 1]],
-                    "extra_euler": {"axis": "x", "degrees": 0.0},
-                },
                 "hand": {
                     "xml_path": str(mjcf_path),
                     "prepared_joints": [0.0] * 20,
                     "approach_joints": [0.0] * 20,
                     "shift_local": [0.0, 0.0, -0.02],
                     "target_body_params": {"finger": [1.0, 1.0]},
+                    "transform": {
+                        "base_rot_grasp_to_palm": [[1, 0, 0], [0, 1, 0], [0, 0, 1]],
+                        "extra_euler": {"axis": "x", "degrees": 0.0},
+                    },
                 },
-                "validation": {"contact_min_count": 4},
-                "output": {"base_dir": "outputs", "max_cap": 10, "h5_name": "grasp.h5", "npy_name": "grasp.npy", "dataset_root": str(tmp_path / "datasets")},
+                "sampling": {"n_points": 1, "downsample_for_sim": 1, "Nd": 1, "rot_n": 1, "d_min": 0.01, "d_max": 0.02},
+                "sim_grasp": {"contact_min_count": 4},
+                "output": {"max_cap": 10, "max_time_sec": 90.0, "h5_name": "grasp.h5", "npy_name": "grasp.npy", "dataset_root": str(tmp_path / "datasets")},
                 "extforce": {"duration": 0.5, "trans_thresh": 0.05, "angle_thresh": 10.0, "grip_delta": 0.05, "force_mag": 1.0, "check_step": 50},
             }
         ),

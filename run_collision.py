@@ -15,8 +15,9 @@ from utils.utils_seed import set_seed
 
 
 def compose_rot_grasp_to_palm(cfg: Dict) -> np.ndarray:
-    base = np.asarray(cfg["transform"]["base_rot_grasp_to_palm"], dtype=float)
-    extra = cfg["transform"]["extra_euler"]
+    transform_cfg = cfg["hand"]["transform"]
+    base = np.asarray(transform_cfg["base_rot_grasp_to_palm"], dtype=float)
+    extra = transform_cfg["extra_euler"]
     extra_rot = R.from_euler(extra["axis"], float(extra["degrees"]), degrees=True).as_matrix()
     return (base @ extra_rot).T
 
@@ -73,11 +74,12 @@ def make_qpos_triplets(cfg: Dict, pose: np.ndarray):
     return qpos_init_sample, qpos_approach_sample, qpos_prepared_sample
 
 
-def resolve_object_info(ds: DatasetObjects, obj_id: Optional[int], obj_key: Optional[str], cfg: Dict) -> Dict:
+def resolve_object_info(ds: DatasetObjects, obj_id: Optional[int], obj_key: Optional[str]) -> Dict:
     if obj_key:
         return ds.get_obj_info_by_scale_key(obj_key)
-    resolved_id = int(obj_id) if obj_id is not None else int(cfg.get("object", {}).get("id", 0))
-    return ds.get_obj_info_by_index(resolved_id)
+    if obj_id is not None:
+        return ds.get_obj_info_by_index(int(obj_id))
+    raise ValueError("run_collision requires either --obj-id or --obj-key.")
 
 
 def main() -> None:
@@ -109,7 +111,7 @@ def main() -> None:
         dataset_output_root=cfg.get("output", {}).get("dataset_root", "datasets"),
         verbose=bool(cfg["dataset"].get("verbose", False)),
     )
-    info = resolve_object_info(ds, args.obj_id, args.obj_key, cfg)
+    info = resolve_object_info(ds, args.obj_id, args.obj_key)
     print(
         f"[run_collision] object={info['object_name']} global_id={info['global_id']} "
         f"scale={info['scale']:.3f}"

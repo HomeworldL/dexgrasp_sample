@@ -9,11 +9,12 @@ from utils.utils_file import DEFAULT_RUN_CONFIG_PATH, dataset_tag_from_config, l
 from utils.utils_vis import visualize_with_viser
 
 
-def _resolve_anchor_info(ds: DatasetObjects, obj_id: int | None, obj_key: str | None, cfg: Dict) -> Dict:
+def _resolve_anchor_info(ds: DatasetObjects, obj_id: int | None, obj_key: str | None) -> Dict:
     if obj_key:
         return ds.get_obj_info_by_scale_key(obj_key)
-    resolved_id = int(obj_id) if obj_id is not None else int(cfg.get("object", {}).get("id", 0))
-    return ds.get_obj_info_by_index(resolved_id)
+    if obj_id is not None:
+        return ds.get_obj_info_by_index(int(obj_id))
+    raise ValueError("vis_obj_scale requires either --obj-id or --obj-key.")
 
 
 def _entries_for_same_object(ds: DatasetObjects, object_name: str) -> List[Dict]:
@@ -72,7 +73,7 @@ def main() -> None:
         verbose=bool(cfg["dataset"].get("verbose", False)),
     )
 
-    anchor_info = _resolve_anchor_info(ds, args.obj_id, args.obj_key, cfg)
+    anchor_info = _resolve_anchor_info(ds, args.obj_id, args.obj_key)
     object_name = anchor_info["object_name"]
     entries = _entries_for_same_object(ds, object_name)
 

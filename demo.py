@@ -44,8 +44,9 @@ def _scale_from_object_scale_key(object_scale_key: str) -> Optional[float]:
 
 
 def compose_rot_grasp_to_palm(cfg: Dict) -> np.ndarray:
-    base = np.asarray(cfg["transform"]["base_rot_grasp_to_palm"], dtype=float)
-    extra = cfg["transform"]["extra_euler"]
+    transform_cfg = cfg["hand"]["transform"]
+    base = np.asarray(transform_cfg["base_rot_grasp_to_palm"], dtype=float)
+    extra = transform_cfg["extra_euler"]
     extra_rot = R.from_euler(extra["axis"], float(extra["degrees"]), degrees=True).as_matrix()
     return (base @ extra_rot).T
 
@@ -138,9 +139,10 @@ def run_sampling(
     qpos_init, qpos_approach, qpos_prepared = make_qpos_triplets(cfg, pose)
 
     max_cap = int(cfg["output"]["max_cap"])
-    contact_min_count = int(cfg["validation"]["contact_min_count"])
+    contact_min_count = int(cfg["sim_grasp"]["contact_min_count"])
     sim_grasp_cfg = dict(cfg.get("sim_grasp", {}))
     sim_grasp_cfg.pop("visualize", None)
+    sim_grasp_cfg.pop("contact_min_count", None)
     num_no_col = 0
     num_valid = 0
     num_samples = transforms_np.shape[0]

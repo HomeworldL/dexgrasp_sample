@@ -66,7 +66,7 @@ Mainline focus is offline grasp configuration generation.
 - Set deterministic seed for `numpy/random/torch` (including CUDA and cuDNN deterministic flags).
 - Load object metadata and meshes via `DatasetObjects`, and sample object point cloud + normals (poisson).
 - Sample candidate grasp frames from point cloud/normals (`sample_grasp_frames`), then convert frame pose to hand pose convention:
-  - apply grasp-to-palm rotation alignment
+  - apply grasp-to-palm rotation alignment from `hand.transform`
   - convert rotation to quaternion and store as `wxyz`
   - build base hand pose `[tx,ty,tz,qw,qx,qy,qz]`
 - Build three pre-grasp states per candidate:
@@ -79,7 +79,7 @@ Mainline focus is offline grasp configuration generation.
   - reject if `init` collides
 - For collision-free candidates:
   - simulate closing grasp to get `qpos_grasp`
-  - require sufficient hand-object contacts (>=4)
+  - require sufficient hand-object contacts (`sim_grasp.contact_min_count`, current default `>=4`)
   - run external-force stability validation in a second simulator (`object_fixed=False`)
   - keep only validated grasps
 - Persist outputs as HDF5 first (`grasp.h5`):
@@ -98,6 +98,8 @@ Mainline focus is offline grasp configuration generation.
 - Do not rebuild defaults inside Python code (`build_default_*` style is disallowed).
 - Default entry config for scripts is:
   - `configs/run_YCB_liberhand.json`
+- Current mainline config grouping order is:
+  - `seed`, `dataset`, `hand`, `sampling`, `sim_grasp`, `extforce`, `output`, `warp_render`
 - Config set naming:
   - `<dataset_group>_<hand>.json`, where dataset group in `{YCB, DGN, DGN2, HOPE}` and hand in `{liberhand, inspire, liberhand2}`.
 - `DGN2` means merged datasets:
@@ -110,7 +112,6 @@ Mainline focus is offline grasp configuration generation.
   - one required derived output per object-scale: `grasp.npy`
   - `grasp.npy` must be converted from `grasp.h5` with identical stored grasp values
   - `grasp.h5` sample schema:
-    - `object_id: str`
     - `object_name: str`
     - `scale: float`
     - `hand_name: str`

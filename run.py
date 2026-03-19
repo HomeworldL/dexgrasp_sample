@@ -6,118 +6,27 @@ from typing import Dict, Optional, Tuple
 
 import h5py
 import numpy as np
-import torch
-from scipy.spatial.transform import Rotation as R
 from tqdm import tqdm
 
 from src.mj_ho import MjHO
-from src.sample import downsample_fps, sample_grasp_frames
+from src.sample import downsample_fps
 from utils.utils_file import DEFAULT_RUN_CONFIG_PATH, load_config
 from utils.utils_pointcloud import sample_surface_o3d
+from utils.utils_sample import (
+    build_pose_candidates,
+    encode_h5_str,
+    grasp_outputs_exist,
+    make_qpos_triplets,
+    parse_object_scale_key,
+    sample_frames_from_points,
+    write_grasp_npy_from_h5,
+)
 from utils.utils_seed import set_seed
-
-
-def object_name_from_scale_key(object_scale_key: str) -> str:
-    if "__" in object_scale_key:
-        return object_scale_key.split("__", 1)[0]
-    return object_scale_key
-
-
-def _encode_h5_str(value: str):
-    return np.bytes_(str(value))
-
-
-def _scale_from_object_scale_key(object_scale_key: str) -> Optional[float]:
-    if "__" not in object_scale_key:
-        return None
-    suffix = object_scale_key.split("__", 1)[1]
-    if not suffix.startswith("scale"):
-        return None
-    digits = suffix[len("scale") :]
-    if not digits.isdigit():
-        return None
-    return float(int(digits)) / 1000.0
-
-
-def _write_grasp_npy_from_h5(h5_path: Path, npy_path: Path) -> None:
-    payload: Dict[str, np.ndarray] = {}
-    with h5py.File(h5_path, "r") as hf:
-        for key in ("qpos_init", "qpos_approach", "qpos_prepared", "qpos_grasp"):
-            if key not in hf:
-                raise KeyError(f"Missing dataset '{key}' in {h5_path}")
-            payload[key] = np.asarray(hf[key][:], dtype=np.float32)
-    np.save(npy_path, payload, allow_pickle=True)
-
-
-def _grasp_outputs_exist(output_dir_abs: str) -> bool:
-    out_dir = Path(output_dir_abs)
-    return (out_dir / "grasp.h5").exists() and (out_dir / "grasp.npy").exists()
-
-
-def compose_rot_grasp_to_palm(cfg: Dict) -> np.ndarray:
-    base = np.asarray(cfg["transform"]["base_rot_grasp_to_palm"], dtype=float)
-    extra = cfg["transform"]["extra_euler"]
-    extra_rot = R.from_euler(extra["axis"], float(extra["degrees"]), degrees=True).as_matrix()
-    return (base @ extra_rot).T
-
-
-def sample_frames_from_points(cfg: Dict, pts: np.ndarray, norms: np.ndarray) -> np.ndarray:
-    sampling_cfg = cfg["sampling"]
-    transforms = sample_grasp_frames(
-        pts,
-        norms,
-        Nd=int(sampling_cfg["Nd"]),
-        rot_n=int(sampling_cfg["rot_n"]),
-        d_min=float(sampling_cfg["d_min"]),
-        d_max=float(sampling_cfg["d_max"]),
-        device=torch.device("cuda:0" if torch.cuda.is_available() else "cpu"),
-        max_points=sampling_cfg["max_points"],
-    )
-    transforms_np = transforms.cpu().numpy()
-    del transforms
-    if torch.cuda.is_available():
-        torch.cuda.empty_cache()
-    return transforms_np
-
-
-def build_pose_candidates(cfg: Dict, transforms_np: np.ndarray) -> np.ndarray:
-    rot_grasp_to_palm = compose_rot_grasp_to_palm(cfg)
-    rotation_matrices = transforms_np[:, :3, :3] @ rot_grasp_to_palm
-    positions = transforms_np[:, :3, 3]
-    quaternions = R.from_matrix(rotation_matrices).as_quat()
-    quaternions = np.roll(quaternions, shift=1, axis=1)
-    return np.concatenate([positions, quaternions], axis=1).astype(np.float32)
-
-
-def make_qpos_triplets(cfg: Dict, pose: np.ndarray) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
-    prepared_joints = np.asarray(cfg["hand"]["prepared_joints"], dtype=np.float32)
-    approach_joints = np.asarray(cfg["hand"]["approach_joints"], dtype=np.float32)
-
-    q_expanded = np.tile(prepared_joints, (pose.shape[0], 1)).astype(np.float32)
-    qpos_prepared_sample = np.concatenate([pose, q_expanded], axis=1).astype(np.float32)
-
-    n = qpos_prepared_sample.shape[0]
-    qpos_approach_sample = qpos_prepared_sample.copy()
-    qpos_approach_sample[:, 7:] = np.tile(approach_joints, (n, 1))
-
-    shift_local = np.asarray(cfg["hand"]["shift_local"], dtype=float)
-    positions = qpos_prepared_sample[:, :3]
-    quats_wxyz = qpos_prepared_sample[:, 3:7]
-    quats_xyzw = quats_wxyz[:, [1, 2, 3, 0]]
-    offset_world = R.from_quat(quats_xyzw).apply(shift_local)
-
-    qpos_init_sample = qpos_prepared_sample.copy()
-    qpos_init_sample[:, :3] = positions + offset_world
-    qpos_init_sample[:, 7:] = np.tile(approach_joints, (n, 1))
-
-    return qpos_init_sample, qpos_approach_sample, qpos_prepared_sample
 
 
 def run_sampling(
     cfg: Dict,
     object_scale_key: str,
-    object_id: str,
-    scale: Optional[float],
     hand_name: str,
     hand_xml_path: str,
     object_mjcf_path: str,
@@ -125,8 +34,10 @@ def run_sampling(
     points: np.ndarray,
     normals: np.ndarray,
     verbose: bool,
+    total_stage_start: float,
 ) -> str:
-    object_name = object_name_from_scale_key(object_scale_key)
+    object_name, parsed_scale = parse_object_scale_key(object_scale_key)
+    scale = parsed_scale
     obj_info = {"name": object_name, "xml_abs": object_mjcf_path}
     target_body_params = cfg["hand"]["target_body_params"]
 
@@ -157,23 +68,25 @@ def run_sampling(
 
     d = qpos_prepared.shape[1]
     max_cap = int(cfg["output"]["max_cap"])
+    max_time_sec = float(cfg["output"]["max_time_sec"])
     flush_every = int(cfg.get("output", {}).get("flush_every", 0) or 0)
-    contact_min_count = int(cfg["validation"]["contact_min_count"])
+    contact_min_count = int(cfg["sim_grasp"]["contact_min_count"])
     sim_grasp_cfg = dict(cfg.get("sim_grasp", {}))
     extforce_cfg = dict(cfg.get("extforce", {}))
     sim_grasp_cfg.pop("visualize", None)
     extforce_cfg.pop("visualize", None)
+    sim_grasp_cfg.pop("contact_min_count", None)
     num_no_col = 0
     num_valid = 0
     num_samples = transforms_np.shape[0]
     ts = time.time()
+    stop_reason = "depleted"
 
     with h5py.File(h5_path, "w") as hf:
-        hf.create_dataset("object_id", data=_encode_h5_str(object_id))
-        hf.create_dataset("object_name", data=_encode_h5_str(object_name))
+        hf.create_dataset("object_name", data=encode_h5_str(object_name))
         hf.create_dataset("scale", data=np.float32(scale if scale is not None else np.nan))
-        hf.create_dataset("hand_name", data=_encode_h5_str(hand_name))
-        hf.create_dataset("rot_repr", data=_encode_h5_str("wxyz+qpos"))
+        hf.create_dataset("hand_name", data=encode_h5_str(hand_name))
+        hf.create_dataset("rot_repr", data=encode_h5_str("wxyz+qpos"))
 
         ds_init = hf.create_dataset("qpos_init", shape=(max_cap, d), maxshape=(None, d), dtype="f4")
         ds_approach = hf.create_dataset("qpos_approach", shape=(max_cap, d), maxshape=(None, d), dtype="f4")
@@ -188,6 +101,11 @@ def run_sampling(
         ):
             if num_valid >= max_cap:
                 num_samples = i
+                stop_reason = "cap"
+                break
+            if (time.perf_counter() - total_stage_start) >= max_time_sec:
+                num_samples = i
+                stop_reason = "timeout"
                 break
 
             mjho.set_hand_qpos(qpos_prepared[i])
@@ -229,14 +147,14 @@ def run_sampling(
         hf.flush()
 
     duration = time.time() - ts
-    if verbose:
-        print(
-            f"[{object_scale_key}] samples={num_samples} no_col={num_no_col} "
-            f"valid={num_valid} time={duration:.2f}s out={h5_path}"
-        )
-    _write_grasp_npy_from_h5(h5_path, npy_path)
-    if verbose:
-        print(f"[{object_scale_key}] converted {h5_path.name} -> {npy_path.name}")
+    total_elapsed = time.perf_counter() - total_stage_start
+    print(
+        f"[{object_scale_key}] samples={num_samples} no_col={num_no_col} "
+        f"valid={num_valid} time={duration:.2f}s total_elapsed={total_elapsed:.2f}s "
+        f"stop_reason={stop_reason} out={h5_path}"
+    )
+    write_grasp_npy_from_h5(h5_path, npy_path)
+    print(f"[{object_scale_key}] converted {h5_path.name} -> {npy_path.name}")
     return str(h5_path)
 
 
@@ -246,8 +164,6 @@ def main():
     p.add_argument("--coacd-path", type=str, required=True, help="Path to scaled COACD mesh OBJ.")
     p.add_argument("--mjcf-path", type=str, required=True, help="Path to scaled object MJCF.")
     p.add_argument("--output-dir", type=str, required=True, help="Output directory for grasp artifacts.")
-    p.add_argument("--scale", type=float, default=None, help="Object scale metadata for grasp.h5.")
-    p.add_argument("--object-id", type=str, default=None, help="Object id metadata for grasp.h5.")
     p.add_argument("--force", action="store_true", help="Re-run even if grasp.h5 and grasp.npy already exist.")
     p.add_argument("-v", "--verbose", action="store_true", help="Enable verbose logs.")
     p.add_argument("-c", "--config", type=str, default=DEFAULT_RUN_CONFIG_PATH, help="JSON config path.")
@@ -256,9 +172,10 @@ def main():
     cfg = load_config(args.config)
     set_seed(int(cfg["seed"]))
     verbose = bool(args.verbose)
+    total_stage_start = time.perf_counter()
     if verbose:
         print(f"Using object-scale key: {args.object_scale_key}")
-    if (not args.force) and _grasp_outputs_exist(args.output_dir):
+    if (not args.force) and grasp_outputs_exist(args.output_dir):
         if verbose:
             print(f"[{args.object_scale_key}] skip existing grasp.h5 and grasp.npy in {args.output_dir}")
         return
@@ -267,14 +184,9 @@ def main():
     hand_name = Path(hand_xml_path).stem
     n_points = int(cfg["sampling"]["n_points"])
     pts, norms = sample_surface_o3d(args.coacd_path, n_points=n_points, method="poisson")
-    object_name = object_name_from_scale_key(args.object_scale_key)
-    object_id = str(args.object_id) if args.object_id else object_name
-    scale = args.scale if args.scale is not None else _scale_from_object_scale_key(args.object_scale_key)
     run_sampling(
         cfg=cfg,
         object_scale_key=args.object_scale_key,
-        object_id=object_id,
-        scale=scale,
         hand_name=hand_name,
         hand_xml_path=hand_xml_path,
         object_mjcf_path=args.mjcf_path,
@@ -282,6 +194,7 @@ def main():
         points=pts,
         normals=norms,
         verbose=verbose,
+        total_stage_start=total_stage_start,
     )
 
 

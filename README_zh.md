@@ -145,7 +145,6 @@ datasets/<dataset_tag>/<object_name>/scaleXXX/
 
 ## 5. 抓取数据格式（`grasp.h5`）
 H5 元信息数据集：
-- `object_id`（字符串）
 - `object_name`（字符串）
 - `scale`（float32）
 - `hand_name`（字符串）
@@ -184,8 +183,7 @@ python run.py \
 
 参数：
 - 必填：`--object-scale-key`、`--coacd-path`、`--mjcf-path`、`--output-dir`
-- 可选：`--scale`（H5 元信息；`run_multi.py` 自动传入）
-- 可选：`--object-id`（H5 元信息；`run_multi.py` 自动传入）
+- `object_name` 和 `scale` 由 `--object-scale-key` 解析得到
 - 可选：`-c/--config`（默认 `configs/run_YCB_liberhand.json`）
 - 可选：`-v/--verbose`
 
@@ -334,40 +332,37 @@ PYTHONPATH=. python tools/visualization/plot_grasp_pose_plotly.py -c configs/run
 - `scales`：固定尺度列表
 - `verbose`：索引阶段日志
 
-### 8.2 `object`
-- `id`：可视化脚本的默认全局对象 id
+### 8.2 `hand`
+- `xml_path`
+- `prepared_joints`
+- `approach_joints`
+- `shift_local`
+- `transform`
+  - `base_rot_grasp_to_palm`
+  - `extra_euler`（`axis`, `degrees`）
+- `target_body_params`（接触/距离权重）
 
 ### 8.3 `sampling`
 - `n_points`：表面采样点数
 - `downsample_for_sim`：用于仿真辅助点云数量
 - `Nd`, `rot_n`, `d_min`, `d_max`, `max_points`：抓取帧采样控制项
 
-### 8.4 `transform`
-- `base_rot_grasp_to_palm`
-- `extra_euler`（`axis`, `degrees`）
-
-### 8.5 `hand`
-- `xml_path`
-- `prepared_joints`
-- `approach_joints`
-- `shift_local`
-- `target_body_params`（接触/距离权重）
-
-### 8.6 `validation`
-- `contact_min_count`
-
-### 8.7 `sim_grasp`
+### 8.4 `sim_grasp`
 - 抓取闭合仿真参数（`Mp`, `steps`, `speed_gain`, `max_tip_speed`）
+- `contact_min_count`：进入外力稳定性验证前的最小手物接触数
 
-### 8.8 `extforce`
+### 8.5 `extforce`
 - 外力稳定性验证参数（时长、阈值、力大小、检查步长）
+- `run_mjw.py` 将 `output.max_time_sec` 作为 extforce 阶段的 wall-clock 上限
+- `run.py` 将 `output.max_time_sec` 作为整个 CPU 采样流程的总 wall-clock 上限
 
-### 8.9 `output`
-- `base_dir`, `max_cap`, `h5_name`, `npy_name`
+### 8.6 `output`
+- `max_cap`, `max_time_sec`, `h5_name`, `npy_name`
+- `dataset_root` 为可选项，供 `run_multi.py` 等数据集级脚本使用
 - 当前实现在每个条目目录写 `grasp.h5`。
 - 当前实现固定从 `grasp.h5` 导出 `grasp.npy`。
 
-### 8.10 `warp_render`
+### 8.7 `warp_render`
 - 设备与并行：
   - `gpu_lst`, `thread_per_gpu`
 - 输出与跳过：
@@ -404,7 +399,39 @@ python vis_partial_pc.py -c configs/run_YCB_liberhand.json -i 0 --show-cam-frame
 
 ---
 
-## 11. 测试
+## 11. CPU 基准运行建议
+这几条主要用于在运行 `run_multi.py` 前做更干净的 CPU 基准测试。
+
+清理 Linux 页缓存（需要 `sudo`）：
+
+```bash
+sync
+echo 3 | sudo tee /proc/sys/vm/drop_caches >/dev/null
+```
+
+用 `taskset` 绑定 `run_multi.py` 及其所有子进程到指定 CPU 核：
+
+```bash
+OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1 \
+taskset -c 0-15 python run_multi.py -c configs/run_YCB_liberhand.json -j 16
+```
+
+如果机器是 NUMA，优先用 `numactl`，同时约束 CPU 和本地内存分配：
+
+```bash
+OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1 \
+numactl --physcpubind=0-15 --localalloc \
+python run_multi.py -c configs/run_YCB_liberhand.json -j 16
+```
+
+说明：
+- `run_multi.py` 拉起的子进程会继承 `taskset` 的 CPU 亲和度。
+- 把 BLAS/OpenMP 线程数限制为 `1`，可以避免 `run_multi.py` 已经做进程并行时再次线程过度竞争。
+- 清页缓存主要用于提升基准测试可重复性，不是日常生产运行的必需步骤。
+
+---
+
+## 12. 测试
 ```bash
 pytest -q
 ```

@@ -1,7 +1,7 @@
 import json
 import os
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict, List, Optional
 
 
 DEFAULT_RUN_CONFIG_PATH = "configs/run_YCB_liberhand.json"
@@ -24,6 +24,50 @@ def ensure_dir_for_file(filepath: str):
     d = os.path.dirname(os.path.abspath(filepath))
     if d and not os.path.exists(d):
         os.makedirs(d, exist_ok=True)
+
+
+def safe_filename(name: str) -> str:
+    """Sanitize a name for log/output filenames.
+
+    English: Used by multi-run entrypoints to convert object-scale keys or script
+    names into filesystem-safe path fragments.
+    中文：供并行运行脚本使用，把脚本名或 object-scale key 转成适合日志路径的安全文件名。
+    """
+    return "".join(c if c.isalnum() or c in "-_.()" else "_" for c in name)
+
+
+def build_logs_dir(script: str, dataset_tag: str) -> Path:
+    """Build logs/<script>/<dataset_tag> directory path.
+
+    English: Shared by CPU/GPU multi-run scripts so their child-process logs are
+    grouped by entry script and dataset tag.
+    中文：供 CPU/GPU 两个 multi 脚本共用，把子进程日志统一归档到
+    logs/<script>/<dataset_tag>/ 目录下。
+    """
+    script_name = Path(script).stem or "run"
+    return Path("logs") / safe_filename(script_name) / safe_filename(dataset_tag)
+
+
+def relpath_str(path: Path, start: Path) -> str:
+    """Return POSIX-style relative path string for dataset manifests.
+
+    English: Used when exporting dataset split json files so saved paths are
+    relative to the dataset root and platform-independent.
+    中文：用于导出数据集 split 清单，把路径写成相对 dataset 根目录的
+    POSIX 字符串，避免平台分隔符差异。
+    """
+    return path.resolve().relative_to(start.resolve()).as_posix()
+
+
+def list_existing_files(folder: Path, prefix: str) -> List[Path]:
+    """List existing npy files with a given prefix in sorted order.
+
+    English: Used by run_multi.py when validating rendered warp assets such as
+    partial point clouds and camera extrinsics.
+    中文：用于 run_multi.py 检查 warp 渲染产物，按前缀收集并排序已有的
+    npy 文件，例如 partial_pc 和 cam_ex。
+    """
+    return sorted(p for p in folder.glob(f"{prefix}*.npy") if p.is_file())
 
 
 def resolve_split_manifest_path(cfg: Dict, config_path: str, split: str) -> Path:
@@ -86,14 +130,19 @@ def _validate_config(cfg: Dict, source_path: str) -> None:
         if float(s) <= 0:
             raise ValueError("All dataset.scales values must be > 0.")
 
-    _require(cfg, "object.id")
-
     for k in ["n_points", "downsample_for_sim", "Nd", "rot_n", "d_min", "d_max"]:
         _require(cfg, f"sampling.{k}")
 
-    _require(cfg, "transform.base_rot_grasp_to_palm")
-    _require(cfg, "transform.extra_euler.axis")
-    _require(cfg, "transform.extra_euler.degrees")
+    transform_cfg = _require(cfg, "hand.transform")
+    if "base_rot_grasp_to_palm" not in transform_cfg:
+        raise KeyError("Missing required config field: hand.transform.base_rot_grasp_to_palm")
+    extra_euler = transform_cfg.get("extra_euler")
+    if not isinstance(extra_euler, dict):
+        raise KeyError("Missing required config field: hand.transform.extra_euler")
+    if "axis" not in extra_euler:
+        raise KeyError("Missing required config field: hand.transform.extra_euler.axis")
+    if "degrees" not in extra_euler:
+        raise KeyError("Missing required config field: hand.transform.extra_euler.degrees")
 
     xml_path = _require(cfg, "hand.xml_path")
     if not isinstance(xml_path, str) or not xml_path:
@@ -107,10 +156,16 @@ def _validate_config(cfg: Dict, source_path: str) -> None:
     _require(cfg, "hand.shift_local")
     _validate_target_body_params(cfg)
 
-    _require(cfg, "validation.contact_min_count")
+    contact_min_count = int(_require(cfg, "sim_grasp.contact_min_count"))
+    if contact_min_count <= 0:
+        raise ValueError("sim_grasp.contact_min_count must be > 0.")
 
-    for k in ["base_dir", "max_cap", "h5_name", "npy_name"]:
+    for k in ["max_cap", "max_time_sec", "h5_name", "npy_name"]:
         _require(cfg, f"output.{k}")
+
+    max_time_sec = float(_require(cfg, "output.max_time_sec"))
+    if max_time_sec <= 0.0:
+        raise ValueError("output.max_time_sec must be > 0.")
 
 
 def load_config(path: Optional[str]) -> Dict:

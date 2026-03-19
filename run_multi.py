@@ -11,10 +11,17 @@ from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Tuple
 import time
 
-import h5py
-
 from src.dataset_objects import DatasetObjects
-from utils.utils_file import DEFAULT_RUN_CONFIG_PATH, dataset_tag_from_config, load_config
+from utils.utils_file import (
+    DEFAULT_RUN_CONFIG_PATH,
+    build_logs_dir,
+    dataset_tag_from_config,
+    list_existing_files,
+    load_config,
+    relpath_str,
+    safe_filename,
+)
+from utils.utils_sample import grasp_h5_nonempty, grasp_outputs_exist
 
 # 全局进程注册（用于在主线程捕获中断时终止子进程）
 _RUN_PROCS = []
@@ -43,26 +50,8 @@ def parse_args():
         help="运行配置 JSON（默认 configs/run_YCB_liberhand.json）",
     )
     p.add_argument("--force", action="store_true", help="即使已有 grasp.h5 和 grasp.npy 也强制重跑")
-    p.add_argument("-v", "--verbose", action="store_true", help="打印详细日志并透传给 run.py")
+    p.add_argument("-v", "--verbose", action="store_true", help="仅透传详细日志给子进程 run.py")
     return p.parse_args()
-
-
-def safe_filename(name: str) -> str:
-    return "".join(c if c.isalnum() or c in "-_.()" else "_" for c in name)
-
-
-def _grasp_outputs_exist(entry: Dict) -> bool:
-    out_dir = Path(str(entry["output_dir_abs"]))
-    return (out_dir / "grasp.h5").exists() and (out_dir / "grasp.npy").exists()
-
-
-def _relpath_str(path: Path, start: Path) -> str:
-    return path.resolve().relative_to(start.resolve()).as_posix()
-
-
-def _list_existing_files(folder: Path, prefix: str) -> List[Path]:
-    return sorted(p for p in folder.glob(f"{prefix}*.npy") if p.is_file())
-
 
 def _collect_entry_record(
     entry: Dict,
@@ -82,9 +71,9 @@ def _collect_entry_record(
     if not cam_in_path.exists():
         return None, f"missing {render_subdir}/cam_in.npy"
 
-    partial_pc_paths = _list_existing_files(render_dir, "partial_pc_")
-    partial_pc_cam_paths = _list_existing_files(render_dir, "partial_pc_cam_")
-    cam_ex_paths = _list_existing_files(render_dir, "cam_ex_")
+    partial_pc_paths = list_existing_files(render_dir, "partial_pc_")
+    partial_pc_cam_paths = list_existing_files(render_dir, "partial_pc_cam_")
+    cam_ex_paths = list_existing_files(render_dir, "cam_ex_")
 
     partial_pc_paths = [p for p in partial_pc_paths if not p.name.startswith("partial_pc_cam_")]
 
@@ -105,15 +94,15 @@ def _collect_entry_record(
         "global_id": int(entry["global_id"]),
         "object_scale_key": str(entry["object_scale_key"]),
         "object_name": str(entry["object_name"]),
-        "output_path": _relpath_str(output_dir, dataset_dir),
-        "coacd_path": _relpath_str(Path(str(entry["coacd_abs"])), dataset_dir),
-        "mjcf_path": _relpath_str(Path(str(entry["mjcf_abs"])), dataset_dir),
-        "grasp_h5_path": _relpath_str(grasp_h5_path, dataset_dir),
-        "grasp_npy_path": _relpath_str(grasp_npy_path, dataset_dir),
-        "partial_pc_path": [_relpath_str(path, dataset_dir) for path in partial_pc_paths],
-        "partial_pc_cam_path": [_relpath_str(path, dataset_dir) for path in partial_pc_cam_paths],
-        "cam_ex_path": [_relpath_str(path, dataset_dir) for path in cam_ex_paths],
-        "cam_in": _relpath_str(cam_in_path, dataset_dir),
+        "output_path": relpath_str(output_dir, dataset_dir),
+        "coacd_path": relpath_str(Path(str(entry["coacd_abs"])), dataset_dir),
+        "mjcf_path": relpath_str(Path(str(entry["mjcf_abs"])), dataset_dir),
+        "grasp_h5_path": relpath_str(grasp_h5_path, dataset_dir),
+        "grasp_npy_path": relpath_str(grasp_npy_path, dataset_dir),
+        "partial_pc_path": [relpath_str(path, dataset_dir) for path in partial_pc_paths],
+        "partial_pc_cam_path": [relpath_str(path, dataset_dir) for path in partial_pc_cam_paths],
+        "cam_ex_path": [relpath_str(path, dataset_dir) for path in cam_ex_paths],
+        "cam_in": relpath_str(cam_in_path, dataset_dir),
         "scale": float(entry["scale"]),
     }
     return record, None
@@ -148,21 +137,6 @@ def split_records_by_object(records: Sequence[Dict]) -> Tuple[List[Dict], List[D
     return train_records, test_records
 
 
-def _grasp_h5_nonempty(h5_path: Path) -> Tuple[bool, str]:
-    try:
-        with h5py.File(h5_path, "r") as hf:
-            if "qpos_grasp" not in hf:
-                return False, "missing qpos_grasp dataset"
-            ds_grasp = hf["qpos_grasp"]
-            if len(ds_grasp.shape) == 0:
-                return False, "qpos_grasp is scalar"
-            if int(ds_grasp.shape[0]) <= 0:
-                return False, "qpos_grasp has zero rows"
-    except Exception as exc:
-        return False, f"failed to read grasp.h5 ({exc})"
-    return True, ""
-
-
 def filter_nonempty_grasp_records(
     records: Sequence[Dict],
     dataset_dir: Path,
@@ -171,7 +145,7 @@ def filter_nonempty_grasp_records(
     removed: List[Tuple[str, str]] = []
     for record in records:
         h5_path = dataset_dir / str(record["grasp_h5_path"])
-        ok, reason = _grasp_h5_nonempty(h5_path)
+        ok, reason = grasp_h5_nonempty(h5_path)
         if ok:
             kept.append(record)
             continue
@@ -230,10 +204,6 @@ def run_one(
         str(entry["mjcf_abs"]),
         "--output-dir",
         str(entry["output_dir_abs"]),
-        "--scale",
-        str(float(entry.get("scale"))),
-        "--object-id",
-        str(entry.get("object_id", entry.get("object_name", ""))),
     ]
     if force:
         cmd.append("--force")
@@ -280,14 +250,13 @@ def terminate_all_running():
 
 def main():
     args = parse_args()
-    logs_dir = Path("logs")
-    logs_dir.mkdir(parents=True, exist_ok=True)
-
     print(f"Time Stamp: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}")
 
     print("Discovering dataset object-scale entries...")
     cfg = load_config(args.config)
     dataset_tag = dataset_tag_from_config(args.config)
+    logs_dir = build_logs_dir(args.script, dataset_tag)
+    logs_dir.mkdir(parents=True, exist_ok=True)
     ds = DatasetObjects(
         cfg["dataset"]["root"],
         dataset_names=list(cfg["dataset"].get("include", [])),
@@ -303,7 +272,7 @@ def main():
 
     if not args.force:
         total_entries = len(entries)
-        entries = [it for it in entries if not _grasp_outputs_exist(it)]
+        entries = [it for it in entries if not grasp_outputs_exist(str(it["output_dir_abs"]))]
         skipped = total_entries - len(entries)
         if skipped > 0:
             print(f"Pre-skip existing results: {skipped}/{total_entries} entries already have grasp.h5 and grasp.npy.")
@@ -311,9 +280,9 @@ def main():
             print("所有 object-scale 条目都已存在 grasp.h5 和 grasp.npy，跳过并行执行，继续构建数据划分。")
 
     print(f"Found {len(entries)} object-scale entries to run. Running with max parallel = {args.max_parallel}.")
-    if args.verbose:
-        for i, it in enumerate(entries):
-            print(f"  [{i}] {it['object_scale_key']}")
+    print(f"Logs directory: {logs_dir}")
+    for i, it in enumerate(entries):
+        print(f"  [{i}] {it['object_scale_key']}")
 
     # 并行执行
     futures = []

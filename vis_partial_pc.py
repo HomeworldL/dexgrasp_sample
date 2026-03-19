@@ -89,9 +89,10 @@ def main() -> None:
 
     if args.obj_key:
         info = ds.get_obj_info_by_scale_key(args.obj_key)
+    elif args.obj_id is not None:
+        info = ds.get_obj_info_by_index(int(args.obj_id))
     else:
-        obj_id = int(args.obj_id) if args.obj_id is not None else int(cfg.get("object", {}).get("id", 0))
-        info = ds.get_obj_info_by_index(obj_id)
+        raise ValueError("vis_partial_pc requires either --obj-id or --obj-key.")
 
     subdir = args.pc_subdir or cfg.get("warp_render", {}).get("output_subdir", "partial_pc_warp")
     pc_dir = Path(info["output_dir_abs"]).resolve() / subdir

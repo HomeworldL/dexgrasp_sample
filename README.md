@@ -143,7 +143,6 @@ Notes:
 
 ## 5. Grasp Dataset Format (`grasp.h5`)
 Metadata datasets in H5:
-- `object_id` (string)
 - `object_name` (string)
 - `scale` (float32)
 - `hand_name` (string)
@@ -185,8 +184,7 @@ Args:
 - `--coacd-path` required
 - `--mjcf-path` required
 - `--output-dir` required
-- `--scale` optional (metadata; `run_multi.py` auto fills)
-- `--object-id` optional (metadata; `run_multi.py` auto fills)
+- `object_name` and `scale` are parsed from `--object-scale-key`
 - `-c/--config` optional (default `configs/run_YCB_liberhand.json`)
 - `-v/--verbose` optional
 
@@ -335,44 +333,40 @@ Examples:
 - `scales`: fixed scale list
 - `verbose`: dataset indexing logs
 
-### 8.2 `object`
-- `id`: default object global id for visualization scripts
+### 8.2 `hand`
+- `xml_path`
+- `prepared_joints`
+- `approach_joints`
+- `shift_local`
+- `transform`
+  - `base_rot_grasp_to_palm`
+  - `extra_euler` (`axis`, `degrees`)
+- `target_body_params` (contact/distance weights)
 
 ### 8.3 `sampling`
 - `n_points`: surface sampling points
 - `downsample_for_sim`: object point count used in simulation helper
 - `Nd`, `rot_n`, `d_min`, `d_max`, `max_points`: grasp frame sampling controls
 
-### 8.4 `transform`
-- `base_rot_grasp_to_palm`
-- `extra_euler` (`axis`, `degrees`)
-
-### 8.5 `hand`
-- `xml_path`
-- `prepared_joints`
-- `approach_joints`
-- `shift_local`
-- `target_body_params` (contact/distance weights)
-
-### 8.6 `validation`
-- `contact_min_count`
-
-### 8.7 `sim_grasp`
+### 8.4 `sim_grasp`
 - MuJoCo grasp-closing step settings (`Mp`, `steps`, `speed_gain`, `max_tip_speed`)
+- `contact_min_count`: minimum hand-object contact count before external-force validation
 
-### 8.8 `extforce`
+### 8.5 `extforce`
 - External-force validation settings (`duration`, thresholds, force magnitude, check interval)
 - `run_mjw.py` stops the extforce stage early when either:
   - `output.max_cap` valid grasps have been written
   - extforce wall-clock time exceeds `output.max_time_sec`
+- `run.py` treats `output.max_time_sec` as a total wall-clock budget for the whole CPU sampling run
 - Current default recommendation for Warp configs is `output.max_time_sec = 90.0`
 
-### 8.9 `output`
-- `base_dir`, `max_cap`, `max_time_sec`, `h5_name`, `npy_name`
+### 8.6 `output`
+- `max_cap`, `max_time_sec`, `h5_name`, `npy_name`
+- `dataset_root` is optional and used by dataset-level helper scripts such as `run_multi.py`
 - Current implementation writes `grasp.h5` in each `output_dir_abs`.
 - Current implementation always exports `grasp.npy` from `grasp.h5`.
 
-### 8.10 `warp_render`
+### 8.7 `warp_render`
 - Device and parallel:
   - `gpu_lst`, `thread_per_gpu`
 - Output and skip:
@@ -418,7 +412,39 @@ python vis_partial_pc.py -c configs/run_YCB_liberhand.json -i 0 --show-cam-frame
 
 ---
 
-## 12. Testing
+## 12. CPU Benchmark Tips
+Use these only when you want cleaner CPU benchmarking for `run_multi.py`.
+
+Clear Linux page cache before a benchmark run (requires `sudo`):
+
+```bash
+sync
+echo 3 | sudo tee /proc/sys/vm/drop_caches >/dev/null
+```
+
+Pin `run_multi.py` and all of its child processes to a CPU set with `taskset`:
+
+```bash
+OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1 \
+taskset -c 0-15 python run_multi.py -c configs/run_YCB_liberhand.json -j 16
+```
+
+On a NUMA machine, prefer `numactl` so CPU affinity and memory locality stay together:
+
+```bash
+OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1 \
+numactl --physcpubind=0-15 --localalloc \
+python run_multi.py -c configs/run_YCB_liberhand.json -j 16
+```
+
+Notes:
+- `taskset` affinity is inherited by child processes started by `run_multi.py`.
+- Setting BLAS/OpenMP thread counts to `1` avoids oversubscription when `run_multi.py` already uses process-level parallelism.
+- Dropping page cache is mainly for reproducible benchmarking, not a normal production requirement.
+
+---
+
+## 13. Testing
 ```bash
 pytest -q
 ```

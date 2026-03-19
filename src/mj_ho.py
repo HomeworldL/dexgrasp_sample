@@ -113,6 +113,40 @@ class MjHO:
 
         # hand qpos length = total nq minus 7 if object exists
         self.nq_hand = self.nq - 7 if not self.object_fixed else self.nq
+        self.side_swing_indices = np.asarray(
+            self.hand_profile.get("side_swing_indices", [0, 4, 8, 12, 16]),
+            dtype=int,
+        )
+        self.side_swing_index_set = set(self.side_swing_indices.tolist())
+        self.thumb_relax_indices = np.asarray(
+            self.hand_profile.get("thumb_relax_indices", [17, 18, 19]),
+            dtype=int,
+        )
+        self.thumb_relax_divisor = float(
+            self.hand_profile.get("thumb_relax_divisor", 1.2)
+        )
+        self.object_body_id = int(self.model.nbody - 1)
+        self.hand_body_upper_id = int(self.model.nbody - 2)
+        self.world_body_id = 0
+        self.obj_collision_geom_indices = [
+            gi
+            for gi in range(self.model.ngeom)
+            if f"{self.obj_name}_collision" in self.model.geom(gi).name
+        ]
+        ctrl_slices = self.hand_profile.get("ctrl_qpos_slices")
+        if not ctrl_slices:
+            raise NotImplementedError(
+                f"No hand_profile ctrl mapping for hand '{self.hand_name}'."
+            )
+        ctrl_qpos_indices: List[int] = []
+        for q0, q1 in ctrl_slices:
+            ctrl_qpos_indices.extend(range(int(q0), int(q1)))
+        self.ctrl_qpos_indices = np.asarray(ctrl_qpos_indices, dtype=int)
+        if self.ctrl_qpos_indices.shape[0] != self.nu:
+            raise ValueError(
+                f"ctrl index length {self.ctrl_qpos_indices.shape[0]} != model.nu {self.nu} "
+                f"for hand '{self.hand_name}'."
+            )
 
         # build mapping: fingertip body names -> body ids
         self.body_name_to_id = {}
@@ -337,7 +371,7 @@ class MjHO:
         if len(hand_qpos) != self.nq_hand:
             raise ValueError(f"hand_qpos must have length {self.nq_hand}")
         self.data.qpos[: self.nq_hand] = hand_qpos
-        self.data.ctrl = self.qpos2ctrl(self.data.qpos)
+        self.data.ctrl[:] = self.qpos2ctrl(self.data.qpos)
         # print(f"hand_qpos: {hand_qpos}")
         # print(f"ctrl: {self.data.ctrl}")
         mujoco.mj_forward(self.model, self.data)
@@ -357,9 +391,10 @@ class MjHO:
         self.data.qpos[-7:] = obj_pose
         mujoco.mj_forward(self.model, self.data)
 
-    def get_hand_qpos(self) -> np.ndarray:
+    def get_hand_qpos(self, copy: bool = True) -> np.ndarray:
         """Return hand's qpos (first self.hand_qpos_len entries)."""
-        return np.array(self.data.qpos[: self.nq_hand])
+        hand_qpos = self.data.qpos[: self.nq_hand]
+        return np.array(hand_qpos, copy=True) if copy else hand_qpos
 
     def get_obj_pose(self) -> np.ndarray:
         """Return object's 7-dof qpos (last 7 entries)."""
@@ -380,15 +415,7 @@ class MjHO:
             hand_qpos = q
         else:
             raise ValueError(f"Unsupported qpos length {q.shape[0]} for qpos2ctrl.")
-
-        slices = self.hand_profile.get("ctrl_qpos_slices")
-        if not slices:
-            raise NotImplementedError(
-                f"No hand_profile ctrl mapping for hand '{self.hand_name}'."
-            )
-
-        ctrl_parts = [hand_qpos[int(q0) : int(q1)] for q0, q1 in slices]
-        ctrl = np.concatenate(ctrl_parts, axis=0) if ctrl_parts else np.zeros(0, dtype=float)
+        ctrl = np.take(hand_qpos, self.ctrl_qpos_indices)
         if ctrl.shape[0] != self.nu:
             raise ValueError(
                 f"ctrl length {ctrl.shape[0]} != model.nu {self.nu} for hand '{self.hand_name}'."
@@ -417,22 +444,27 @@ class MjHO:
         speed_gain: float = 1.5,
         max_tip_speed: float = 0.05,
         visualize: bool = False,
+        record_history: bool = False,
     ):
         # --- sanity checks ---
         if self.fingertip_bodies is None:
             raise ValueError("fingertip_bodies must be specified in constructor")
 
-        history = {
-            "qpos": [],
-            "tip_positions": [],
-            "pts_top_Mp": [],
-            "pts_target": [],
-        }
+        history = (
+            {
+                "qpos": [],
+                "tip_positions": [],
+                "pts_top_Mp": [],
+                "pts_target": [],
+            }
+            if record_history
+            else {}
+        )
 
         # Main loop
         for step_i in range(int(steps)):
             # read current qpos and tip positions (no modification)
-            hand_qpos = self.get_hand_qpos().copy()
+            hand_qpos = self.get_hand_qpos(copy=True)
 
             tip_positions = np.vstack(
                 [np.array(self.data.xpos[bid]).copy() for bid in self.tip_body_ids]
@@ -516,11 +548,11 @@ class MjHO:
             step_targets = np.vstack(step_targets)  # (n_tips, 3)
 
             # store history (flattened as requested)
-            history["qpos"].append(hand_qpos.copy())  # (nq_hand,)
-            history["tip_positions"].append(tip_positions.copy())  # (n_tips,3)
-
-            history["pts_top_Mp"].append(all_top_Mp_pts.copy())  # (n_tips*Mp, 3)
-            history["pts_target"].append(step_targets.copy())  # (n_tips, 3)
+            if record_history:
+                history["qpos"].append(hand_qpos.copy())  # (nq_hand,)
+                history["tip_positions"].append(tip_positions.copy())  # (n_tips,3)
+                history["pts_top_Mp"].append(all_top_Mp_pts.copy())  # (n_tips*Mp, 3)
+                history["pts_target"].append(step_targets.copy())  # (n_tips, 3)
 
             # print(f"step_i: {step_i}")
             # print(f"hand_qpos: {hand_qpos}")
@@ -572,17 +604,14 @@ class MjHO:
             # exit()
 
             # now add to hand_qpos
-            special_indices = list(self.hand_profile.get("side_swing_indices", [0, 4, 8, 12, 16]))
-            mask = ~np.isin(np.arange(total_dq_hand.shape[0]), special_indices)
+            mask = ~np.isin(np.arange(total_dq_hand.shape[0]), self.side_swing_indices)
             total_dq_hand[mask] = np.maximum(total_dq_hand[mask], 0)
             # for idx in special_indices:
             #     total_dq_hand[idx] /= 3
 
-            thumb_indices = list(self.hand_profile.get("thumb_relax_indices", [17, 18, 19]))
-            thumb_div = float(self.hand_profile.get("thumb_relax_divisor", 1.2))
-            for idx in thumb_indices:
+            for idx in self.thumb_relax_indices:
                 if 0 <= idx < total_dq_hand.shape[0]:
-                    total_dq_hand[idx] /= max(thumb_div, 1e-6)
+                    total_dq_hand[idx] /= max(self.thumb_relax_divisor, 1e-6)
             # print(f"total_dq_hand: {total_dq_hand}")
             # print(f"total_dq_hand.shape: {total_dq_hand.shape}")
 
@@ -600,8 +629,34 @@ class MjHO:
         #         self.viewer.render()
 
         # after loop: collect final
-        final_hand_qpos = self.get_hand_qpos().copy()
+        final_hand_qpos = self.get_hand_qpos(copy=True)
         return final_hand_qpos, history
+
+    def get_contact_num(self, obj_margin=0.0) -> int:
+        for geom_id in self.obj_collision_geom_indices:
+            self.model.geom_margin[geom_id] = obj_margin
+            self.model.geom_gap[geom_id] = obj_margin
+
+        ho_contact_count = 0
+        for contact_i in range(self.data.ncon):
+            contact = self.data.contact[contact_i]
+            body1_id = self.model.geom(contact.geom1).bodyid
+            body2_id = self.model.geom(contact.geom2).bodyid
+            if (
+                body1_id > self.world_body_id
+                and body1_id < self.hand_body_upper_id
+                and body2_id == self.object_body_id
+            ) or (
+                body2_id > self.world_body_id
+                and body2_id < self.hand_body_upper_id
+                and body1_id == self.object_body_id
+            ):
+                ho_contact_count += 1
+
+        for geom_id in self.obj_collision_geom_indices:
+            self.model.geom_margin[geom_id] = obj_margin
+            self.model.geom_gap[geom_id] = obj_margin
+        return ho_contact_count
 
     def get_contact_info(self, obj_margin=0.0):
         # for body_id in range(self.model.nbody):
@@ -610,28 +665,30 @@ class MjHO:
         # print("-" * 40)
 
         # Set margin and gap
-        for i in range(self.model.ngeom):
-            if f"{self.obj_name}_collision" in self.model.geom(i).name:
-                self.model.geom_margin[i] = self.model.geom_gap[i] = obj_margin
-
-        object_id = self.model.nbody - 1
-        hand_id = self.model.nbody - 2
-        world_id = 0
+        for geom_id in self.obj_collision_geom_indices:
+            self.model.geom_margin[geom_id] = self.model.geom_gap[geom_id] = obj_margin
 
         # Processing all contact information
         ho_contact = []
         hh_contact = []
-        for contact in self.data.contact:
+        for contact_i in range(self.data.ncon):
+            contact = self.data.contact[contact_i]
             body1_id = self.model.geom(contact.geom1).bodyid
             body2_id = self.model.geom(contact.geom2).bodyid
             body1_name = self.model.body(self.model.geom(contact.geom1).bodyid).name
             body2_name = self.model.body(self.model.geom(contact.geom2).bodyid).name
             # hand and object
             if (
-                body1_id > world_id and body1_id < hand_id and body2_id == object_id
-            ) or (body2_id > world_id and body2_id < hand_id and body1_id == object_id):
+                body1_id > self.world_body_id
+                and body1_id < self.hand_body_upper_id
+                and body2_id == self.object_body_id
+            ) or (
+                body2_id > self.world_body_id
+                and body2_id < self.hand_body_upper_id
+                and body1_id == self.object_body_id
+            ):
                 # keep body1=hand and body2=object
-                if body2_id == object_id:
+                if body2_id == self.object_body_id:
                     contact_normal = contact.frame[0:3]
                     hand_body_name = body1_name
                     obj_body_name = body2_name
@@ -650,10 +707,10 @@ class MjHO:
                 )
             # hand and hand
             elif (
-                body1_id > world_id
-                and body1_id < hand_id
-                and body2_id > world_id
-                and body2_id < hand_id
+                body1_id > self.world_body_id
+                and body1_id < self.hand_body_upper_id
+                and body2_id > self.world_body_id
+                and body2_id < self.hand_body_upper_id
             ):
                 hh_contact.append(
                     {
@@ -668,9 +725,8 @@ class MjHO:
                 print(body1_name, body2_name, body1_id, body2_id)
 
         # Set margin and gap back
-        for i in range(self.model.ngeom):
-            if f"{self.obj_name}_collision" in self.model.geom(i).name:
-                self.model.geom_margin[i] = self.model.geom_gap[i] = obj_margin
+        for geom_id in self.obj_collision_geom_indices:
+            self.model.geom_margin[geom_id] = self.model.geom_gap[geom_id] = obj_margin
         return ho_contact, hh_contact
 
     def is_contact(self):
@@ -711,10 +767,9 @@ class MjHO:
 
         # tighten hand: add grip_delta to all joints except side-swing indices
         hand_qpos = qpos_grasp.copy()
-        excluded = set(self.hand_profile.get("side_swing_indices", [0, 4, 8, 12, 16]))
         # apply delta
         for i in range(hand_qpos.shape[0]):
-            if i not in excluded:
+            if i not in self.side_swing_index_set:
                 hand_qpos[i] += grip_delta
 
         hand_ctrl = self.qpos2ctrl(hand_qpos)

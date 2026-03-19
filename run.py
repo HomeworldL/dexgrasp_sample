@@ -69,7 +69,7 @@ def run_sampling(
     d = qpos_prepared.shape[1]
     max_cap = int(cfg["output"]["max_cap"])
     max_time_sec = float(cfg["output"]["max_time_sec"])
-    flush_every = int(cfg.get("output", {}).get("flush_every", 0) or 0)
+    flush_every = int(cfg["output"]["flush_every"])
     contact_min_count = int(cfg["sim_grasp"]["contact_min_count"])
     sim_grasp_cfg = dict(cfg.get("sim_grasp", {}))
     extforce_cfg = dict(cfg.get("extforce", {}))
@@ -121,9 +121,9 @@ def run_sampling(
             num_no_col += 1
             mjho.set_hand_qpos(qpos_prepared[i])
             qpos_grasp, _ = mjho.sim_grasp(visualize=False, **sim_grasp_cfg)
-            ho_contact, _ = mjho.get_contact_info(obj_margin=0.00)
+            ho_contact_num = mjho.get_contact_num(obj_margin=0.00)
 
-            if len(ho_contact) >= contact_min_count:
+            if ho_contact_num >= contact_min_count:
                 is_valid, _, _ = mjho_valid.sim_under_extforce(
                     qpos_grasp.copy(),
                     visualize=False,

@@ -136,7 +136,7 @@ if __name__ == "__main__":
 
         # sim_grasp
         mjho.set_hand_qpos(qpos_prepared_sample[i])
-        qpos_grasp, history = mjho.sim_grasp(visualize=False)
+        qpos_grasp, history = mjho.sim_grasp(visualize=False, record_history=True)
         ho_contact, hh_contact = mjho.get_contact_info(obj_margin=0.00)
 
         if len(ho_contact) >= 3:

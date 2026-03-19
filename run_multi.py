@@ -3,6 +3,7 @@
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 import threading
@@ -286,35 +287,42 @@ def main():
 
     # 并行执行
     futures = []
+    executor = None
     if entries:
         try:
-            with ThreadPoolExecutor(max_workers=args.max_parallel) as ex:
-                for entry in entries:
-                    futures.append(
-                        ex.submit(
-                            run_one,
-                            entry,
-                            args.script,
-                            args.config,
-                            bool(args.force),
-                            bool(args.verbose),
-                            sys.executable,
-                            logs_dir,
-                        )
+            executor = ThreadPoolExecutor(max_workers=args.max_parallel)
+            for entry in entries:
+                futures.append(
+                    executor.submit(
+                        run_one,
+                        entry,
+                        args.script,
+                        args.config,
+                        bool(args.force),
+                        bool(args.verbose),
+                        sys.executable,
+                        logs_dir,
                     )
-                # 等待完成并打印结果（每完成一个就开始下一个是 ThreadPoolExecutor 的默认行为）
-                for fut in as_completed(futures):
-                    try:
-                        object_scale_key, code, logpath = fut.result()
-                        status = "OK" if code == 0 else f"FAIL(code={code})"
-                        print(f"[DONE] {object_scale_key}: {status} (log: {logpath})")
-                    except Exception as exc:
-                        print(f"[ERR] task raised exception: {exc}")
+                )
+            # 等待完成并打印结果（每完成一个就开始下一个是 ThreadPoolExecutor 的默认行为）
+            for fut in as_completed(futures):
+                try:
+                    object_scale_key, code, logpath = fut.result()
+                    status = "OK" if code == 0 else f"FAIL(code={code})"
+                    print(f"[DONE] {object_scale_key}: {status} (log: {logpath})")
+                except Exception as exc:
+                    print(f"[ERR] task raised exception: {exc}")
+            executor.shutdown(wait=True, cancel_futures=False)
+            executor = None
         except KeyboardInterrupt:
             print("\nKeyboardInterrupt detected — terminating running child processes...")
             terminate_all_running()
+            if executor is not None:
+                executor.shutdown(wait=False, cancel_futures=True)
             print("Exiting.")
-            sys.exit(1)
+            sys.stdout.flush()
+            sys.stderr.flush()
+            os._exit(130)
 
     print("All jobs finished.")
     dataset_root = Path(cfg.get("output", {}).get("dataset_root", "datasets")).resolve()

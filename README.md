@@ -358,10 +358,10 @@ Examples:
   - `output.max_cap` valid grasps have been written
   - extforce wall-clock time exceeds `output.max_time_sec`
 - `run.py` treats `output.max_time_sec` as a total wall-clock budget for the whole CPU sampling run
-- Current default recommendation for Warp configs is `output.max_time_sec = 90.0`
+- Current default recommendation for Warp configs is `output.max_time_sec = 180.0`
 
 ### 8.6 `output`
-- `max_cap`, `max_time_sec`, `h5_name`, `npy_name`
+- `max_cap`, `max_time_sec`, `flush_every`, `h5_name`, `npy_name`
 - `dataset_root` is optional and used by dataset-level helper scripts such as `run_multi.py`
 - Current implementation writes `grasp.h5` in each `output_dir_abs`.
 - Current implementation always exports `grasp.npy` from `grasp.h5`.
@@ -394,7 +394,7 @@ Examples:
 - Do not assume larger is faster for small-cap collection. A very large `batch_size` such as `4096` makes each MJWarp step heavier, so the extforce stage can become slower even though GPU occupancy is higher.
 - `batch_size = 4096` is better suited to large-scale grasp harvesting, not to quickly stopping after about `100` valid grasps.
 - Smaller `batch_size` also means fewer candidates are pushed through collision and `sim_grasp`, so surface sampling density should be reduced accordingly.
-- For the current `max_cap = 100` workflow, `sampling.n_points = 1024` is the recommended default. This avoids waiting too long in collision filtering and `sim_grasp` while still producing enough candidates for extforce.
+- For the current `max_cap = 100` workflow, `sampling.n_points = 2048` is the current default. This keeps candidate coverage reasonable without making collision filtering and `sim_grasp` excessively slow.
 
 ---
 
@@ -444,7 +444,18 @@ Notes:
 
 ---
 
-## 13. Testing
+## 13. CPU Optimization Notes
+- `run.py` now reads `output.flush_every` from config and only flushes `grasp.h5` periodically instead of flushing on every accepted sample.
+- Recommended default is `output.flush_every = 25` for the current `max_cap = 100` workflow. This usually means only a few intermediate flushes, plus one guaranteed final flush when the file is resized and closed.
+- Even if the last chunk is smaller than `flush_every`, it is still written because `run.py` always does a final resize + `hf.flush()` before leaving the HDF5 context.
+- The closing stage now defaults to `sim_grasp(record_history=False)`. This avoids storing per-step history in the hot path. Visualization/debug tooling should enable `record_history=True` explicitly.
+- Contact-count filtering in `run.py` now uses a lightweight `MjHO.get_contact_num()` path instead of the heavier `get_contact_info()` structure-building path.
+- `MjHO` also precomputes control-mapping indices and side-swing DOF indices during initialization, so `qpos2ctrl()` and repeated side-swing masking no longer rebuild the same index lists on every step.
+- `get_hand_qpos(copy=True)` now supports a non-copy view mode for future high-frequency paths, while the current hot loop keeps explicit copies only where mutation safety matters.
+
+---
+
+## 14. Testing
 ```bash
 pytest -q
 ```

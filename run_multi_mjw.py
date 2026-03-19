@@ -2,6 +2,7 @@
 """Parallel object-scale runner for run_mjw.py."""
 
 import argparse
+import os
 import subprocess
 import sys
 import threading
@@ -160,32 +161,39 @@ def main():
         print(f"  [{i}] {entry['object_scale_key']}")
 
     futures = []
+    executor = None
     try:
-        with ThreadPoolExecutor(max_workers=args.max_parallel) as executor:
-            for entry in entries:
-                futures.append(
-                    executor.submit(
-                        run_one,
-                        entry,
-                        args.script,
-                        args.config,
-                        args,
-                        sys.executable,
-                        logs_dir,
-                    )
+        executor = ThreadPoolExecutor(max_workers=args.max_parallel)
+        for entry in entries:
+            futures.append(
+                executor.submit(
+                    run_one,
+                    entry,
+                    args.script,
+                    args.config,
+                    args,
+                    sys.executable,
+                    logs_dir,
                 )
-            for future in as_completed(futures):
-                try:
-                    object_scale_key, code, logpath = future.result()
-                    status = "OK" if code == 0 else f"FAIL(code={code})"
-                    print(f"[DONE] {object_scale_key}: {status} (log: {logpath})")
-                except Exception as exc:
-                    print(f"[ERR] task raised exception: {exc}")
+            )
+        for future in as_completed(futures):
+            try:
+                object_scale_key, code, logpath = future.result()
+                status = "OK" if code == 0 else f"FAIL(code={code})"
+                print(f"[DONE] {object_scale_key}: {status} (log: {logpath})")
+            except Exception as exc:
+                print(f"[ERR] task raised exception: {exc}")
+        executor.shutdown(wait=True, cancel_futures=False)
+        executor = None
     except KeyboardInterrupt:
         print("\nKeyboardInterrupt detected — terminating running child processes...")
         terminate_all_running()
+        if executor is not None:
+            executor.shutdown(wait=False, cancel_futures=True)
         print("Exiting.")
-        sys.exit(1)
+        sys.stdout.flush()
+        sys.stderr.flush()
+        os._exit(130)
 
     print("All jobs finished.")
     print(f"Time Stamp: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}")

@@ -355,9 +355,10 @@ PYTHONPATH=. python tools/visualization/plot_grasp_pose_plotly.py -c configs/run
 - 外力稳定性验证参数（时长、阈值、力大小、检查步长）
 - `run_mjw.py` 将 `output.max_time_sec` 作为 extforce 阶段的 wall-clock 上限
 - `run.py` 将 `output.max_time_sec` 作为整个 CPU 采样流程的总 wall-clock 上限
+- 当前推荐默认值是 `output.max_time_sec = 180.0`
 
 ### 8.6 `output`
-- `max_cap`, `max_time_sec`, `h5_name`, `npy_name`
+- `max_cap`, `max_time_sec`, `flush_every`, `h5_name`, `npy_name`
 - `dataset_root` 为可选项，供 `run_multi.py` 等数据集级脚本使用
 - 当前实现在每个条目目录写 `grasp.h5`。
 - 当前实现固定从 `grasp.h5` 导出 `grasp.npy`。
@@ -431,7 +432,18 @@ python run_multi.py -c configs/run_YCB_liberhand.json -j 16
 
 ---
 
-## 12. 测试
+## 12. CPU 优化说明
+- `run.py` 现在会从 config 读取 `output.flush_every`，只做周期性 `grasp.h5` 刷盘，而不是每接收一个有效样本就刷一次。
+- 对当前 `max_cap = 100` 的流程，推荐默认值是 `output.flush_every = 25`。这通常只会产生少量中途 flush，再加最后一次必定执行的收尾 flush。
+- 即使最后剩余样本数不足 `flush_every`，也仍然会写入，因为 `run.py` 在退出 HDF5 上下文前一定会做一次最终 resize + `hf.flush()`。
+- 抓取闭合阶段现在默认使用 `sim_grasp(record_history=False)`，高频主路径不再保存逐步 history。只有可视化或调试脚本才应显式打开 `record_history=True`。
+- `run.py` 的接触数过滤现在走更轻量的 `MjHO.get_contact_num()`，不再在主路径里构造完整的 `get_contact_info()` 字典结构。
+- `MjHO` 初始化时还会预计算 `ctrl` 映射索引和侧摆自由度索引，因此 `qpos2ctrl()` 以及反复的侧摆掩码不再每一步都重建相同索引列表。
+- `get_hand_qpos(copy=True)` 现在支持非复制视图模式，后续高频路径可以按需复用；当前主循环只在确实需要防止原地修改时才做显式拷贝。
+
+---
+
+## 13. 测试
 ```bash
 pytest -q
 ```

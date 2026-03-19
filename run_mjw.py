@@ -639,26 +639,26 @@ def run_sampling(
         hf.flush()
 
     duration = time.time() - start_ts
-    if verbose:
-        print(
-            f"[{object_scale_key}] candidates={max_candidates} no_col={num_no_col} "
-            f"contact_ok={num_grasp_contact_ok} valid={num_valid} target_valid_cap={max_cap}"
-        )
-        print(
-            f"[{object_scale_key}] batches collision={collision_batches} "
-            f"sim_grasp={sim_grasp_batches} extforce_loops={extforce_batches} "
-            f"extforce_shrinks={extforce_shrinks}"
-        )
-        print(
-            f"[{object_scale_key}] time backend_init={backend_init_time:.3f}s "
-            f"collision={collision_time:.3f}s sim_grasp={sim_grasp_time:.3f}s "
-            f"extforce={extforce_time:.3f}s total={duration:.3f}s "
-            f"stop_reason={stop_reason} out={h5_path}"
-        )
+    # if verbose:
+    print(
+        f"[{object_scale_key}] candidates={max_candidates} no_col={num_no_col} "
+        f"contact_ok={num_grasp_contact_ok} valid={num_valid} target_valid_cap={max_cap}"
+    )
+    print(
+        f"[{object_scale_key}] batches collision={collision_batches} "
+        f"sim_grasp={sim_grasp_batches} extforce_loops={extforce_batches} "
+        f"extforce_shrinks={extforce_shrinks}"
+    )
+    print(
+        f"[{object_scale_key}] time backend_init={backend_init_time:.3f}s "
+        f"collision={collision_time:.3f}s sim_grasp={sim_grasp_time:.3f}s "
+        f"extforce={extforce_time:.3f}s total={duration:.3f}s "
+        f"stop_reason={stop_reason} out={h5_path}"
+    )
 
     _write_grasp_npy_from_h5(h5_path, npy_path)
-    if verbose:
-        print(f"[{object_scale_key}] converted {h5_path.name} -> {npy_path.name}")
+    # if verbose:
+    print(f"[{object_scale_key}] converted {h5_path.name} -> {npy_path.name}")
     return str(h5_path)
 
 

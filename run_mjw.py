@@ -255,6 +255,9 @@ def run_sampling(
     max_cap = int(cfg["output"]["max_cap"])
     if max_cap <= 0:
         raise ValueError(f"output.max_cap must be positive, got {max_cap}.")
+    extforce_max_time_sec = float(cfg["output"]["max_time_sec"])
+    if extforce_max_time_sec <= 0.0:
+        raise ValueError(f"output.max_time_sec must be positive, got {extforce_max_time_sec}.")
     flush_every = int(cfg.get("output", {}).get("flush_every", 0) or 0)
     contact_min_count = int(cfg["validation"]["contact_min_count"])
     sim_grasp_cfg = dict(cfg.get("sim_grasp", {}))
@@ -371,6 +374,7 @@ def run_sampling(
     num_valid = 0
     flushed_valid = 0
     start_ts = time.time()
+    stop_reason = "depleted"
 
     with h5py.File(h5_path, "w") as hf:
         hf.create_dataset("object_id", data=_encode_h5_str(object_id))
@@ -497,7 +501,12 @@ def run_sampling(
                 miniters=1,
                 disable=not verbose,
             )
+            extforce_stage_start = time.perf_counter()
             while np.any(world_active):
+                if (time.perf_counter() - extforce_stage_start) >= extforce_max_time_sec:
+                    stop_reason = "timeout"
+                    break
+
                 active_world_ids = np.flatnonzero(world_active).astype(np.int32)
                 if (
                     next_candidate >= contact_ok_count
@@ -619,6 +628,7 @@ def run_sampling(
                         mjw_valid.reset_worlds(free_worlds)
 
                 if reached_cap:
+                    stop_reason = "cap"
                     break
             pbar.close()
 
@@ -642,7 +652,8 @@ def run_sampling(
         print(
             f"[{object_scale_key}] time backend_init={backend_init_time:.3f}s "
             f"collision={collision_time:.3f}s sim_grasp={sim_grasp_time:.3f}s "
-            f"extforce={extforce_time:.3f}s total={duration:.3f}s out={h5_path}"
+            f"extforce={extforce_time:.3f}s total={duration:.3f}s "
+            f"stop_reason={stop_reason} out={h5_path}"
         )
 
     _write_grasp_npy_from_h5(h5_path, npy_path)

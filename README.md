@@ -362,9 +362,13 @@ Examples:
 
 ### 8.8 `extforce`
 - External-force validation settings (`duration`, thresholds, force magnitude, check interval)
+- `run_mjw.py` stops the extforce stage early when either:
+  - `output.max_cap` valid grasps have been written
+  - extforce wall-clock time exceeds `output.max_time_sec`
+- Current default recommendation for Warp configs is `output.max_time_sec = 90.0`
 
 ### 8.9 `output`
-- `base_dir`, `max_cap`, `h5_name`, `npy_name`
+- `base_dir`, `max_cap`, `max_time_sec`, `h5_name`, `npy_name`
 - Current implementation writes `grasp.h5` in each `output_dir_abs`.
 - Current implementation always exports `grasp.npy` from `grasp.h5`.
 
@@ -391,7 +395,16 @@ Examples:
 
 ---
 
-## 10. Quick Commands
+## 10. MJWarp Sampling Tuning Notes
+- If the goal is to collect about `100` valid grasps per object-scale quickly, keep `output.max_cap = 100` and prefer `run_mjw.py` batch sizes near that target, typically `128`, `256`, or `512`.
+- Do not assume larger is faster for small-cap collection. A very large `batch_size` such as `4096` makes each MJWarp step heavier, so the extforce stage can become slower even though GPU occupancy is higher.
+- `batch_size = 4096` is better suited to large-scale grasp harvesting, not to quickly stopping after about `100` valid grasps.
+- Smaller `batch_size` also means fewer candidates are pushed through collision and `sim_grasp`, so surface sampling density should be reduced accordingly.
+- For the current `max_cap = 100` workflow, `sampling.n_points = 1024` is the recommended default. This avoids waiting too long in collision filtering and `sim_grasp` while still producing enough candidates for extforce.
+
+---
+
+## 11. Quick Commands
 ```bash
 # 1) Grasp generation for all object-scales
 python run_multi.py -c configs/run_YCB_liberhand.json -j 4
@@ -405,7 +418,7 @@ python vis_partial_pc.py -c configs/run_YCB_liberhand.json -i 0 --show-cam-frame
 
 ---
 
-## 11. Testing
+## 12. Testing
 ```bash
 pytest -q
 ```

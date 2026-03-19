@@ -21,7 +21,7 @@
     "id": 0
   },
   "sampling": {
-    "n_points": 4096,
+    "n_points": 1024,
     "downsample_for_sim": 512,
     "Nd": 1,
     "rot_n": 8,
@@ -166,6 +166,7 @@
   "output": {
     "base_dir": "outputs",
     "max_cap": 100,
+    "max_time_sec": 90.0,
     "h5_name": "grasp_data.h5",
     "npy_name": "grasp_data.npy"
   },

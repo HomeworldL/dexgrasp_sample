@@ -1,436 +1,262 @@
 # dexgrasp_sample
 
-MuJoCo-based dexterous grasp sampling pipeline for multi-dataset 3D object assets.
+MuJoCo-based offline dexterous grasp sampling for scaled 3D objects.
 
-## 1. Project Overview
-This repository generates offline grasp configurations for object meshes.
+The mainline pipeline is:
 
-Mainline workflow:
-1. Build object-scale assets from processed meshes.
-2. Sample object surface points and normals.
-3. Sample grasp frame candidates and convert to hand base pose.
-4. Run MuJoCo staged collision filtering + grasp closing + external-force validation.
-5. Save valid grasps to `grasp.h5`.
-6. Export `grasp.npy` from `grasp.h5`.
-7. (Optional, post-process) Render partial point clouds per object-scale via Warp.
+1. build a manifest-driven object-scale index
+2. sample surface points and grasp frames
+3. run MuJoCo collision and stability filtering
+4. save validated grasps to `grasp.h5` and `grasp.npy`
+5. render multi-view partial point clouds with Warp
+6. build dataset-level `train.json` and `test.json`
 
-Mainline code (from `AGENTS.md`):
-- `run.py`
-- `run_multi.py`
-- `run_warp_render.py`
-- `src/mj_ho.py`
-- `src/sample.py`
-- `src/dataset_objects.py`
+This repository supports both:
+- CPU MuJoCo sampling via `run.py` / `run_multi.py`
+- GPU MJWarp sampling via `run_mjw.py` / `run_multi_mjw.py`
 
----
+## Contents
+- [Repository Introduction](#repository-introduction)
+- [Installation and Dependencies](#installation-and-dependencies)
+- [Dataset Construction](#dataset-construction)
+- [Run Commands](#run-commands)
+- [Main Files](#main-files)
+- [Notes](#notes)
+- [Tuning Notes](#tuning-notes)
+- [TODO](#todo)
+- [License](#license)
 
-## 2. Dependencies
-Install base dependencies:
+## Repository Introduction
+
+Mainline purpose:
+- generate grasp candidates offline for object-scale entries
+- validate them with MuJoCo physics
+- save grasp states in a stable dataset format
+- render post-sampling partial point clouds for downstream learning
+
+Current mainline assumptions:
+- config-first workflow
+- manifest-gated dataset indexing
+- one flattened global id space over object-scale entries
+- `grasp.h5` is the source of truth, `grasp.npy` is derived from it
+
+Default dataset/config conventions:
+- default config: `configs/run_YCB_liberhand.json`
+- default dataset root: `assets/objects/processed`
+- common generated dataset tag rule: `run_<...>.json -> graspdata_<...>`
+
+## Installation and Dependencies
+
+Environment assumptions:
+- Ubuntu Linux
+- Python 3.10
+- MuJoCo
+- Open3D / trimesh / h5py / tqdm / transforms3d
+- optional Warp stack for GPU rendering and MJWarp sampling
+
+Recommended install flow:
 
 ```bash
+conda create -n grasp python=3.10 -y
+conda activate grasp
 pip install -r requirements.txt
 ```
 
-`requirements.txt` currently includes:
-- `numpy`, `scipy`, `torch`
-- `trimesh`, `open3d`
-- `mujoco`, `mujoco-viewer`
-- `h5py`, `tqdm`, `transforms3d`
-- `viser`, `pytest`
+If you use Warp / MJWarp:
+- ensure NVIDIA driver and CUDA runtime are available
+- install `warp-lang`
+- install `mujoco_warp`
 
-Optional dependencies by feature:
-- Warp partial point cloud rendering:
-  - `warp-lang`
-  - headless EGL/OpenGL-capable environment
-- Plotly grasp frame visualization:
-  - `plotly`
+Quick sanity checks:
 
----
-
-## 3. Repository Structure and Major Files
-### 3.1 Pipeline Entrypoints
-- `run.py`
-  - Single object-scale grasp sampling worker.
-  - Requires explicit object-scale inputs (`--object-scale-key`, `--coacd-path`, `--mjcf-path`, `--output-dir`).
-- `run_multi.py`
-  - Parallel dispatcher for all object-scales from config datasets.
-  - Spawns subprocesses that call `run.py`.
-- `run_warp_render.py`
-  - Post-grasp partial point cloud rendering for object-scales using Warp.
-  - Parallelized by object-scale entries (not by camera-view splitting across workers).
-
-### 3.2 Core Modules
-- `src/dataset_objects.py`
-  - Manifest-driven merged object-scale index.
-  - Reads `manifest.process_meshes.json`, keeps only `process_status=success`.
-  - Prebuilds scaled assets under `datasets/<dataset_tag>/<object>/scaleXXX/`.
-  - `dataset_tag` is derived from config stem by replacing leading `run_` with `graspdata_`.
-- `src/scale_dataset_builder.py`
-  - Builds per-scale assets:
-    - `coacd.obj`
-    - `convex_parts/*.obj`
-    - `object.xml`
-- `src/sample.py`
-  - Grasp frame sampling and point cloud FPS utilities.
-- `src/mj_ho.py`
-  - MuJoCo hand-object simulation helper:
-    - contact checks
-    - grasp closing simulation
-    - external-force validation
-
-### 3.3 Visualization Entrypoints (root)
-- `vis_obj.py`
-  - Visualize object mesh + sampled point cloud in Viser, then open MuJoCo paused viewer.
-- `vis_ho.py`
-  - Visualize hand-object posed meshes in Viser, then open MuJoCo paused viewer.
-- `vis_grasp.py`
-  - Visualize object + selected grasp hand meshes (4 qpos stages) in Viser.
-  - Also visualize all grasp frames in Plotly.
-- `vis_partial_pc.py`
-  - Visualize saved Warp partial point clouds (`partial_pc_XX.npy` world, `partial_pc_cam_XX.npy` camera) for one object-scale.
-  - Optional camera frame display from `cam_ex_XX.npy`.
-
----
-
-## 4. Dataset Interface and Output Layout
-### 4.1 Input dataset root
-Configured by JSON field `dataset.root` (recommended):
-- `assets/objects/processed`
-
-The repository commonly uses a symlink:
-- `assets/objects -> /home/ccs/repositories/mesh_process/assets/objects`
-
-### 4.2 Manifest gating
-Only manifest entries with:
-- `process_status=success`
-are eligible.
-
-### 4.3 Object-scale flattened indexing
-`DatasetObjects` provides merged global indexing over dataset list and scales.
-
-Each entry has fields:
-- `global_id`
-- `object_name`
-- `coacd_abs`
-- `convex_parts_abs`
-- `scale`
-- `mjcf_abs`
-- `output_dir_abs`
-- `object_scale_key`
-
-### 4.4 Generated filesystem layout
-For each object-scale:
-
-```text
-datasets/<dataset_tag>/<object_name>/scaleXXX/
-  coacd.obj
-  object.xml
-  convex_parts/part_000.obj ...
-  grasp.h5
-  grasp.npy
-  <warp_render.output_subdir>/
-    cam_in.npy
-    cam_ex_00.npy ...
-    partial_pc_00.npy ...
-    partial_pc_cam_00.npy ...
+```bash
+python run.py --help
+python run_multi.py --help
+python run_warp_render.py --help
+python run_mjw.py --help
 ```
 
-Notes:
-- `run.py` always writes `grasp.h5` and exports `grasp.npy`.
-- Point cloud outputs are kept separate from grasp arrays.
+## Dataset Construction
 
----
+### Input Layout
 
-## 5. Grasp Dataset Format (`grasp.h5`)
-Metadata datasets in H5:
-- `object_name` (string)
-- `scale` (float32)
-- `hand_name` (string)
-- `rot_repr` (`wxyz+qpos`)
+`DatasetObjects` indexes processed mesh datasets under:
 
-Main qpos datasets inside H5:
-- `qpos_init`
-- `qpos_approach`
-- `qpos_prepared`
-- `qpos_grasp`
+```text
+assets/objects/processed/
+  YCB/
+  DGN/
+  DGN2/
+  HOPE/
+```
 
-Each row is:
-- `[tx, ty, tz, qw, qx, qy, qz, q1...qN]`
+This repo commonly uses a symlinked mesh source:
 
-Semantics:
-- `qpos_prepared`: base pose + prepared joints
-- `qpos_approach`: base pose + approach joints
-- `qpos_init`: approach joints + shifted pose for approach start
-- `qpos_grasp`: final grasp pose after closing
+```text
+assets/objects -> /home/ccs/repositories/mesh_process/assets/objects
+```
 
----
+### Manifest Gating
 
-## 6. CLI Usage (Main Entrypoints)
-### 6.1 `run.py`
-Single object-scale grasp generation.
+Only objects listed in `manifest.process_meshes.json` with:
+- `process_status = success`
+
+are eligible for indexing.
+
+### Object-Scale Flattening
+
+Every `(object, scale)` pair becomes one flat entry with:
+- `global_id`
+- `object_scale_key`
+- `object_name`
+- `scale`
+- `coacd_abs`
+- `mjcf_abs`
+- `output_dir_abs`
+
+Example scale list used by mainline liberhand configs:
+
+```json
+[0.08, 0.10, 0.12, 0.14, 0.16]
+```
+
+### Generated Output Layout
+
+For a dataset tag like `graspdata_YCB_liberhand`, outputs are written under:
+
+```text
+datasets/graspdata_YCB_liberhand/<object>/scaleXXX/
+  coacd.obj
+  object.xml
+  convex_parts/*.obj
+  grasp.h5
+  grasp.npy
+  partial_pc_warp/
+    cam_in.npy
+    cam_ex_XX.npy
+    partial_pc_XX.npy
+    partial_pc_cam_XX.npy
+```
+
+## Run Commands
+
+### CPU: Single Object-Scale
+
+`run.py` samples one object-scale entry.
 
 ```bash
 python run.py \
   -c configs/run_YCB_liberhand.json \
-  --object-scale-key YCB_002_master_chef_can__scale080 \
-  --coacd-path datasets/graspdata_YCB_liberhand/YCB_002_master_chef_can/scale080/coacd.obj \
-  --mjcf-path datasets/graspdata_YCB_liberhand/YCB_002_master_chef_can/scale080/object.xml \
-  --output-dir datasets/graspdata_YCB_liberhand/YCB_002_master_chef_can/scale080 \
-  -v
+  --object-scale-key YCB_002_master_chef_can__scale120 \
+  --coacd-path datasets/graspdata_YCB_liberhand/YCB_002_master_chef_can/scale120/coacd.obj \
+  --mjcf-path datasets/graspdata_YCB_liberhand/YCB_002_master_chef_can/scale120/object.xml \
+  --output-dir datasets/graspdata_YCB_liberhand/YCB_002_master_chef_can/scale120 \
+  --force -v
 ```
 
-Args:
-- `--object-scale-key` required
-- `--coacd-path` required
-- `--mjcf-path` required
-- `--output-dir` required
-- `object_name` and `scale` are parsed from `--object-scale-key`
-- `-c/--config` optional (default `configs/run_YCB_liberhand.json`)
-- `-v/--verbose` optional
+Required arguments:
+- `--object-scale-key`
+- `--coacd-path`
+- `--mjcf-path`
+- `--output-dir`
 
-### 6.2 `run_multi.py`
-Parallel all object-scale entries in config.
+### CPU: Whole Dataset in Parallel
+
+`run_multi.py` only launches parallel grasp sampling.
 
 ```bash
-python run_multi.py -c configs/run_YCB_liberhand.json -j 4 -v
+python run_multi.py -c configs/run_YCB_liberhand.json -j 16 --force
 ```
 
-Args:
-- `-j/--max-parallel` max subprocesses
-- `--script` script path called per entry (default `run.py`)
-- `-c/--config` config path
-- `-v/--verbose`
+Useful flags:
+- `-j/--max-parallel`
+- `--script` to swap in another single-entry script
+- `--force`
+- `-v` to forward verbose mode to child `run.py`
 
-`run_multi.py` now only handles parallel grasp sampling.
+Logs are stored under:
 
-### 6.2.1 `build_dataset_splits.py`
-Build dataset-level `train.json` and `test.json` manifests from existing grasp and render outputs.
+```text
+logs/run/<dataset_tag>/
+```
+
+### GPU MJWarp: Single Object-Scale
 
 ```bash
-python build_dataset_splits.py -c configs/run_YCB_liberhand.json
+python run_mjw.py \
+  -c configs/run_YCB_liberhand.json \
+  --object-scale-key YCB_002_master_chef_can__scale120 \
+  --coacd-path datasets/graspdata_YCB_liberhand/YCB_002_master_chef_can/scale120/coacd.obj \
+  --mjcf-path datasets/graspdata_YCB_liberhand/YCB_002_master_chef_can/scale120/object.xml \
+  --output-dir datasets/graspdata_YCB_liberhand/YCB_002_master_chef_can/scale120 \
+  --batch-size 512 \
+  --nconmax 32 \
+  --naconmax 16384 \
+  --njmax 200 \
+  --ccd-iterations 200 \
+  --force -v
 ```
 
-This script writes:
-- `datasets/<dataset_tag>/train.json`
-- `datasets/<dataset_tag>/test.json`
-
-Build rules:
-- Re-scan all object-scale entries for the current config.
-- Only include complete outputs: `grasp.h5`, `grasp.npy`, `cam_in.npy`, and matched `partial_pc_XX.npy`, `partial_pc_cam_XX.npy`, `cam_ex_XX.npy`.
-- Split by `object_name` with a stable 4:1 train/test partition, so all scales of the same object stay in the same split.
-
-Each JSON item remains flattened at object-scale granularity, with all paths relative to `datasets/<dataset_tag>/`. Fields:
-- `global_id`
-- `object_scale_key`
-- `object_name`
-- `output_path`
-- `coacd_path`
-- `mjcf_path`
-- `grasp_h5_path`
-- `grasp_npy_path`
-- `partial_pc_path`
-- `partial_pc_cam_path`
-- `cam_ex_path`
-- `cam_in`
-- `scale`
-
-### 6.3 `run_warp_render.py`
-Post-process partial point cloud rendering.
+### GPU MJWarp: Whole Dataset in Parallel
 
 ```bash
-python run_warp_render.py -c configs/run_YCB_liberhand.json -j 1 -v
+python run_multi_mjw.py \
+  -c configs/run_YCB_liberhand.json \
+  -j 4 \
+  --batch-size 512 \
+  --njmax 200 \
+  --ccd-iterations 200 \
+  --force
 ```
 
-Single entry examples:
+Logs are stored under:
+
+```text
+logs/run_mjw/<dataset_tag>/
+```
+
+### Warp Partial Point Cloud Rendering
+
+`run_warp_render.py` supports both:
+- single entry mode via `-i` or `-k`
+- full dataset mode when neither is passed
+
+Whole dataset:
+
+```bash
+python run_warp_render.py -c configs/run_YCB_liberhand.json -j 2
+```
+
+Single entry:
 
 ```bash
 python run_warp_render.py -c configs/run_YCB_liberhand.json -i 0
 python run_warp_render.py -c configs/run_YCB_liberhand.json -k YCB_002_master_chef_can__scale080
 ```
 
-Args:
-- `-c/--config`
-- `-i/--obj-id` or `-k/--obj-key`
-- `-j/--max-parallel`
-- `--gpu-lst` override device list, e.g. `0,1` or `cpu`
-- `--force` ignore skip-existing
-- `-v/--verbose`
+### Dataset Split Manifest Build
 
-Parallel semantics:
-- Worker granularity is object-scale entries.
-- One entry renders `n_cols * n_rows` views in one worker.
-
-### 6.4 `eval_dataset.py`
-Evaluate the existing `qpos_grasp` entries already stored in `train.json` or `test.json`, without using a network.
+`build_dataset_splits.py` scans existing grasp and render outputs and writes:
+- `datasets/<dataset_tag>/train.json`
+- `datasets/<dataset_tag>/test.json`
 
 ```bash
-python eval_dataset.py \
-  -c configs/run_YCB_liberhand.json \
-  --split test \
-  --visualize \
-  -v
+python build_dataset_splits.py -c configs/run_YCB_liberhand.json
 ```
 
-Notes:
-- The split manifest is resolved automatically from `config` and `--split` as `datasets/<dataset_tag>/<split>.json`.
-- Each object-scale loads `qpos_grasp` directly from `grasp.h5`.
-- Each `qpos_grasp` is first rejected if `qpos_init` or `qpos_prepared` is already in contact.
-- Only grasps that pass the pre-contact checks are evaluated with `MjHO.sim_under_extforce`.
-- `--visualize` opens the MuJoCo viewer for both the pre-contact checks and the extforce validation.
-- The script reports per-object-scale and whole-split success counts and rates.
-- No new grasp artifact files are written.
+### One-Command Pipeline
 
----
-
-## 7. Visualization Usage
-### 7.1 `vis_obj.py`
-```bash
-python vis_obj.py -c configs/run_YCB_liberhand.json -i 0
-# or
-python vis_obj.py -c configs/run_YCB_liberhand.json -k YCB_002_master_chef_can__scale080
-```
-
-### 7.2 `vis_ho.py`
-```bash
-python vis_ho.py -c configs/run_YCB_liberhand.json -i 0
-```
-
-### 7.3 `vis_grasp.py`
-```bash
-python vis_grasp.py -c configs/run_YCB_liberhand.json -i 0
-python vis_grasp.py -c configs/run_YCB_liberhand.json -i 0 --vis-ids 0,10,-1 --frame-stage qpos_grasp
-```
-
-Useful options:
-- `--grasp-path` explicit `.h5` / `.npy`
-- `--skip-plotly`
-- `--plotly-html out.html`
-
-### 7.4 `vis_partial_pc.py`
-```bash
-python vis_partial_pc.py -c configs/run_YCB_liberhand.json -i 0
-python vis_partial_pc.py -c configs/run_YCB_liberhand.json -i 0 --view-ids 0,1 --show-cam-frames
-```
-
-Useful options:
-- `--pc-subdir` override pointcloud subdir
-- `--hide-mesh`
-- `--show-cam-frames`
-
-### 7.5 `tools/visualization/plot_grasp_pose_plotly.py`
-Run with project root in module path:
-
-```bash
-PYTHONPATH=. python tools/visualization/plot_grasp_pose_plotly.py -c configs/run_YCB_liberhand.json -i 0
-```
-
----
-
-## 8. Config JSON Guide
-Main config files:
-- `configs/run_<dataset_group>_<hand>.json`
-
-Examples:
-- `run_YCB_liberhand.json`
-- `run_DGN2_liberhand2.json`
-- `run_HOPE_inspire.json`
-
-### 8.1 `dataset`
-- `root`: dataset root path
-- `include`: dataset names list
-- `scales`: fixed scale list
-- `verbose`: dataset indexing logs
-
-### 8.2 `hand`
-- `xml_path`
-- `prepared_joints`
-- `approach_joints`
-- `shift_local`
-- `transform`
-  - `base_rot_grasp_to_palm`
-  - `extra_euler` (`axis`, `degrees`)
-- `target_body_params` (contact/distance weights)
-
-### 8.3 `sampling`
-- `n_points`: surface sampling points
-- `downsample_for_sim`: object point count used in simulation helper
-- `Nd`, `rot_n`, `d_min`, `d_max`, `max_points`: grasp frame sampling controls
-
-### 8.4 `sim_grasp`
-- MuJoCo grasp-closing step settings (`Mp`, `steps`, `speed_gain`, `max_tip_speed`)
-- `contact_min_count`: minimum hand-object contact count before external-force validation
-
-### 8.5 `extforce`
-- External-force validation settings (`duration`, thresholds, force magnitude, check interval)
-- `run_mjw.py` stops the extforce stage early when either:
-  - `output.max_cap` valid grasps have been written
-  - extforce wall-clock time exceeds `output.max_time_sec`
-- `run.py` treats `output.max_time_sec` as a total wall-clock budget for the whole CPU sampling run
-- Current default recommendation for Warp configs is `output.max_time_sec = 180.0`
-
-### 8.6 `output`
-- `max_cap`, `max_time_sec`, `flush_every`, `h5_name`, `npy_name`
-- `dataset_root` is optional and used by dataset-level helper scripts such as `run_multi.py`
-- Current implementation writes `grasp.h5` in each `output_dir_abs`.
-- Current implementation always exports `grasp.npy` from `grasp.h5`.
-
-### 8.7 `warp_render`
-- Device and parallel:
-  - `gpu_lst`, `thread_per_gpu`
-- Output and skip:
-  - `output_subdir` (default now `partial_pc_warp`)
-  - `save_pc/save_rgb/save_depth`
-  - `skip_existing`
-- Rendering geometry:
-  - `tile_width`, `tile_height`, `n_cols`, `n_rows`, `z_near`, `z_far`
-- Camera model:
-  - `intrinsics` (`preset/fx/fy/cx/cy`)
-  - `camera` (`type/radius/center/noise/lookat/up`)
-
----
-
-## 9. Notes on Partial Point Clouds
-- Saved `cam_ex_XX.npy` is camera-to-world transform in current implementation.
-- `partial_pc_XX.npy` is reconstructed from rendered depth + intrinsics + extrinsics in world frame.
-- `partial_pc_cam_XX.npy` stores the same sampled points in camera frame.
-- Point cloud geometry depends on both intrinsics and extrinsics.
-
----
-
-## 10. MJWarp Sampling Tuning Notes
-- If the goal is to collect about `100` valid grasps per object-scale quickly, keep `output.max_cap = 100` and prefer `run_mjw.py` batch sizes near that target, typically `128`, `256`, or `512`.
-- Do not assume larger is faster for small-cap collection. A very large `batch_size` such as `4096` makes each MJWarp step heavier, so the extforce stage can become slower even though GPU occupancy is higher.
-- `batch_size = 4096` is better suited to large-scale grasp harvesting, not to quickly stopping after about `100` valid grasps.
-- Smaller `batch_size` also means fewer candidates are pushed through collision and `sim_grasp`, so surface sampling density should be reduced accordingly.
-- For the current `max_cap = 100` workflow, `sampling.n_points = 2048` is the current default. This keeps candidate coverage reasonable without making collision filtering and `sim_grasp` excessively slow.
-
----
-
-## 11. Quick Commands
-```bash
-# 1) Grasp generation for all object-scales
-python run_multi.py -c configs/run_YCB_liberhand.json -j 4
-
-# 2) Render partial point clouds after grasp generation
-python run_warp_render.py -c configs/run_YCB_liberhand.json -j 1
-
-# 3) Visualize one object-scale partial point clouds
-python vis_partial_pc.py -c configs/run_YCB_liberhand.json -i 0 --show-cam-frames
-```
-
-One-command full pipeline for one config:
+`scripts/run_pipeline.sh` runs:
+1. page-cache drop
+2. `run_multi.py`
+3. `run_warp_render.py`
+4. `build_dataset_splits.py`
 
 ```bash
 bash scripts/run_pipeline.sh -c configs/run_YCB_liberhand.json
 ```
 
-Default behavior:
-- drops Linux page caches first
-- runs `run_multi.py` with `taskset -c 0-15`, `-j 16`, and `--force`
-- runs `run_warp_render.py` with `-j 2`
-- runs `build_dataset_splits.py`
-
-Optional overrides:
+Overrides:
 
 ```bash
 bash scripts/run_pipeline.sh \
@@ -442,52 +268,126 @@ bash scripts/run_pipeline.sh \
   --no-drop-caches
 ```
 
----
+### Visualization
 
-## 12. CPU Benchmark Tips
-Use these only when you want cleaner CPU benchmarking for `run_multi.py`.
+Object mesh:
 
-Clear Linux page cache before a benchmark run (requires `sudo`):
+```bash
+python vis_obj.py -c configs/run_YCB_liberhand.json -i 0
+python vis_obj.py -c configs/run_YCB_liberhand.json -k YCB_002_master_chef_can__scale080
+```
+
+Hand-object state:
+
+```bash
+python vis_ho.py -c configs/run_YCB_liberhand.json -i 0
+```
+
+Saved grasp states:
+
+```bash
+python vis_grasp.py -c configs/run_YCB_liberhand.json -i 0
+python vis_grasp.py -c configs/run_YCB_liberhand.json -i 0 --vis-ids 0,10,-1 --frame-stage qpos_grasp
+```
+
+Saved partial point clouds:
+
+```bash
+python vis_partial_pc.py -c configs/run_YCB_liberhand.json -i 0 --show-cam-frames
+```
+
+Plot grasp pose distributions:
+
+```bash
+PYTHONPATH=. python tools/visualization/plot_grasp_pose_plotly.py -c configs/run_YCB_liberhand.json -i 0
+```
+
+## Main Files
+
+### Entrypoints
+- [run.py](/home/ccs/repositories/dexgrasp_sample/run.py)
+  CPU single-entry grasp sampling
+- [run_multi.py](/home/ccs/repositories/dexgrasp_sample/run_multi.py)
+  CPU dataset-level parallel launcher
+- [run_mjw.py](/home/ccs/repositories/dexgrasp_sample/run_mjw.py)
+  GPU MJWarp single-entry sampling
+- [run_multi_mjw.py](/home/ccs/repositories/dexgrasp_sample/run_multi_mjw.py)
+  GPU MJWarp dataset-level parallel launcher
+- [run_warp_render.py](/home/ccs/repositories/dexgrasp_sample/run_warp_render.py)
+  Warp partial point cloud rendering
+- [build_dataset_splits.py](/home/ccs/repositories/dexgrasp_sample/build_dataset_splits.py)
+  Build `train.json` / `test.json`
+- [scripts/run_pipeline.sh](/home/ccs/repositories/dexgrasp_sample/scripts/run_pipeline.sh)
+  One-command full pipeline shell script
+
+### Core Modules
+- [src/dataset_objects.py](/home/ccs/repositories/dexgrasp_sample/src/dataset_objects.py)
+  Manifest-driven object-scale indexing and asset lookup
+- [src/mj_ho.py](/home/ccs/repositories/dexgrasp_sample/src/mj_ho.py)
+  CPU MuJoCo hand-object simulation helper
+- [src/mjw_ho.py](/home/ccs/repositories/dexgrasp_sample/src/mjw_ho.py)
+  MJWarp batched simulation helper
+- [src/sample.py](/home/ccs/repositories/dexgrasp_sample/src/sample.py)
+  Grasp frame sampling logic
+- [utils/utils_sample.py](/home/ccs/repositories/dexgrasp_sample/utils/utils_sample.py)
+  Shared sampling/output helpers
+- [utils/utils_file.py](/home/ccs/repositories/dexgrasp_sample/utils/utils_file.py)
+  Config loading, path utilities, logs-path helpers
+
+### Visualization
+- [vis_obj.py](/home/ccs/repositories/dexgrasp_sample/vis_obj.py)
+- [vis_obj_scale.py](/home/ccs/repositories/dexgrasp_sample/vis_obj_scale.py)
+- [vis_ho.py](/home/ccs/repositories/dexgrasp_sample/vis_ho.py)
+- [vis_grasp.py](/home/ccs/repositories/dexgrasp_sample/vis_grasp.py)
+- [vis_partial_pc.py](/home/ccs/repositories/dexgrasp_sample/vis_partial_pc.py)
+
+## Notes
+
+- Mainline is config-first. Do not expect hidden Python defaults to replace missing config fields.
+- `run_multi.py` only performs parallel sampling. Dataset split export is now separate in `build_dataset_splits.py`.
+- `run_warp_render.py` supports both single-entry mode and full-dataset mode.
+- `grasp.h5` is the authoritative result file. `grasp.npy` is always derived from it.
+- `docs/` is treated as local reference in this repo workflow and may be gitignored.
+- CPU and GPU sampling share the same object-scale interface, but not the same runtime behavior.
+- MJWarp GPU execution is not guaranteed to be deterministic across repeated runs.
+
+## Tuning Notes
+
+### CPU
+- `output.flush_every = 25` is the current default and avoids flushing HDF5 on every accepted sample.
+- `run.py` uses `output.max_time_sec` as a total wall-clock cap for the whole CPU sampling run.
+- `sim_grasp(record_history=False)` is the default hot-path setting; enable history only for visualization/debugging.
+- For cleaner CPU benchmarks:
 
 ```bash
 sync
 echo 3 | sudo tee /proc/sys/vm/drop_caches >/dev/null
-```
-
-Pin `run_multi.py` and all of its child processes to a CPU set with `taskset`:
-
-```bash
 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1 \
 taskset -c 0-15 python run_multi.py -c configs/run_YCB_liberhand.json -j 16
 ```
 
-On a NUMA machine, prefer `numactl` so CPU affinity and memory locality stay together:
+### MJWarp
+- `output.max_cap = 100` is still the practical target for the current MJWarp path.
+- `output.max_time_sec = 180.0` is the current extforce wall-clock cap in `run_mjw.py`.
+- If the goal is to reach about `100` valid grasps quickly, prefer `batch_size` near the target, typically `128`, `256`, or `512`.
+- Very large `batch_size` values such as `4096` are better suited to large-scale harvesting than to early-stop collection around `100` valid grasps.
+- Current mainline default `sampling.n_points = 2048` is the compromise point for the `max_cap = 100` workflow.
 
-```bash
-OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1 \
-numactl --physcpubind=0-15 --localalloc \
-python run_multi.py -c configs/run_YCB_liberhand.json -j 16
-```
+## TODO
 
-Notes:
-- `taskset` affinity is inherited by child processes started by `run_multi.py`.
-- Setting BLAS/OpenMP thread counts to `1` avoids oversubscription when `run_multi.py` already uses process-level parallelism.
-- Dropping page cache is mainly for reproducible benchmarking, not a normal production requirement.
+Current follow-up directions:
+- Improve GPU sampling throughput, likely including cross-object batching instead of only one object per batch.
+- Explore different grasp families beyond the current setting, for example 2-finger, 3-finger, and 4-finger grasps.
 
----
+Active plan file:
+- [TODO.md](/home/ccs/repositories/dexgrasp_sample/TODO.md)
 
-## 13. CPU Optimization Notes
-- `run.py` now reads `output.flush_every` from config and only flushes `grasp.h5` periodically instead of flushing on every accepted sample.
-- Recommended default is `output.flush_every = 25` for the current `max_cap = 100` workflow. This usually means only a few intermediate flushes, plus one guaranteed final flush when the file is resized and closed.
-- Even if the last chunk is smaller than `flush_every`, it is still written because `run.py` always does a final resize + `hf.flush()` before leaving the HDF5 context.
-- The closing stage now defaults to `sim_grasp(record_history=False)`. This avoids storing per-step history in the hot path. Visualization/debug tooling should enable `record_history=True` explicitly.
-- Contact-count filtering in `run.py` now uses a lightweight `MjHO.get_contact_num()` path instead of the heavier `get_contact_info()` structure-building path.
-- `MjHO` also precomputes control-mapping indices and side-swing DOF indices during initialization, so `qpos2ctrl()` and repeated side-swing masking no longer rebuild the same index lists on every step.
-- `get_hand_qpos(copy=True)` now supports a non-copy view mode for future high-frequency paths, while the current hot loop keeps explicit copies only where mutation safety matters.
+## References
 
----
+- BODex: <https://github.com/JYChen18/BODex>
+- DexGraspBench: <https://github.com/JYChen18/DexGraspBench>
 
-## 14. Testing
-```bash
-pytest -q
-```
+## License
+
+This project is released under the MIT License.
+See [LICENSE](/home/ccs/repositories/dexgrasp_sample/LICENSE).

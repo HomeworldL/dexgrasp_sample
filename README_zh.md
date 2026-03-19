@@ -200,7 +200,16 @@ python run_multi.py -c configs/run_YCB_liberhand.json -j 4 -v
 - `-c/--config`
 - `-v/--verbose`
 
-完成所有并行任务后，`run_multi.py` 还会在 `datasets/<dataset_tag>/` 下构建：
+`run_multi.py` 现在只负责并行抓取采样。
+
+### 6.2.1 `build_dataset_splits.py`
+基于已有抓取结果和点云渲染结果，构建数据集级别的 `train.json` / `test.json`。
+
+```bash
+python build_dataset_splits.py -c configs/run_YCB_liberhand.json
+```
+
+该脚本会写出：
 - `train.json`
 - `test.json`
 
@@ -208,7 +217,6 @@ python run_multi.py -c configs/run_YCB_liberhand.json -j 4 -v
 - 先重新遍历当前 config 对应的全部 object-scale 条目。
 - 仅收录产物完整的条目：需要存在 `grasp.h5`、`grasp.npy`、`cam_in.npy`，以及一一对应的 `partial_pc_XX.npy`、`partial_pc_cam_XX.npy`、`cam_ex_XX.npy`。
 - 按 `object_name` 分组做稳定的 4:1 划分，同一个物体的全部 scale 只会落在同一个 split。
-- 即使所有 object-scale 已经存在、无需再启动并行采样，也仍然会继续执行这一步划分导出。
 
 `train.json` / `test.json` 里的每条记录仍然是 obj-scale 粒度，路径都相对 `datasets/<dataset_tag>/`，字段包括：
 - `global_id`
@@ -396,6 +404,30 @@ python run_warp_render.py -c configs/run_YCB_liberhand.json -j 1
 
 # 3) 可视化某个 object-scale 的部分点云
 python vis_partial_pc.py -c configs/run_YCB_liberhand.json -i 0 --show-cam-frames
+```
+
+给定一个 config 一键跑完整流水线：
+
+```bash
+bash scripts/run_pipeline.sh -c configs/run_YCB_liberhand.json
+```
+
+默认行为：
+- 先清 Linux 页缓存
+- 用 `taskset -c 0-15`、`-j 16`、`--force` 运行 `run_multi.py`
+- 用 `-j 2` 运行 `run_warp_render.py`
+- 最后运行 `build_dataset_splits.py`
+
+可选覆盖参数：
+
+```bash
+bash scripts/run_pipeline.sh \
+  -c configs/run_YCB_liberhand.json \
+  --cpu-set 0-23 \
+  --run-j 24 \
+  --render-j 2 \
+  --no-force \
+  --no-drop-caches
 ```
 
 ---

@@ -201,7 +201,16 @@ Args:
 - `-c/--config` config path
 - `-v/--verbose`
 
-After parallel execution finishes, `run_multi.py` also writes:
+`run_multi.py` now only handles parallel grasp sampling.
+
+### 6.2.1 `build_dataset_splits.py`
+Build dataset-level `train.json` and `test.json` manifests from existing grasp and render outputs.
+
+```bash
+python build_dataset_splits.py -c configs/run_YCB_liberhand.json
+```
+
+This script writes:
 - `datasets/<dataset_tag>/train.json`
 - `datasets/<dataset_tag>/test.json`
 
@@ -209,7 +218,6 @@ Build rules:
 - Re-scan all object-scale entries for the current config.
 - Only include complete outputs: `grasp.h5`, `grasp.npy`, `cam_in.npy`, and matched `partial_pc_XX.npy`, `partial_pc_cam_XX.npy`, `cam_ex_XX.npy`.
 - Split by `object_name` with a stable 4:1 train/test partition, so all scales of the same object stay in the same split.
-- Even when every object-scale already exists and no parallel sampling is launched, this split export step still runs.
 
 Each JSON item remains flattened at object-scale granularity, with all paths relative to `datasets/<dataset_tag>/`. Fields:
 - `global_id`
@@ -408,6 +416,30 @@ python run_warp_render.py -c configs/run_YCB_liberhand.json -j 1
 
 # 3) Visualize one object-scale partial point clouds
 python vis_partial_pc.py -c configs/run_YCB_liberhand.json -i 0 --show-cam-frames
+```
+
+One-command full pipeline for one config:
+
+```bash
+bash scripts/run_pipeline.sh -c configs/run_YCB_liberhand.json
+```
+
+Default behavior:
+- drops Linux page caches first
+- runs `run_multi.py` with `taskset -c 0-15`, `-j 16`, and `--force`
+- runs `run_warp_render.py` with `-j 2`
+- runs `build_dataset_splits.py`
+
+Optional overrides:
+
+```bash
+bash scripts/run_pipeline.sh \
+  -c configs/run_YCB_liberhand.json \
+  --cpu-set 0-23 \
+  --run-j 24 \
+  --render-j 2 \
+  --no-force \
+  --no-drop-caches
 ```
 
 ---

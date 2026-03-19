@@ -293,6 +293,8 @@ def main() -> None:
         verbose=bool(cfg["dataset"].get("verbose", False)),
     )
 
+    # Single-entry mode: use -i/--obj-id or -k/--obj-key.
+    # Dataset mode: pass neither flag and iterate over all object-scale entries.
     if args.obj_key:
         entries = [ds.get_obj_info_by_scale_key(args.obj_key)]
     elif args.obj_id is not None:

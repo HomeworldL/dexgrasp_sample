@@ -3,7 +3,7 @@ from pathlib import Path
 
 import h5py
 
-from run_multi import build_split_records, split_records_by_object
+from build_dataset_splits import build_split_records, split_records_by_object
 
 
 def _touch(path: Path) -> None:
@@ -98,7 +98,7 @@ def test_empty_grasp_h5_is_filtered_after_split(tmp_path: Path):
         _write_grasp_h5(Path(entry["output_dir_abs"]) / "grasp.h5", rows=2)
     _write_grasp_h5(Path(entries[-1]["output_dir_abs"]) / "grasp.h5", rows=0)
 
-    from run_multi import build_split_records, filter_nonempty_grasp_records
+    from build_dataset_splits import build_split_records, filter_nonempty_grasp_records
 
     records, skipped = build_split_records(entries, dataset_dir, "partial_pc_warp")
     assert skipped == []

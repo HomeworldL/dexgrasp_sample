@@ -768,8 +768,8 @@ class MjHO:
         # tighten hand: add grip_delta to all joints except side-swing indices
         hand_qpos = qpos_grasp.copy()
         # apply delta
-        for i in range(hand_qpos.shape[0]):
-            if i not in self.side_swing_index_set:
+        for i in range(7, hand_qpos.shape[0]):
+            if (i - 7) not in self.side_swing_index_set:
                 hand_qpos[i] += grip_delta
 
         hand_ctrl = self.qpos2ctrl(hand_qpos)

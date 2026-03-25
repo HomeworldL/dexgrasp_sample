@@ -1,9 +1,13 @@
 from pathlib import Path
 import json
 
+import numpy as np
+import pytest
 import trimesh
 
 from src.dataset_objects import DatasetObjects
+from utils.utils_seed import set_seed
+from utils.utils_pointcloud import sample_surface_o3d
 
 
 def _make_mesh_object(obj_dir: Path):
@@ -47,3 +51,18 @@ def test_sample_surface_mesh_with_coacd_path(tmp_path: Path):
     pts, norms = ds.sample_surface_o3d(info["coacd_abs"], n_points=128, method="poisson")
     assert pts.shape == (128, 3)
     assert norms.shape == (128, 3)
+
+
+def test_sample_surface_o3d_is_reproducible_after_set_seed(tmp_path: Path):
+    pytest.importorskip("open3d")
+
+    obj_dir = tmp_path / "MSO" / "obj_b"
+    _make_mesh_object(obj_dir)
+
+    set_seed(0)
+    pts1, norms1 = sample_surface_o3d(str(obj_dir / "coacd.obj"), n_points=128, method="poisson")
+    set_seed(0)
+    pts2, norms2 = sample_surface_o3d(str(obj_dir / "coacd.obj"), n_points=128, method="poisson")
+
+    assert np.array_equal(pts1, pts2)
+    assert np.array_equal(norms1, norms2)

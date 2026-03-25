@@ -18,6 +18,8 @@ class ScaleDatasetBuilder:
     MIN_PART_MAX_EXTENT = 1e-5
     MIN_PART_AREA = 1e-10
     MIN_PART_VOLUME = 1e-12
+    MIN_OBJECT_MASS = 1e-10
+    MIN_OBJECT_INERTIA = 1e-12
 
     def __init__(self, base_output_dir: str):
         self.base_output_dir = Path(base_output_dir)
@@ -211,6 +213,16 @@ class ScaleDatasetBuilder:
         volume_ratio = vn / v0
         mass_scaled = m0 * volume_ratio * (scale_value ** 3)
         inertia_scaled = p0 * (volume_ratio ** (5.0 / 3.0)) * (scale_value ** 5)
+        if (
+            (not np.isfinite(mass_scaled))
+            or mass_scaled <= self.MIN_OBJECT_MASS
+            or np.any(~np.isfinite(inertia_scaled))
+            or np.any(np.asarray(inertia_scaled, dtype=np.float64) <= self.MIN_OBJECT_INERTIA)
+        ):
+            raise ValueError(
+                f"Scaled inertial is below valid threshold for {object_name} at scale={scale_value:.6f}: "
+                f"mass={mass_scaled:.6e}, inertia={np.asarray(inertia_scaled).tolist()}"
+            )
 
         convex_rel_paths = [os.path.relpath(p, scale_dir).replace("\\", "/") for p in scaled_convex_paths]
         xml_text = self._build_object_xml(

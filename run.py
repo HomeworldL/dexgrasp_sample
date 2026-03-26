@@ -84,14 +84,14 @@ def run_sampling(
 
     with h5py.File(h5_path, "w") as hf:
         hf.create_dataset("object_name", data=encode_h5_str(object_name))
-        hf.create_dataset("scale", data=np.float32(scale if scale is not None else np.nan))
+        hf.create_dataset("scale", data=np.float64(scale if scale is not None else np.nan))
         hf.create_dataset("hand_name", data=encode_h5_str(hand_name))
         hf.create_dataset("rot_repr", data=encode_h5_str("wxyz+qpos"))
 
-        ds_init = hf.create_dataset("qpos_init", shape=(max_cap, d), maxshape=(None, d), dtype="f4")
-        ds_approach = hf.create_dataset("qpos_approach", shape=(max_cap, d), maxshape=(None, d), dtype="f4")
-        ds_prepared = hf.create_dataset("qpos_prepared", shape=(max_cap, d), maxshape=(None, d), dtype="f4")
-        ds_grasp = hf.create_dataset("qpos_grasp", shape=(max_cap, d), maxshape=(None, d), dtype="f4")
+        ds_init = hf.create_dataset("qpos_init", shape=(max_cap, d), maxshape=(None, d), dtype="f8")
+        ds_approach = hf.create_dataset("qpos_approach", shape=(max_cap, d), maxshape=(None, d), dtype="f8")
+        ds_prepared = hf.create_dataset("qpos_prepared", shape=(max_cap, d), maxshape=(None, d), dtype="f8")
+        ds_grasp = hf.create_dataset("qpos_grasp", shape=(max_cap, d), maxshape=(None, d), dtype="f8")
 
         for i in tqdm(
             range(qpos_prepared.shape[0]),
@@ -130,10 +130,10 @@ def run_sampling(
                     **extforce_cfg,
                 )
                 if is_valid:
-                    ds_init[num_valid] = qpos_init[i].astype(np.float32, copy=False)
-                    ds_approach[num_valid] = qpos_approach[i].astype(np.float32, copy=False)
-                    ds_prepared[num_valid] = qpos_prepared[i].astype(np.float32, copy=False)
-                    ds_grasp[num_valid] = qpos_grasp.astype(np.float32, copy=False)
+                    ds_init[num_valid] = qpos_init[i].astype(np.float64, copy=False)
+                    ds_approach[num_valid] = qpos_approach[i].astype(np.float64, copy=False)
+                    ds_prepared[num_valid] = qpos_prepared[i].astype(np.float64, copy=False)
+                    ds_grasp[num_valid] = qpos_grasp.astype(np.float64, copy=False)
                     num_valid += 1
 
             if flush_every > 0 and (i + 1) % flush_every == 0:

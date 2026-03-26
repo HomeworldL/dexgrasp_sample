@@ -53,7 +53,7 @@ def write_grasp_npy_from_h5(h5_path: Path, npy_path: Path) -> None:
         for key in ("qpos_init", "qpos_approach", "qpos_prepared", "qpos_grasp"):
             if key not in hf:
                 raise KeyError(f"Missing dataset '{key}' in {h5_path}")
-            payload[key] = np.asarray(hf[key][:], dtype=np.float32)
+            payload[key] = np.asarray(hf[key][:])
     np.save(npy_path, payload, allow_pickle=True)
 
 
@@ -86,19 +86,19 @@ def sample_frames_from_points(cfg: Dict, pts: np.ndarray, norms: np.ndarray) -> 
 
 def build_pose_candidates(cfg: Dict, transforms_np: np.ndarray) -> np.ndarray:
     rot_grasp_to_palm = compose_rot_grasp_to_palm(cfg)
-    rotation_matrices = transforms_np[:, :3, :3] @ rot_grasp_to_palm
-    positions = transforms_np[:, :3, 3]
+    rotation_matrices = np.asarray(transforms_np[:, :3, :3], dtype=np.float64) @ rot_grasp_to_palm
+    positions = np.asarray(transforms_np[:, :3, 3], dtype=np.float64)
     quaternions = R.from_matrix(rotation_matrices).as_quat()
     quaternions = np.roll(quaternions, shift=1, axis=1)
-    return np.concatenate([positions, quaternions], axis=1).astype(np.float32)
+    return np.concatenate([positions, quaternions], axis=1).astype(np.float64)
 
 
 def make_qpos_triplets(cfg: Dict, pose: np.ndarray) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
-    prepared_joints = np.asarray(cfg["hand"]["prepared_joints"], dtype=np.float32)
-    approach_joints = np.asarray(cfg["hand"]["approach_joints"], dtype=np.float32)
+    prepared_joints = np.asarray(cfg["hand"]["prepared_joints"], dtype=np.float64)
+    approach_joints = np.asarray(cfg["hand"]["approach_joints"], dtype=np.float64)
 
-    q_expanded = np.tile(prepared_joints, (pose.shape[0], 1)).astype(np.float32)
-    qpos_prepared_sample = np.concatenate([pose, q_expanded], axis=1).astype(np.float32)
+    q_expanded = np.tile(prepared_joints, (pose.shape[0], 1)).astype(np.float64)
+    qpos_prepared_sample = np.concatenate([pose, q_expanded], axis=1).astype(np.float64)
 
     n = qpos_prepared_sample.shape[0]
     qpos_approach_sample = qpos_prepared_sample.copy()

@@ -30,7 +30,7 @@ def _load_qpos_grasp(grasp_h5_path: Path) -> Dict[str, np.ndarray]:
         missing = [key for key in required if key not in handle]
         if missing:
             raise KeyError(f"Missing datasets {missing} in {grasp_h5_path}")
-        arrays = {key: np.asarray(handle[key][:], dtype=np.float32) for key in required}
+        arrays = {key: np.asarray(handle[key][:], dtype=np.float64) for key in required}
     sizes = {key: int(value.shape[0]) for key, value in arrays.items()}
     if min(sizes.values()) <= 0:
         raise ValueError(f"One or more grasp datasets are empty in {grasp_h5_path}: {sizes}")
@@ -191,7 +191,7 @@ def evaluate_dataset_manifest(
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Evaluate existing dataset grasps from train/test.json using MjHO.sim_under_extforce."
+        description="Simulate existing dataset grasps from train/test.json using MjHO.sim_under_extforce."
     )
     parser.add_argument("-c", "--config", type=str, default=DEFAULT_RUN_CONFIG_PATH)
     parser.add_argument("--split", type=str, choices=["train", "test"], default="test")
@@ -219,7 +219,7 @@ def main() -> None:
     )
     print(json.dumps(summary, indent=2, ensure_ascii=False))
     print(
-        f"[eval_dataset] split={summary['split']} "
+        f"[sim_dataset] split={summary['split']} "
         f"success_rate={summary['success_rate']:.6f} "
         f"success={summary['total_success']}/{summary['total_attempts']} "
         f"evaluated_items={summary['evaluated_items']} skipped_items={len(summary['skipped_items'])}"

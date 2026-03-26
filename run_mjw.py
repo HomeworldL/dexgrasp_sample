@@ -289,14 +289,14 @@ def run_sampling(
 
     with h5py.File(h5_path, "w") as hf:
         hf.create_dataset("object_name", data=encode_h5_str(object_name))
-        hf.create_dataset("scale", data=np.float32(scale if scale is not None else np.nan))
+        hf.create_dataset("scale", data=np.float64(scale if scale is not None else np.nan))
         hf.create_dataset("hand_name", data=encode_h5_str(hand_name))
         hf.create_dataset("rot_repr", data=encode_h5_str("wxyz+qpos"))
 
-        ds_init = hf.create_dataset("qpos_init", shape=(max_cap, d), maxshape=(None, d), dtype="f4")
-        ds_approach = hf.create_dataset("qpos_approach", shape=(max_cap, d), maxshape=(None, d), dtype="f4")
-        ds_prepared = hf.create_dataset("qpos_prepared", shape=(max_cap, d), maxshape=(None, d), dtype="f4")
-        ds_grasp = hf.create_dataset("qpos_grasp", shape=(max_cap, d), maxshape=(None, d), dtype="f4")
+        ds_init = hf.create_dataset("qpos_init", shape=(max_cap, d), maxshape=(None, d), dtype="f8")
+        ds_approach = hf.create_dataset("qpos_approach", shape=(max_cap, d), maxshape=(None, d), dtype="f8")
+        ds_prepared = hf.create_dataset("qpos_prepared", shape=(max_cap, d), maxshape=(None, d), dtype="f8")
+        ds_grasp = hf.create_dataset("qpos_grasp", shape=(max_cap, d), maxshape=(None, d), dtype="f8")
 
         def write_valid_candidates(candidate_ids: np.ndarray) -> bool:
             nonlocal num_valid, flushed_valid
@@ -308,10 +308,10 @@ def run_sampling(
             write_ids = np.asarray(candidate_ids[:remaining], dtype=np.int32)
             n_write = int(write_ids.size)
             end = num_valid + n_write
-            ds_init[num_valid:end] = qpos_init_contact_ok[write_ids]
-            ds_approach[num_valid:end] = qpos_approach_contact_ok[write_ids]
-            ds_prepared[num_valid:end] = qpos_prepared_contact_ok[write_ids]
-            ds_grasp[num_valid:end] = qpos_grasp_contact_ok[write_ids]
+            ds_init[num_valid:end] = qpos_init_contact_ok[write_ids].astype(np.float64, copy=False)
+            ds_approach[num_valid:end] = qpos_approach_contact_ok[write_ids].astype(np.float64, copy=False)
+            ds_prepared[num_valid:end] = qpos_prepared_contact_ok[write_ids].astype(np.float64, copy=False)
+            ds_grasp[num_valid:end] = qpos_grasp_contact_ok[write_ids].astype(np.float64, copy=False)
             num_valid = end
             if flush_every > 0 and (num_valid - flushed_valid) >= flush_every:
                 hf.flush()
@@ -386,13 +386,13 @@ def run_sampling(
                 mjw_valid.reset_worlds(world_ids)
                 mjw_valid.load_hand_qpos_to_worlds(
                     world_ids,
-                    qpos_grasp_contact_ok[candidate_ids],
+                    grip_qpos_all[candidate_ids],
                     ctrl_batch=grip_ctrl_all[candidate_ids],
                     do_forward=True,
                 )
                 world_active[world_ids] = True
                 world_candidate_ids[world_ids] = candidate_ids
-                world_chunk_idx[world_ids] = 0
+                world_chunk_idx[world_ids] = -1
                 world_initial_pose[world_ids] = mjw_valid.get_obj_pose_for_worlds(world_ids)
                 if reset_metrics:
                     world_dir_idx[world_ids] = 0
@@ -456,8 +456,13 @@ def run_sampling(
                     world_active = np.ones((current_pool_size,), dtype=bool)
                     active_world_ids = np.arange(current_pool_size, dtype=np.int32)
 
+                settling_mask = world_chunk_idx[active_world_ids] < 0
                 active_force = np.zeros((active_world_ids.size, 6), dtype=np.float32)
-                active_force[:, :3] = force_dirs[world_dir_idx[active_world_ids], :3] * force_mag
+                force_worlds = active_world_ids[~settling_mask]
+                if force_worlds.size > 0:
+                    active_force[~settling_mask, :3] = (
+                        force_dirs[world_dir_idx[force_worlds], :3] * force_mag
+                    )
                 mjw_valid.set_object_force_to_worlds(active_world_ids, active_force)
 
                 ts = time.perf_counter()
@@ -465,23 +470,31 @@ def run_sampling(
                 extforce_time += time.perf_counter() - ts
                 extforce_batches += 1
 
-                has_contact = mjw_valid.read_contact_mask_for_worlds(active_world_ids)
-                current_obj_pose = mjw_valid.get_obj_pose_for_worlds(active_world_ids)
+                settling_worlds = active_world_ids[settling_mask]
+                if settling_worlds.size > 0:
+                    world_chunk_idx[settling_worlds] = 0
+
+                eval_worlds = active_world_ids[~settling_mask]
+                if eval_worlds.size == 0:
+                    continue
+
+                has_contact = mjw_valid.read_contact_mask_for_worlds(eval_worlds)
+                current_obj_pose = mjw_valid.get_obj_pose_for_worlds(eval_worlds)
                 dir_pos_delta, dir_angle_delta = mjw_valid._pose_delta_batch(
-                    world_initial_pose[active_world_ids], current_obj_pose
+                    world_initial_pose[eval_worlds], current_obj_pose
                 )
-                world_pos_delta[active_world_ids] = np.maximum(
-                    world_pos_delta[active_world_ids], dir_pos_delta
+                world_pos_delta[eval_worlds] = np.maximum(
+                    world_pos_delta[eval_worlds], dir_pos_delta
                 )
-                world_angle_delta[active_world_ids] = np.maximum(
-                    world_angle_delta[active_world_ids], dir_angle_delta
+                world_angle_delta[eval_worlds] = np.maximum(
+                    world_angle_delta[eval_worlds], dir_angle_delta
                 )
 
                 failed_mask = (~has_contact) | (dir_pos_delta >= trans_thresh) | (
                     dir_angle_delta >= angle_thresh
                 )
-                failed_worlds = active_world_ids[failed_mask]
-                alive_worlds = active_world_ids[~failed_mask]
+                failed_worlds = eval_worlds[failed_mask]
+                alive_worlds = eval_worlds[~failed_mask]
 
                 advance_mask = (world_chunk_idx[alive_worlds] + 1) >= n_chunks
                 dir_complete_worlds = alive_worlds[advance_mask]

@@ -2,14 +2,16 @@ import json
 from pathlib import Path
 
 import h5py
+import numpy as np
 
-import eval_dataset
+import sim_dataset
+from utils.utils_sample import write_grasp_npy_from_h5
 
 
 def _write_grasp_h5(path: Path, rows):
     path.parent.mkdir(parents=True, exist_ok=True)
     with h5py.File(path, "w") as handle:
-        handle.create_dataset("qpos_grasp", data=rows, dtype="f4")
+        handle.create_dataset("qpos_grasp", data=rows, dtype="f8")
 
 
 class _FakeMjHO:
@@ -39,7 +41,7 @@ class _FakeMjHO:
         return None
 
 
-def test_evaluate_dataset_manifest_counts_successes(tmp_path: Path, monkeypatch):
+def test_simulate_dataset_manifest_counts_successes(tmp_path: Path, monkeypatch):
     dataset_dir = tmp_path / "datasets" / "graspdata_YCB_liberhand"
     item_dir = dataset_dir / "obj_a" / "scale080"
     grasp_h5_path = item_dir / "grasp.h5"
@@ -58,7 +60,7 @@ def test_evaluate_dataset_manifest_counts_successes(tmp_path: Path, monkeypatch)
                 [1.0, 0.0, 0.0],
                 [-1.0, 0.0, 0.0],
             ],
-            dtype="f4",
+            dtype="f8",
         )
         handle.create_dataset(
             "qpos_prepared",
@@ -67,7 +69,7 @@ def test_evaluate_dataset_manifest_counts_successes(tmp_path: Path, monkeypatch)
                 [-1.0, 0.0, 0.0],
                 [1.0, 0.0, 0.0],
             ],
-            dtype="f4",
+            dtype="f8",
         )
 
     (dataset_dir / "test.json").write_text(
@@ -120,9 +122,9 @@ def test_evaluate_dataset_manifest_counts_successes(tmp_path: Path, monkeypatch)
         encoding="utf-8",
     )
 
-    monkeypatch.setattr(eval_dataset, "MjHO", _FakeMjHO)
+    monkeypatch.setattr(sim_dataset, "MjHO", _FakeMjHO)
 
-    summary = eval_dataset.evaluate_dataset_manifest(
+    summary = sim_dataset.evaluate_dataset_manifest(
         run_config_path=str(config_path),
         split="test",
     )
@@ -135,3 +137,18 @@ def test_evaluate_dataset_manifest_counts_successes(tmp_path: Path, monkeypatch)
     assert summary["items"][0]["grasp_count"] == 3
     assert summary["items"][0]["attempts"][1]["failure_stage"] == "qpos_prepared_contact"
     assert summary["items"][0]["attempts"][2]["failure_stage"] == "qpos_init_contact"
+
+
+def test_write_grasp_npy_preserves_float64(tmp_path: Path):
+    h5_path = tmp_path / "grasp.h5"
+    npy_path = tmp_path / "grasp.npy"
+    rows = np.asarray([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]], dtype=np.float64)
+    with h5py.File(h5_path, "w") as handle:
+        for key in ("qpos_init", "qpos_approach", "qpos_prepared", "qpos_grasp"):
+            handle.create_dataset(key, data=rows, dtype="f8")
+
+    write_grasp_npy_from_h5(h5_path, npy_path)
+
+    payload = np.load(npy_path, allow_pickle=True).item()
+    assert payload["qpos_grasp"].dtype == np.float64
+    assert np.array_equal(payload["qpos_grasp"], rows)

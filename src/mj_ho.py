@@ -760,11 +760,6 @@ class MjHO:
             raise RuntimeError(
                 "Object is fixed in this MjHO instance; cannot run extforce validation."
             )
-
-        self.reset()
-        # get initial object pose (pos + quat)
-        initial_obj_pose = self.get_obj_pose().copy()  # [x,y,z,qw,qx,qy,qz]
-
         # tighten hand: add grip_delta to all joints except side-swing indices
         hand_qpos = qpos_grasp.copy()
         # apply delta
@@ -798,7 +793,10 @@ class MjHO:
         # perform tests for each direction
         for dir_vec in external_force_dirs:
             self.reset()
-            self.set_hand_qpos(qpos_grasp)
+            self.set_hand_qpos(hand_qpos)
+            # get initial object pose (pos + quat)
+            initial_obj_pose = self.get_obj_pose().copy()  # [x,y,z,qw,qx,qy,qz]
+            self.step(check_step, ctrl=hand_ctrl)
             # print(f"Testing direction: {dir_vec}")
             # print(f"obj pos after reset: {self.get_obj_pose()}")
 

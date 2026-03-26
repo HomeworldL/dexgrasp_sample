@@ -786,9 +786,6 @@ class MjWarpHO:
             raise ValueError("valid_count must be positive for sim_under_extforce_batch.")
 
         qpos_grasp_batch = np.asarray(qpos_grasp_batch, dtype=np.float32)
-        self.set_hand_qpos_batch(qpos_grasp_batch, valid_count=valid_count, do_forward=True)
-        initial_obj_pose = self.get_obj_pose_batch(valid_count=valid_count).copy()
-
         grip_qpos = qpos_grasp_batch[:valid_count].copy()
         side_swing = set(self.hand_profile.get("side_swing_indices", [0, 4, 8, 12, 16]))
         for idx in range(7, self.nq_hand):
@@ -826,7 +823,13 @@ class MjWarpHO:
         angle_delta = np.zeros((valid_count,), dtype=np.float32)
 
         for dir_vec in external_force_dirs:
-            self.set_hand_qpos_batch(qpos_grasp_batch, valid_count=valid_count, do_forward=True)
+            self.set_hand_qpos_batch(grip_qpos, valid_count=valid_count, do_forward=True)
+            initial_obj_pose = self.get_obj_pose_batch(valid_count=valid_count).copy()
+            body_force_batch = np.zeros((valid_count, 6), dtype=np.float32)
+            self.set_object_force_batch(body_force_batch, valid_count=valid_count)
+            if self.nu > 0:
+                self.set_ctrl_batch(hand_ctrl_batch)
+            self.step_batch(int(chunk_size))
             body_force_batch = np.zeros((valid_count, 6), dtype=np.float32)
             body_force_batch[:, :3] = dir_vec[:3] * float(force_mag)
             self.set_object_force_batch(body_force_batch, valid_count=valid_count)

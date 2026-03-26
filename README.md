@@ -244,6 +244,24 @@ python run_warp_render.py -c configs/run_YCB_liberhand.json -k YCB_002_master_ch
 python build_dataset_splits.py -c configs/run_YCB_liberhand.json
 ```
 
+### Dataset Simulation Check
+
+`sim_dataset.py` replays saved dataset grasps from `train.json` / `test.json` with
+`MjHO.sim_under_extforce`.
+
+Default validation uses `float64` qpos casting:
+
+```bash
+python sim_dataset.py -c configs/run_YCB_liberhand.json --split train -v
+```
+
+To compare simulated success rates under `float32` casting:
+
+```bash
+python sim_dataset.py -c configs/run_YCB_liberhand.json --split train --dtype float32 -v
+python sim_dataset.py -c configs/run_YCB_liberhand.json --split train --dtype float64 -v
+```
+
 ### One-Command Pipeline
 
 `scripts/run_pipeline.sh` runs:
@@ -317,6 +335,8 @@ PYTHONPATH=. python tools/visualization/plot_grasp_pose_plotly.py -c configs/run
   Warp partial point cloud rendering
 - [build_dataset_splits.py](/home/ccs/repositories/dexgrasp_sample/build_dataset_splits.py)
   Build `train.json` / `test.json`
+- [sim_dataset.py](/home/ccs/repositories/dexgrasp_sample/sim_dataset.py)
+  Replay saved dataset grasps and report extforce success rates under `float32` / `float64`
 - [scripts/run_pipeline.sh](/home/ccs/repositories/dexgrasp_sample/scripts/run_pipeline.sh)
   One-command full pipeline shell script
 
@@ -347,6 +367,8 @@ PYTHONPATH=. python tools/visualization/plot_grasp_pose_plotly.py -c configs/run
 - `run_multi.py` only performs parallel sampling. Dataset split export is now separate in `build_dataset_splits.py`.
 - `run_warp_render.py` supports both single-entry mode and full-dataset mode.
 - `grasp.h5` is the authoritative result file. `grasp.npy` is always derived from it.
+- Mainline grasp arrays in `grasp.h5` / `grasp.npy` are stored as `float64`.
+- `sim_dataset.py` can cast stored qpos arrays to either `float32` or `float64` for stability comparison.
 - `docs/` is treated as local reference in this repo workflow and may be gitignored.
 - CPU and GPU sampling share the same object-scale interface, but not the same runtime behavior.
 - MJWarp GPU execution is not guaranteed to be deterministic across repeated runs.

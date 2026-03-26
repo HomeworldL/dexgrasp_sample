@@ -22,7 +22,15 @@ def _load_json(path: Path) -> List[Dict]:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def _load_qpos_grasp(grasp_h5_path: Path) -> Dict[str, np.ndarray]:
+def _resolve_qpos_dtype(dtype_name: str) -> np.dtype:
+    if dtype_name == "float32":
+        return np.dtype(np.float32)
+    if dtype_name == "float64":
+        return np.dtype(np.float64)
+    raise ValueError(f"Unsupported qpos dtype '{dtype_name}'. Expected 'float32' or 'float64'.")
+
+
+def _load_qpos_grasp(grasp_h5_path: Path, qpos_dtype: np.dtype) -> Dict[str, np.ndarray]:
     if not grasp_h5_path.exists():
         raise FileNotFoundError(f"grasp.h5 not found: {grasp_h5_path}")
     with h5py.File(grasp_h5_path, "r") as handle:
@@ -30,7 +38,7 @@ def _load_qpos_grasp(grasp_h5_path: Path) -> Dict[str, np.ndarray]:
         missing = [key for key in required if key not in handle]
         if missing:
             raise KeyError(f"Missing datasets {missing} in {grasp_h5_path}")
-        arrays = {key: np.asarray(handle[key][:], dtype=np.float64) for key in required}
+        arrays = {key: np.asarray(handle[key][:], dtype=qpos_dtype) for key in required}
     sizes = {key: int(value.shape[0]) for key, value in arrays.items()}
     if min(sizes.values()) <= 0:
         raise ValueError(f"One or more grasp datasets are empty in {grasp_h5_path}: {sizes}")
@@ -43,11 +51,13 @@ def evaluate_dataset_manifest(
     run_config_path: str,
     split: str,
     seed: Optional[int] = None,
+    qpos_dtype_name: str = "float64",
     visualize: bool = False,
 ) -> Dict:
     cfg = load_config(run_config_path)
     eval_seed = int(cfg["seed"] if seed is None else seed)
     set_seed(eval_seed)
+    qpos_dtype = _resolve_qpos_dtype(qpos_dtype_name)
 
     manifest_file = resolve_split_manifest_path(cfg, run_config_path, split)
     if not manifest_file.exists():
@@ -63,7 +73,13 @@ def evaluate_dataset_manifest(
     total_success = 0
     total_attempts = 0
 
-    LOGGER.info("Evaluating manifest=%s split=%s items=%d", manifest_file, split, len(items))
+    LOGGER.info(
+        "Evaluating manifest=%s split=%s items=%d qpos_dtype=%s",
+        manifest_file,
+        split,
+        len(items),
+        qpos_dtype.name,
+    )
 
     for item in items:
         grasp_h5_path = dataset_root / str(item["grasp_h5_path"])
@@ -72,7 +88,7 @@ def evaluate_dataset_manifest(
         object_name = str(item["object_name"])
 
         try:
-            grasp_arrays = _load_qpos_grasp(grasp_h5_path)
+            grasp_arrays = _load_qpos_grasp(grasp_h5_path, qpos_dtype=qpos_dtype)
             qpos_grasp = grasp_arrays["qpos_grasp"]
             if qpos_grasp.shape[0] <= 0:
                 raise ValueError("no grasps selected for evaluation")
@@ -179,6 +195,7 @@ def evaluate_dataset_manifest(
     return {
         "manifest_path": str(manifest_file),
         "split": split,
+        "qpos_dtype": qpos_dtype.name,
         "total_items": len(items),
         "evaluated_items": len(summary_items),
         "skipped_items": skipped_items,
@@ -196,6 +213,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("-c", "--config", type=str, default=DEFAULT_RUN_CONFIG_PATH)
     parser.add_argument("--split", type=str, choices=["train", "test"], default="test")
     parser.add_argument("--seed", type=int, default=None)
+    parser.add_argument(
+        "--dtype",
+        type=str,
+        choices=["float32", "float64"],
+        default="float64",
+        help="Cast stored qpos arrays to this dtype before simulation.",
+    )
     parser.add_argument(
         "--visualize",
         action="store_true",
@@ -215,11 +239,13 @@ def main() -> None:
         run_config_path=args.config,
         split=args.split,
         seed=args.seed,
+        qpos_dtype_name=args.dtype,
         visualize=bool(args.visualize),
     )
     print(json.dumps(summary, indent=2, ensure_ascii=False))
     print(
         f"[sim_dataset] split={summary['split']} "
+        f"dtype={summary['qpos_dtype']} "
         f"success_rate={summary['success_rate']:.6f} "
         f"success={summary['total_success']}/{summary['total_attempts']} "
         f"evaluated_items={summary['evaluated_items']} skipped_items={len(summary['skipped_items'])}"

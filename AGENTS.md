@@ -84,9 +84,12 @@ Mainline focus is offline grasp configuration generation.
   - keep only validated grasps
 - Persist outputs as HDF5 first (`grasp.h5`):
   - datasets: `qpos_init`, `qpos_approach`, `qpos_prepared`, `qpos_grasp`
+  - mainline stored dtype for grasp arrays is `float64`
   - use preallocated capacity + runtime truncate to final valid size
   - periodic flush/GC during long runs
 - After HDF5 is finalized, load the same arrays and convert to `grasp.npy` (values must be identical to HDF5).
+- `sim_dataset.py` is the dataset-level replay/validation entrypoint for `train.json` / `test.json`.
+  - support `--dtype float32` or `--dtype float64` to compare precision-sensitive extforce success rates
 - After grasp outputs are ready, render object partial point clouds with Warp (`run_warp_render.py`) and save under:
   - `datasets/<dataset_tag>/<object>/scaleXXX/<warp_render.output_subdir>/`
   - `dataset_tag` rule: replace config stem prefix `run_` with `graspdata_`

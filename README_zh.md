@@ -244,6 +244,24 @@ python run_warp_render.py -c configs/run_YCB_liberhand.json -k YCB_002_master_ch
 python build_dataset_splits.py -c configs/run_YCB_liberhand.json
 ```
 
+### 数据集仿真复验
+
+`sim_dataset.py` 会基于 `train.json` / `test.json` 中的已保存 grasp，重新调用
+`MjHO.sim_under_extforce` 做稳定性复验。
+
+默认按 `float64` 读取并转换 qpos：
+
+```bash
+python sim_dataset.py -c configs/run_YCB_liberhand.json --split train -v
+```
+
+如果要比较 `float32` 和 `float64` 两种精度下的成功率：
+
+```bash
+python sim_dataset.py -c configs/run_YCB_liberhand.json --split train --dtype float32 -v
+python sim_dataset.py -c configs/run_YCB_liberhand.json --split train --dtype float64 -v
+```
+
 ### 一键流水线脚本
 
 `scripts/run_pipeline.sh` 会依次执行：
@@ -317,6 +335,8 @@ PYTHONPATH=. python tools/visualization/plot_grasp_pose_plotly.py -c configs/run
   Warp 部分点云渲染
 - [build_dataset_splits.py](/home/ccs/repositories/dexgrasp_sample/build_dataset_splits.py)
   构建 `train.json` / `test.json`
+- [sim_dataset.py](/home/ccs/repositories/dexgrasp_sample/sim_dataset.py)
+  重放已保存数据集 grasp，并统计 `float32` / `float64` 下的 extforce 成功率
 - [scripts/run_pipeline.sh](/home/ccs/repositories/dexgrasp_sample/scripts/run_pipeline.sh)
   一键完整流水线
 
@@ -347,6 +367,8 @@ PYTHONPATH=. python tools/visualization/plot_grasp_pose_plotly.py -c configs/run
 - `run_multi.py` 现在只负责并行抓取采样，split 导出已经拆到 `build_dataset_splits.py`。
 - `run_warp_render.py` 同时支持单条目模式和整数据集模式。
 - `grasp.h5` 是主结果文件，`grasp.npy` 始终由它导出。
+- 当前主线 `grasp.h5` / `grasp.npy` 中的 grasp 数组按 `float64` 保存。
+- `sim_dataset.py` 可以把已保存的 qpos 强制转成 `float32` 或 `float64` 后再复验，用于比较精度敏感性。
 - 当前工作流里 `docs/` 更多用于本地参考，通常不会上传到 git。
 - CPU 和 GPU 采样使用统一的 object-scale 接口，但运行时行为和性能特征不同。
 - MJWarp GPU 路径不保证严格确定性。

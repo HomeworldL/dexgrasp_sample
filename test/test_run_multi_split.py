@@ -71,17 +71,20 @@ def test_build_split_records_and_split_by_object(tmp_path: Path):
     assert records[0]["cam_ex_path"] == ["obj_a/scale080/partial_pc_warp/cam_ex_00.npy"]
     assert records[0]["cam_in"] == "obj_a/scale080/partial_pc_warp/cam_in.npy"
 
-    train_records, test_records = split_records_by_object(records)
+    train_records, test_records = split_records_by_object(records, seed=0)
+    train_records_repeat, test_records_repeat = split_records_by_object(records, seed=0)
     train_objects = {record["object_name"] for record in train_records}
     test_objects = {record["object_name"] for record in test_records}
 
-    assert train_objects == {"obj_a", "obj_b", "obj_c", "obj_d"}
-    assert test_objects == {"obj_e"}
+    assert train_objects == {"obj_a", "obj_b", "obj_d", "obj_e"}
+    assert test_objects == {"obj_c"}
+    assert train_records == train_records_repeat
+    assert test_records == test_records_repeat
     assert len(train_records) == 8
     assert len(test_records) == 2
 
     serialized = json.loads(json.dumps(test_records, ensure_ascii=False))
-    assert serialized[0]["object_scale_key"].startswith("obj_e__")
+    assert serialized[0]["object_scale_key"].startswith("obj_c__")
 
 
 def test_empty_grasp_h5_is_filtered_after_split(tmp_path: Path):
@@ -103,7 +106,7 @@ def test_empty_grasp_h5_is_filtered_after_split(tmp_path: Path):
     records, skipped = build_split_records(entries, dataset_dir, "partial_pc_warp")
     assert skipped == []
 
-    train_records, test_records = split_records_by_object(records)
+    train_records, test_records = split_records_by_object(records, seed=7)
     filtered_train, empty_train = filter_nonempty_grasp_records(train_records, dataset_dir)
     filtered_test, empty_test = filter_nonempty_grasp_records(test_records, dataset_dir)
 

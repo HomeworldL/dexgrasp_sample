@@ -3,6 +3,7 @@
 
 import argparse
 import json
+import random
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Tuple
 
@@ -96,13 +97,17 @@ def build_split_records(
     return records, skipped
 
 
-def split_records_by_object(records: Sequence[Dict]) -> Tuple[List[Dict], List[Dict]]:
+def split_records_by_object(
+    records: Sequence[Dict],
+    seed: int,
+) -> Tuple[List[Dict], List[Dict]]:
     object_names = sorted({str(record["object_name"]) for record in records})
+    random.Random(int(seed)).shuffle(object_names)
     if len(object_names) <= 1:
         test_objects = set()
     else:
         test_count = max(1, int(round(len(object_names) * 0.2)))
-        test_objects = set(object_names[-test_count:])
+        test_objects = set(object_names[:test_count])
 
     train_records = [
         record for record in records if str(record["object_name"]) not in test_objects
@@ -133,13 +138,14 @@ def write_split_jsons(
     entries: Sequence[Dict],
     dataset_dir: Path,
     render_subdir: str,
+    split_seed: int,
 ) -> Tuple[Path, Path]:
     records, skipped = build_split_records(
         entries=entries,
         dataset_dir=dataset_dir,
         render_subdir=render_subdir,
     )
-    train_records, test_records = split_records_by_object(records)
+    train_records, test_records = split_records_by_object(records, seed=split_seed)
     train_records, empty_train = filter_nonempty_grasp_records(train_records, dataset_dir)
     test_records, empty_test = filter_nonempty_grasp_records(test_records, dataset_dir)
     empty_records = empty_train + empty_test
@@ -190,6 +196,7 @@ def main() -> None:
         entries=ds.get_entries(),
         dataset_dir=dataset_dir,
         render_subdir=str(cfg["warp_render"]["output_subdir"]),
+        split_seed=int(cfg["seed"]),
     )
 
 

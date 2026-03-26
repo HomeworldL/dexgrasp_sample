@@ -105,6 +105,29 @@ def _validate_target_body_params(cfg: Dict) -> None:
             ) from exc
 
 
+def _validate_template_sampling(cfg: Dict) -> None:
+    template_cfg = cfg.get("template_sampling")
+    if template_cfg is None:
+        return
+    if not isinstance(template_cfg, dict):
+        raise ValueError("Config field template_sampling must be an object.")
+    required = ["enabled", "keep_topk", "batch_size", "opt_steps", "normal_offset"]
+    for key in required:
+        if key not in template_cfg:
+            raise KeyError(f"Missing required config field: template_sampling.{key}")
+    if not isinstance(template_cfg["enabled"], bool):
+        raise ValueError("template_sampling.enabled must be a boolean.")
+    for key in ["keep_topk", "batch_size", "opt_steps"]:
+        if int(template_cfg[key]) <= 0:
+            raise ValueError(f"template_sampling.{key} must be > 0.")
+    if float(template_cfg["normal_offset"]) <= 0.0:
+        raise ValueError("template_sampling.normal_offset must be > 0.")
+    if "device" in template_cfg:
+        device = str(template_cfg["device"]).strip()
+        if not device:
+            raise ValueError("template_sampling.device must be a non-empty string when provided.")
+
+
 def _validate_config(cfg: Dict, source_path: str) -> None:
     if not isinstance(cfg, dict):
         raise ValueError(f"Config root must be a JSON object: {source_path}")
@@ -132,6 +155,7 @@ def _validate_config(cfg: Dict, source_path: str) -> None:
 
     for k in ["n_points", "downsample_for_sim", "Nd", "rot_n", "d_min", "d_max"]:
         _require(cfg, f"sampling.{k}")
+    _validate_template_sampling(cfg)
 
     transform_cfg = _require(cfg, "hand.transform")
     if "base_rot_grasp_to_palm" not in transform_cfg:

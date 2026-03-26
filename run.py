@@ -25,6 +25,7 @@ from utils.utils_sample import (
     write_grasp_npy_from_h5,
 )
 from utils.utils_seed import set_seed
+from utils.utils_template_sampling import refine_pose_candidates_with_template_alignment
 
 
 def run_sampling(
@@ -62,6 +63,18 @@ def run_sampling(
         print(f"[{object_scale_key}] frame sampling time: {time.time() - ts:.3f}s, N={len(transforms_np)}")
 
     pose = build_pose_candidates(cfg, transforms_np)
+    pose = refine_pose_candidates_with_template_alignment(
+        cfg=cfg,
+        hand_xml_path=hand_xml_path,
+        target_body_params=target_body_params,
+        pose_candidates=pose,
+        obj_points=pts_for_sim,
+        obj_normals=norms_for_sim,
+    )
+    if verbose and pose.shape[0] != transforms_np.shape[0]:
+        print(
+            f"[{object_scale_key}] template alignment kept {pose.shape[0]}/{transforms_np.shape[0]} pose candidates"
+        )
     qpos_init, qpos_approach, qpos_prepared = make_qpos_triplets(cfg, pose)
 
     out_dir = Path(output_dir_abs)

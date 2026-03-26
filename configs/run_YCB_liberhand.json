@@ -140,6 +140,13 @@
     "d_max": 0.06,
     "max_points": null
   },
+  "template_sampling": {
+    "enabled": true,
+    "keep_topk": 4096,
+    "batch_size": 1024,
+    "opt_steps": 2,
+    "normal_offset": 0.01
+  },
   "sim_grasp": {
     "Mp": 20,
     "steps": 40,

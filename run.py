@@ -73,8 +73,11 @@ def run_sampling(
     contact_min_count = int(cfg["sim_grasp"]["contact_min_count"])
     sim_grasp_cfg = dict(cfg.get("sim_grasp", {}))
     extforce_cfg = dict(cfg.get("extforce", {}))
+    extforce_sim_cfg = dict(extforce_cfg)
     sim_grasp_cfg.pop("visualize", None)
     extforce_cfg.pop("visualize", None)
+    extforce_sim_cfg.pop("visualize", None)
+    extforce_sim_cfg.pop("grip_delta", None)
     sim_grasp_cfg.pop("contact_min_count", None)
     num_no_col = 0
     num_valid = 0
@@ -92,6 +95,7 @@ def run_sampling(
         ds_approach = hf.create_dataset("qpos_approach", shape=(max_cap, d), maxshape=(None, d), dtype="f8")
         ds_prepared = hf.create_dataset("qpos_prepared", shape=(max_cap, d), maxshape=(None, d), dtype="f8")
         ds_grasp = hf.create_dataset("qpos_grasp", shape=(max_cap, d), maxshape=(None, d), dtype="f8")
+        ds_squeeze = hf.create_dataset("qpos_squeeze", shape=(max_cap, d), maxshape=(None, d), dtype="f8")
 
         for i in tqdm(
             range(qpos_prepared.shape[0]),
@@ -124,16 +128,21 @@ def run_sampling(
             ho_contact_num = mjho.get_contact_num(obj_margin=0.00)
 
             if ho_contact_num >= contact_min_count:
+                qpos_squeeze = mjho_valid.build_squeeze_qpos(
+                    qpos_grasp,
+                    grip_delta=float(extforce_cfg.get("grip_delta", 0.0)),
+                )
                 is_valid, _, _ = mjho_valid.sim_under_extforce(
-                    qpos_grasp.copy(),
+                    qpos_squeeze.copy(),
                     visualize=False,
-                    **extforce_cfg,
+                    **extforce_sim_cfg,
                 )
                 if is_valid:
                     ds_init[num_valid] = qpos_init[i].astype(np.float64, copy=False)
                     ds_approach[num_valid] = qpos_approach[i].astype(np.float64, copy=False)
                     ds_prepared[num_valid] = qpos_prepared[i].astype(np.float64, copy=False)
                     ds_grasp[num_valid] = qpos_grasp.astype(np.float64, copy=False)
+                    ds_squeeze[num_valid] = qpos_squeeze.astype(np.float64, copy=False)
                     num_valid += 1
 
             if flush_every > 0 and (i + 1) % flush_every == 0:
@@ -144,6 +153,7 @@ def run_sampling(
         ds_approach.resize((final_size, d))
         ds_prepared.resize((final_size, d))
         ds_grasp.resize((final_size, d))
+        ds_squeeze.resize((final_size, d))
         hf.flush()
 
     duration = time.time() - ts

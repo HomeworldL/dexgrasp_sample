@@ -50,7 +50,7 @@ def grasp_h5_nonempty(h5_path: Path) -> Tuple[bool, str]:
 def write_grasp_npy_from_h5(h5_path: Path, npy_path: Path) -> None:
     payload: Dict[str, np.ndarray] = {}
     with h5py.File(h5_path, "r") as hf:
-        for key in ("qpos_init", "qpos_approach", "qpos_prepared", "qpos_grasp"):
+        for key in ("qpos_init", "qpos_approach", "qpos_prepared", "qpos_grasp", "qpos_squeeze"):
             if key not in hf:
                 raise KeyError(f"Missing dataset '{key}' in {h5_path}")
             payload[key] = np.asarray(hf[key][:])

@@ -403,6 +403,24 @@ class MjHO:
         else:
             return np.array(self.data.qpos[-7:])
 
+    def build_squeeze_qpos(
+        self,
+        qpos_grasp: np.ndarray,
+        grip_delta: float = 0.05,
+    ) -> np.ndarray:
+        """Return a hand qpos with extra squeeze applied to non-side-swing joints."""
+        hand_qpos = np.asarray(qpos_grasp, dtype=float).reshape(-1).copy()
+        if hand_qpos.shape[0] == self.nq:
+            hand_qpos = hand_qpos[: self.nq_hand].copy()
+        elif hand_qpos.shape[0] != self.nq_hand:
+            raise ValueError(
+                f"Unsupported qpos length {hand_qpos.shape[0]} for build_squeeze_qpos."
+            )
+        for i in range(7, hand_qpos.shape[0]):
+            if (i - 7) not in self.side_swing_index_set:
+                hand_qpos[i] += float(grip_delta)
+        return hand_qpos
+
     def get_obj_mesh(self):
         # TODO
         pass
@@ -746,11 +764,10 @@ class MjHO:
 
     def sim_under_extforce(
         self,
-        qpos_grasp: np.ndarray,
+        qpos_squeeze: np.ndarray,
         duration: float = 1.0,
         trans_thresh: float = 0.05,
         angle_thresh: float = 10.0,
-        grip_delta: float = 0.05,
         force_mag: float = 1.0,
         check_step: int = 50,
         visualize: bool = False,
@@ -760,12 +777,13 @@ class MjHO:
             raise RuntimeError(
                 "Object is fixed in this MjHO instance; cannot run extforce validation."
             )
-        # tighten hand: add grip_delta to all joints except side-swing indices
-        hand_qpos = qpos_grasp.copy()
-        # apply delta
-        for i in range(7, hand_qpos.shape[0]):
-            if (i - 7) not in self.side_swing_index_set:
-                hand_qpos[i] += grip_delta
+        hand_qpos = np.asarray(qpos_squeeze, dtype=float).reshape(-1).copy()
+        if hand_qpos.shape[0] == self.nq:
+            hand_qpos = hand_qpos[: self.nq_hand].copy()
+        elif hand_qpos.shape[0] != self.nq_hand:
+            raise ValueError(
+                f"Unsupported qpos length {hand_qpos.shape[0]} for sim_under_extforce."
+            )
 
         hand_ctrl = self.qpos2ctrl(hand_qpos)
 
@@ -794,9 +812,19 @@ class MjHO:
         for dir_vec in external_force_dirs:
             self.reset()
             self.set_hand_qpos(hand_qpos)
-            # get initial object pose (pos + quat)
+            # First gate the no-force settling drift before applying external forces.
             initial_obj_pose = self.get_obj_pose().copy()  # [x,y,z,qw,qx,qy,qz]
             self.step(check_step, ctrl=hand_ctrl)
+            if not self.is_contact():
+                return False, np.inf, np.inf
+            settle_pos_delta, settle_angle_delta = self.get_pose_delta(
+                initial_obj_pose, self.get_obj_pose()
+            )
+            if (settle_pos_delta >= (trans_thresh * 0.5)) or (
+                settle_angle_delta >= (angle_thresh * 0.5)
+            ):
+                return False, np.inf, np.inf
+            settled_obj_pose = self.get_obj_pose().copy()
             # print(f"Testing direction: {dir_vec}")
             # print(f"obj pos after reset: {self.get_obj_pose()}")
 
@@ -819,7 +847,7 @@ class MjHO:
                 if self.is_contact():
 
                     pos_delta, angle_delta = self.get_pose_delta(
-                        initial_obj_pose, self.get_obj_pose()
+                        settled_obj_pose, self.get_obj_pose()
                     )
 
                     succ_flag = (pos_delta < trans_thresh) & (
@@ -830,13 +858,14 @@ class MjHO:
                         return False, np.inf, np.inf
                 else:
                     return False, np.inf, np.inf
+            self.data.xfrc_applied[obj_body_id] = np.zeros(6, dtype=float)
 
         # all directions passed
         self.data.xfrc_applied[obj_body_id] = np.zeros(6, dtype=float)
 
         # compute translation and rotation deltas
         pos_delta, angle_delta = self.get_pose_delta(
-            initial_obj_pose, self.get_obj_pose()
+            settled_obj_pose, self.get_obj_pose()
         )
         succ_flag = (pos_delta < trans_thresh) & (angle_delta < angle_thresh)
 

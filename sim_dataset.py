@@ -34,7 +34,7 @@ def _load_qpos_grasp(grasp_h5_path: Path, qpos_dtype: np.dtype) -> Dict[str, np.
     if not grasp_h5_path.exists():
         raise FileNotFoundError(f"grasp.h5 not found: {grasp_h5_path}")
     with h5py.File(grasp_h5_path, "r") as handle:
-        required = ["qpos_init", "qpos_prepared", "qpos_grasp"]
+        required = ["qpos_init", "qpos_prepared", "qpos_grasp", "qpos_squeeze"]
         missing = [key for key in required if key not in handle]
         if missing:
             raise KeyError(f"Missing datasets {missing} in {grasp_h5_path}")
@@ -66,7 +66,10 @@ def evaluate_dataset_manifest(
     dataset_root = manifest_file.parent.resolve()
     items = _load_json(manifest_file)
     extforce_cfg = dict(cfg.get("extforce", {}))
+    extforce_sim_cfg = dict(extforce_cfg)
     extforce_cfg.pop("visualize", None)
+    extforce_sim_cfg.pop("visualize", None)
+    extforce_sim_cfg.pop("grip_delta", None)
 
     summary_items: List[Dict] = []
     skipped_items: List[Dict] = []
@@ -89,8 +92,8 @@ def evaluate_dataset_manifest(
 
         try:
             grasp_arrays = _load_qpos_grasp(grasp_h5_path, qpos_dtype=qpos_dtype)
-            qpos_grasp = grasp_arrays["qpos_grasp"]
-            if qpos_grasp.shape[0] <= 0:
+            qpos_eval = grasp_arrays["qpos_squeeze"]
+            if qpos_eval.shape[0] <= 0:
                 raise ValueError("no grasps selected for evaluation")
             mjho_collision = MjHO(
                 {"name": object_name, "xml_abs": str(mjcf_path.resolve())},
@@ -114,7 +117,7 @@ def evaluate_dataset_manifest(
 
         success_count = 0
         attempt_details: List[Dict] = []
-        for grasp_idx, grasp_qpos in enumerate(qpos_grasp):
+        for grasp_idx, grasp_qpos in enumerate(qpos_eval):
             try:
                 # Pre-check stored init/prepared states before running extforce validation.
                 init_qpos = grasp_arrays["qpos_init"][grasp_idx]
@@ -150,7 +153,7 @@ def evaluate_dataset_manifest(
                 success, pos_delta, angle_delta = mjho_valid.sim_under_extforce(
                     grasp_qpos.copy(),
                     visualize=visualize,
-                    **extforce_cfg,
+                    **extforce_sim_cfg,
                 )
                 success_flag = bool(success)
                 success_count += int(success_flag)
@@ -178,9 +181,10 @@ def evaluate_dataset_manifest(
         item_summary = {
             "object_scale_key": object_scale_key,
             "object_name": object_name,
-            "grasp_count": int(qpos_grasp.shape[0]),
+            "grasp_count": int(qpos_eval.shape[0]),
+            "validated_qpos_key": "qpos_squeeze",
             "success_count": int(success_count),
-            "success_rate": float(success_count / max(1, qpos_grasp.shape[0])),
+            "success_rate": float(success_count / max(1, qpos_eval.shape[0])),
             "attempts": attempt_details,
         }
         summary_items.append(item_summary)
@@ -188,7 +192,7 @@ def evaluate_dataset_manifest(
             "[%s] success=%d/%d rate=%.4f",
             object_scale_key,
             success_count,
-            int(qpos_grasp.shape[0]),
+            int(qpos_eval.shape[0]),
             item_summary["success_rate"],
         )
 

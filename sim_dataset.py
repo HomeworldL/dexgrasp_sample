@@ -51,7 +51,7 @@ def evaluate_dataset_manifest(
     run_config_path: str,
     split: str,
     seed: Optional[int] = None,
-    qpos_dtype_name: str = "float64",
+    qpos_dtype_name: str = "float32",
     visualize: bool = False,
 ) -> Dict:
     cfg = load_config(run_config_path)
@@ -221,8 +221,8 @@ def parse_args() -> argparse.Namespace:
         "--dtype",
         type=str,
         choices=["float32", "float64"],
-        default="float64",
-        help="Cast stored qpos arrays to this dtype before simulation.",
+        default="float32",
+        help="Cast stored qpos arrays to this dtype before simulation. Mainline uses float32.",
     )
     parser.add_argument(
         "--visualize",

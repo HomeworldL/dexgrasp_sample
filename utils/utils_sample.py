@@ -10,9 +10,16 @@ from scipy.spatial.transform import Rotation as R
 
 from src.sample import sample_grasp_frames
 
+GRASP_ARRAY_DTYPE = np.float32
+GRASP_H5_DTYPE = "f4"
+
 
 def encode_h5_str(value: str) -> np.bytes_:
     return np.bytes_(str(value))
+
+
+def as_grasp_array(values: np.ndarray) -> np.ndarray:
+    return np.asarray(values, dtype=GRASP_ARRAY_DTYPE)
 
 
 def parse_object_scale_key(object_scale_key: str) -> Tuple[str, Optional[float]]:
@@ -77,7 +84,7 @@ def sample_frames_from_points(cfg: Dict, pts: np.ndarray, norms: np.ndarray) -> 
         device=torch.device("cuda:0" if torch.cuda.is_available() else "cpu"),
         max_points=sampling_cfg["max_points"],
     )
-    transforms_np = transforms.cpu().numpy()
+    transforms_np = transforms.cpu().numpy().astype(GRASP_ARRAY_DTYPE, copy=False)
     del transforms
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
@@ -86,32 +93,36 @@ def sample_frames_from_points(cfg: Dict, pts: np.ndarray, norms: np.ndarray) -> 
 
 def build_pose_candidates(cfg: Dict, transforms_np: np.ndarray) -> np.ndarray:
     rot_grasp_to_palm = compose_rot_grasp_to_palm(cfg)
-    rotation_matrices = np.asarray(transforms_np[:, :3, :3], dtype=np.float64) @ rot_grasp_to_palm
-    positions = np.asarray(transforms_np[:, :3, 3], dtype=np.float64)
+    rotation_matrices = np.asarray(transforms_np[:, :3, :3], dtype=GRASP_ARRAY_DTYPE) @ rot_grasp_to_palm
+    positions = np.asarray(transforms_np[:, :3, 3], dtype=GRASP_ARRAY_DTYPE)
     quaternions = R.from_matrix(rotation_matrices).as_quat()
     quaternions = np.roll(quaternions, shift=1, axis=1)
-    return np.concatenate([positions, quaternions], axis=1).astype(np.float64)
+    return np.concatenate([positions, quaternions], axis=1).astype(GRASP_ARRAY_DTYPE)
 
 
 def make_qpos_triplets(cfg: Dict, pose: np.ndarray) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
-    prepared_joints = np.asarray(cfg["hand"]["prepared_joints"], dtype=np.float64)
-    approach_joints = np.asarray(cfg["hand"]["approach_joints"], dtype=np.float64)
+    prepared_joints = np.asarray(cfg["hand"]["prepared_joints"], dtype=GRASP_ARRAY_DTYPE)
+    approach_joints = np.asarray(cfg["hand"]["approach_joints"], dtype=GRASP_ARRAY_DTYPE)
 
-    q_expanded = np.tile(prepared_joints, (pose.shape[0], 1)).astype(np.float64)
-    qpos_prepared_sample = np.concatenate([pose, q_expanded], axis=1).astype(np.float64)
+    q_expanded = np.tile(prepared_joints, (pose.shape[0], 1)).astype(GRASP_ARRAY_DTYPE)
+    qpos_prepared_sample = np.concatenate([pose, q_expanded], axis=1).astype(GRASP_ARRAY_DTYPE)
 
     n = qpos_prepared_sample.shape[0]
     qpos_approach_sample = qpos_prepared_sample.copy()
     qpos_approach_sample[:, 7:] = np.tile(approach_joints, (n, 1))
 
-    shift_local = np.asarray(cfg["hand"]["shift_local"], dtype=float)
+    shift_local = np.asarray(cfg["hand"]["shift_local"], dtype=GRASP_ARRAY_DTYPE)
     positions = qpos_prepared_sample[:, :3]
     quats_wxyz = qpos_prepared_sample[:, 3:7]
     quats_xyzw = quats_wxyz[:, [1, 2, 3, 0]]
-    offset_world = R.from_quat(quats_xyzw).apply(shift_local)
+    offset_world = R.from_quat(quats_xyzw.astype(np.float64)).apply(shift_local).astype(GRASP_ARRAY_DTYPE)
 
     qpos_init_sample = qpos_prepared_sample.copy()
     qpos_init_sample[:, :3] = positions + offset_world
     qpos_init_sample[:, 7:] = np.tile(approach_joints, (n, 1))
 
-    return qpos_init_sample, qpos_approach_sample, qpos_prepared_sample
+    return (
+        qpos_init_sample.astype(GRASP_ARRAY_DTYPE, copy=False),
+        qpos_approach_sample.astype(GRASP_ARRAY_DTYPE, copy=False),
+        qpos_prepared_sample.astype(GRASP_ARRAY_DTYPE, copy=False),
+    )

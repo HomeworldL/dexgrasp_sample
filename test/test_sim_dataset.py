@@ -11,7 +11,7 @@ from utils.utils_sample import write_grasp_npy_from_h5
 def _write_grasp_h5(path: Path, rows):
     path.parent.mkdir(parents=True, exist_ok=True)
     with h5py.File(path, "w") as handle:
-        handle.create_dataset("qpos_grasp", data=rows, dtype="f8")
+        handle.create_dataset("qpos_grasp", data=rows, dtype="f4")
 
 
 class _FakeMjHO:
@@ -60,7 +60,7 @@ def test_simulate_dataset_manifest_counts_successes(tmp_path: Path, monkeypatch)
                 [1.0, 0.0, 0.0],
                 [-1.0, 0.0, 0.0],
             ],
-            dtype="f8",
+            dtype="f4",
         )
         handle.create_dataset(
             "qpos_prepared",
@@ -69,7 +69,7 @@ def test_simulate_dataset_manifest_counts_successes(tmp_path: Path, monkeypatch)
                 [-1.0, 0.0, 0.0],
                 [1.0, 0.0, 0.0],
             ],
-            dtype="f8",
+            dtype="f4",
         )
         handle.create_dataset(
             "qpos_squeeze",
@@ -78,7 +78,7 @@ def test_simulate_dataset_manifest_counts_successes(tmp_path: Path, monkeypatch)
                 [-1.0, 0.0, 0.0],
                 [2.0, 0.0, 0.0],
             ],
-            dtype="f8",
+            dtype="f4",
         )
 
     (dataset_dir / "test.json").write_text(
@@ -147,10 +147,10 @@ def test_simulate_dataset_manifest_counts_successes(tmp_path: Path, monkeypatch)
     assert summary["items"][0]["validated_qpos_key"] == "qpos_squeeze"
     assert summary["items"][0]["attempts"][1]["failure_stage"] == "qpos_prepared_contact"
     assert summary["items"][0]["attempts"][2]["failure_stage"] == "qpos_init_contact"
-    assert summary["qpos_dtype"] == "float64"
+    assert summary["qpos_dtype"] == "float32"
 
 
-def test_simulate_dataset_manifest_allows_float32_cast(tmp_path: Path, monkeypatch):
+def test_simulate_dataset_manifest_allows_explicit_float64_cast(tmp_path: Path, monkeypatch):
     dataset_dir = tmp_path / "datasets" / "graspdata_YCB_liberhand"
     item_dir = dataset_dir / "obj_b" / "scale080"
     grasp_h5_path = item_dir / "grasp.h5"
@@ -159,9 +159,9 @@ def test_simulate_dataset_manifest_allows_float32_cast(tmp_path: Path, monkeypat
     mjcf_path.write_text("<mujoco/>", encoding="utf-8")
     _write_grasp_h5(grasp_h5_path, rows=[[1.0, 0.0, 0.0]])
     with h5py.File(grasp_h5_path, "a") as handle:
-        handle.create_dataset("qpos_init", data=[[1.0, 0.0, 0.0]], dtype="f8")
-        handle.create_dataset("qpos_prepared", data=[[1.0, 0.0, 0.0]], dtype="f8")
-        handle.create_dataset("qpos_squeeze", data=[[1.0, 0.0, 0.0]], dtype="f8")
+        handle.create_dataset("qpos_init", data=[[1.0, 0.0, 0.0]], dtype="f4")
+        handle.create_dataset("qpos_prepared", data=[[1.0, 0.0, 0.0]], dtype="f4")
+        handle.create_dataset("qpos_squeeze", data=[[1.0, 0.0, 0.0]], dtype="f4")
 
     (dataset_dir / "test.json").write_text(
         json.dumps(
@@ -218,11 +218,11 @@ def test_simulate_dataset_manifest_allows_float32_cast(tmp_path: Path, monkeypat
     summary = sim_dataset.evaluate_dataset_manifest(
         run_config_path=str(config_path),
         split="test",
-        qpos_dtype_name="float32",
+        qpos_dtype_name="float64",
     )
 
     assert summary["total_success"] == 1
-    assert summary["qpos_dtype"] == "float32"
+    assert summary["qpos_dtype"] == "float64"
 
 
 def test_simulate_dataset_manifest_requires_qpos_squeeze(tmp_path: Path, monkeypatch):
@@ -234,8 +234,8 @@ def test_simulate_dataset_manifest_requires_qpos_squeeze(tmp_path: Path, monkeyp
     mjcf_path.write_text("<mujoco/>", encoding="utf-8")
     _write_grasp_h5(grasp_h5_path, rows=[[-1.0, 0.0, 0.0]])
     with h5py.File(grasp_h5_path, "a") as handle:
-        handle.create_dataset("qpos_init", data=[[1.0, 0.0, 0.0]], dtype="f8")
-        handle.create_dataset("qpos_prepared", data=[[1.0, 0.0, 0.0]], dtype="f8")
+        handle.create_dataset("qpos_init", data=[[1.0, 0.0, 0.0]], dtype="f4")
+        handle.create_dataset("qpos_prepared", data=[[1.0, 0.0, 0.0]], dtype="f4")
 
     (dataset_dir / "test.json").write_text(
         json.dumps(
@@ -323,20 +323,20 @@ def test_simulate_dataset_manifest_requires_qpos_squeeze(tmp_path: Path, monkeyp
     assert "qpos_squeeze" in summary["skipped_items"][0]["reason"]
 
 
-def test_write_grasp_npy_preserves_float64(tmp_path: Path):
+def test_write_grasp_npy_preserves_float32(tmp_path: Path):
     h5_path = tmp_path / "grasp.h5"
     npy_path = tmp_path / "grasp.npy"
-    rows = np.asarray([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]], dtype=np.float64)
-    squeeze_rows = np.asarray([[1.5, 2.5, 3.5], [4.5, 5.5, 6.5]], dtype=np.float64)
+    rows = np.asarray([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]], dtype=np.float32)
+    squeeze_rows = np.asarray([[1.5, 2.5, 3.5], [4.5, 5.5, 6.5]], dtype=np.float32)
     with h5py.File(h5_path, "w") as handle:
         for key in ("qpos_init", "qpos_approach", "qpos_prepared", "qpos_grasp"):
-            handle.create_dataset(key, data=rows, dtype="f8")
-        handle.create_dataset("qpos_squeeze", data=squeeze_rows, dtype="f8")
+            handle.create_dataset(key, data=rows, dtype="f4")
+        handle.create_dataset("qpos_squeeze", data=squeeze_rows, dtype="f4")
 
     write_grasp_npy_from_h5(h5_path, npy_path)
 
     payload = np.load(npy_path, allow_pickle=True).item()
-    assert payload["qpos_grasp"].dtype == np.float64
+    assert payload["qpos_grasp"].dtype == np.float32
     assert np.array_equal(payload["qpos_grasp"], rows)
-    assert payload["qpos_squeeze"].dtype == np.float64
+    assert payload["qpos_squeeze"].dtype == np.float32
     assert np.array_equal(payload["qpos_squeeze"], squeeze_rows)

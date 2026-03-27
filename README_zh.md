@@ -7,9 +7,9 @@
 1. 基于 manifest 构建 object-scale 索引
 2. 采样表面点和抓取帧
 3. 用 MuJoCo 做碰撞与稳定性筛选
-4. 保存 `grasp.h5` 与 `grasp.npy`
+4. 保存抓取状态到 `grasp.h5` 与 `grasp.npy`
 5. 用 Warp 渲染多视角部分点云
-6. 构建数据集级别的 `train.json` / `test.json`
+6. 构建按 object 切分的数据集级别 `train.json` / `test.json`
 
 当前同时支持：
 - CPU MuJoCo 采样：`run.py` / `run_multi.py`
@@ -39,6 +39,8 @@
 - manifest 先过滤，再进入索引
 - 全局 id 空间是 object-scale 粒度
 - `grasp.h5` 是主结果，`grasp.npy` 由它导出
+- 主线 grasp 数组按 `float32` 存储
+- 数据集切分按 `object_name` 分组，避免不同 scale 间泄漏
 
 默认约定：
 - 默认配置：`configs/run_YCB_liberhand.json`
@@ -137,6 +139,29 @@ datasets/graspdata_YCB_liberhand/<object>/scaleXXX/
     partial_pc_XX.npy
     partial_pc_cam_XX.npy
 ```
+
+当前主线里，`grasp.h5` / `grasp.npy` 主要包含这些抓取数组：
+- `qpos_init`
+- `qpos_approach`
+- `qpos_prepared`
+- `qpos_grasp`
+- `qpos_squeeze`
+
+这些数组目前统一按 `float32` 存储。
+
+### 数据集切分规则
+
+`build_dataset_splits.py` 会在这里输出数据集清单：
+- `datasets/<dataset_tag>/train.json`
+- `datasets/<dataset_tag>/test.json`
+
+当前切分规则：
+- 按 `object_name` 切分，而不是按 object-scale 条目切分
+- 同一个物体的所有 scale 必须留在同一个 split 中
+- 默认按唯一物体数做约 `80/20` 切分，并使用配置中的 `seed` 打乱
+- 只有 `grasp.h5`、`grasp.npy` 和所需渲染输出都存在，条目才会进入清单
+- 写出最终 manifest 前会过滤空 grasp 文件
+- manifest 中保存相对 dataset root 的相对路径，便于整体迁移
 
 ## 运行指令
 
@@ -249,7 +274,12 @@ python build_dataset_splits.py -c configs/run_YCB_liberhand.json
 `sim_dataset.py` 会基于 `train.json` / `test.json` 中的已保存 grasp，重新调用
 `MjHO.sim_under_extforce` 做稳定性复验。
 
-默认按 `float64` 读取并转换 qpos：
+当前主线复验逻辑：
+- 使用保存的 `qpos_squeeze`
+- 在 extforce 前重做 `qpos_init` / `qpos_prepared` 的碰撞门控检查
+- 默认按 `float32` 读取并转换 qpos，与主线数据格式一致
+
+默认按 `float32` 读取并转换 qpos：
 
 ```bash
 python sim_dataset.py -c configs/run_YCB_liberhand.json --split train -v
@@ -367,8 +397,11 @@ PYTHONPATH=. python tools/visualization/plot_grasp_pose_plotly.py -c configs/run
 - `run_multi.py` 现在只负责并行抓取采样，split 导出已经拆到 `build_dataset_splits.py`。
 - `run_warp_render.py` 同时支持单条目模式和整数据集模式。
 - `grasp.h5` 是主结果文件，`grasp.npy` 始终由它导出。
-- 当前主线 `grasp.h5` / `grasp.npy` 中的 grasp 数组按 `float64` 保存。
-- `sim_dataset.py` 可以把已保存的 qpos 强制转成 `float32` 或 `float64` 后再复验，用于比较精度敏感性。
+- 当前主线 `grasp.h5` / `grasp.npy` 中的 grasp 数组按 `float32` 保存。
+- 当前主线数据格式包含 `qpos_init`、`qpos_approach`、`qpos_prepared`、`qpos_grasp`、`qpos_squeeze`。
+- CPU extforce 验证采用两阶段流程：先检查无外力 settle 漂移，再以 settle 后位姿为基准施加六个方向的外力。
+- `sim_dataset.py` 会复验保存的 `qpos_squeeze`，并支持把已保存 qpos 强制转成 `float32` 或 `float64` 后比较精度敏感性。
+- `build_dataset_splits.py` 按 object 切分，而不是按 object-scale 行切分，以避免 scale 间泄漏。
 - 当前工作流里 `docs/` 更多用于本地参考，通常不会上传到 git。
 - CPU 和 GPU 采样使用统一的 object-scale 接口，但运行时行为和性能特征不同。
 - MJWarp GPU 路径不保证严格确定性。

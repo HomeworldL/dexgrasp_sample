@@ -7,9 +7,9 @@ The mainline pipeline is:
 1. build a manifest-driven object-scale index
 2. sample surface points and grasp frames
 3. run MuJoCo collision and stability filtering
-4. save validated grasps to `grasp.h5` and `grasp.npy`
+4. save validated grasp states to `grasp.h5` and `grasp.npy`
 5. render multi-view partial point clouds with Warp
-6. build dataset-level `train.json` and `test.json`
+6. build object-level dataset splits in `train.json` and `test.json`
 
 This repository supports both:
 - CPU MuJoCo sampling via `run.py` / `run_multi.py`
@@ -39,6 +39,8 @@ Current mainline assumptions:
 - manifest-gated dataset indexing
 - one flattened global id space over object-scale entries
 - `grasp.h5` is the source of truth, `grasp.npy` is derived from it
+- mainline grasp arrays are stored as `float32`
+- dataset splits are grouped by `object_name` to avoid cross-scale leakage
 
 Default dataset/config conventions:
 - default config: `configs/run_YCB_liberhand.json`
@@ -137,6 +139,29 @@ datasets/graspdata_YCB_liberhand/<object>/scaleXXX/
     partial_pc_XX.npy
     partial_pc_cam_XX.npy
 ```
+
+Inside `grasp.h5` / `grasp.npy`, the mainline grasp arrays are:
+- `qpos_init`
+- `qpos_approach`
+- `qpos_prepared`
+- `qpos_grasp`
+- `qpos_squeeze`
+
+All of them are stored as `float32` in the current mainline.
+
+### Dataset Split Policy
+
+`build_dataset_splits.py` writes dataset manifests under:
+- `datasets/<dataset_tag>/train.json`
+- `datasets/<dataset_tag>/test.json`
+
+Current split rules:
+- split by `object_name`, not by object-scale row
+- keep all scales of the same object in the same split
+- default ratio is approximately `80/20` over unique objects, shuffled with config `seed`
+- require `grasp.h5`, `grasp.npy`, and required render outputs to exist
+- filter out empty grasp files before writing final manifests
+- store paths relative to dataset root for portability
 
 ## Run Commands
 
@@ -249,13 +274,18 @@ python build_dataset_splits.py -c configs/run_YCB_liberhand.json
 `sim_dataset.py` replays saved dataset grasps from `train.json` / `test.json` with
 `MjHO.sim_under_extforce`.
 
-Default validation uses `float64` qpos casting:
+Current mainline validation:
+- loads stored `qpos_squeeze`
+- re-checks saved `qpos_init` / `qpos_prepared` collision gates before extforce
+- defaults to `float32` qpos casting, matching the stored dataset dtype
+
+Default validation uses `float32` qpos casting:
 
 ```bash
 python sim_dataset.py -c configs/run_YCB_liberhand.json --split train -v
 ```
 
-To compare simulated success rates under `float32` casting:
+To compare simulated success rates under `float32` and `float64` casting:
 
 ```bash
 python sim_dataset.py -c configs/run_YCB_liberhand.json --split train --dtype float32 -v
@@ -367,8 +397,11 @@ PYTHONPATH=. python tools/visualization/plot_grasp_pose_plotly.py -c configs/run
 - `run_multi.py` only performs parallel sampling. Dataset split export is now separate in `build_dataset_splits.py`.
 - `run_warp_render.py` supports both single-entry mode and full-dataset mode.
 - `grasp.h5` is the authoritative result file. `grasp.npy` is always derived from it.
-- Mainline grasp arrays in `grasp.h5` / `grasp.npy` are stored as `float64`.
-- `sim_dataset.py` can cast stored qpos arrays to either `float32` or `float64` for stability comparison.
+- Mainline grasp arrays in `grasp.h5` / `grasp.npy` are stored as `float32`.
+- Mainline dataset format stores `qpos_init`, `qpos_approach`, `qpos_prepared`, `qpos_grasp`, and `qpos_squeeze`.
+- CPU extforce validation uses a two-stage check: no-force settling drift first, then six-direction force checks from the settled pose.
+- `sim_dataset.py` validates stored `qpos_squeeze` and can cast saved qpos arrays to either `float32` or `float64` for stability comparison.
+- `build_dataset_splits.py` splits by object, not by object-scale row, to avoid leakage across scales.
 - `docs/` is treated as local reference in this repo workflow and may be gitignored.
 - CPU and GPU sampling share the same object-scale interface, but not the same runtime behavior.
 - MJWarp GPU execution is not guaranteed to be deterministic across repeated runs.

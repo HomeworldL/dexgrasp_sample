@@ -177,8 +177,14 @@ if __name__ == "__main__":
     )
     # mjho_valid.open_viewer()
     for i in tqdm(range(len(qpos_grasp_list)), desc="validation"):
+        qpos_prepared_valid = mjho_valid.build_pregrasp_qpos(
+            qpos_grasp_list[i],
+            qpos_prepared_list[i][7:],
+        )
         is_valid, pos_delta, angle_delta = mjho_valid.sim_under_extforce(
-            qpos_grasp_list[i], visualize=False
+            qpos_grasp_list[i],
+            qpos_prepared_valid,
+            visualize=False,
         )
         if is_valid:
             qpos_init_valid_list.append(qpos_init_list[i])

@@ -160,6 +160,7 @@ Mainline work focuses on offline grasp configuration generation.
 - Config-first: do not hide defaults in code when config is required.
 - Use `logging` instead of ad-hoc `print` for runtime logs.
 - Fail fast with explicit, contextual error messages.
+- For straightforward logic, prefer direct control flow; avoid unnecessary fallback branches, compatibility branches, and broad `try/except` blocks.
 - Add/maintain minimal tests for core pipeline and bug regressions.
 - Keep commits small and focused with clear messages.
 

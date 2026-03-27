@@ -119,9 +119,13 @@ def evaluate_dataset_manifest(
         attempt_details: List[Dict] = []
         for grasp_idx, grasp_qpos in enumerate(qpos_eval):
             try:
+                prepared_joints = grasp_arrays["qpos_prepared"][grasp_idx][7:].copy()
+                prepared_qpos = mjho_collision.build_pregrasp_qpos(
+                    grasp_qpos.copy(),
+                    prepared_joints,
+                )
                 # Pre-check stored init/prepared states before running extforce validation.
                 init_qpos = grasp_arrays["qpos_init"][grasp_idx]
-                prepared_qpos = grasp_arrays["qpos_prepared"][grasp_idx]
                 mjho_collision.reset()
                 mjho_collision.set_hand_qpos(init_qpos.copy())
                 if visualize:
@@ -152,6 +156,7 @@ def evaluate_dataset_manifest(
                     continue
                 success, pos_delta, angle_delta = mjho_valid.sim_under_extforce(
                     grasp_qpos.copy(),
+                    prepared_qpos.copy(),
                     visualize=visualize,
                     **extforce_sim_cfg,
                 )

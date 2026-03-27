@@ -29,8 +29,11 @@ class _FakeMjHO:
     def set_hand_qpos(self, hand_qpos):
         self.current_qpos = hand_qpos
 
-    def sim_under_extforce(self, qpos_squeeze, visualize=False, **kwargs):
-        return bool(qpos_squeeze[0] > 0), 0.01, 1.0
+    def build_pregrasp_qpos(self, qpos_target, prepared_joints):
+        return np.asarray(qpos_target, dtype=float)
+
+    def sim_under_extforce(self, qpos_target, qpos_prepared, visualize=False, **kwargs):
+        return bool(qpos_target[0] > 0), 0.01, 1.0
 
     def is_contact(self):
         if self.current_qpos is None:

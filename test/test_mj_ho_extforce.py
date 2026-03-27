@@ -32,8 +32,9 @@ def _make_fake_mjho(poses, contacts):
         return np.zeros((1,), dtype=float)
 
     def step(n_steps=1, ctrl=None):
-        if mjho._idx < (len(mjho._poses) - 1):
-            mjho._idx += 1
+        for _ in range(int(n_steps)):
+            if mjho._idx < (len(mjho._poses) - 1):
+                mjho._idx += 1
 
     def get_obj_pose():
         return mjho._poses[mjho._idx].copy()
@@ -55,12 +56,13 @@ def test_sim_under_extforce_rejects_large_no_force_settle_drift():
         poses=[
             _make_pose(0.0),
             _make_pose(0.03),
-            _make_pose(0.03),
+            _make_pose(0.06),
         ],
         contacts=[True, True, True],
     )
 
     success, pos_delta, angle_delta = mjho.sim_under_extforce(
+        np.zeros((8,), dtype=float),
         np.zeros((8,), dtype=float),
         duration=1.0,
         trans_thresh=0.05,
@@ -77,13 +79,15 @@ def test_sim_under_extforce_uses_settled_pose_as_force_baseline():
     mjho = _make_fake_mjho(
         poses=[
             _make_pose(0.0),
+            _make_pose(0.01),
             _make_pose(0.02),
             _make_pose(0.06),
         ],
-        contacts=[True, True, True],
+        contacts=[True, True, True, True],
     )
 
     success, pos_delta, angle_delta = mjho.sim_under_extforce(
+        np.zeros((8,), dtype=float),
         np.zeros((8,), dtype=float),
         duration=1.0,
         trans_thresh=0.05,
@@ -94,3 +98,17 @@ def test_sim_under_extforce_uses_settled_pose_as_force_baseline():
     assert bool(success) is True
     assert np.isclose(pos_delta, 0.04)
     assert np.isclose(angle_delta, 0.0)
+
+
+def test_build_pregrasp_qpos_uses_target_pose_and_prepared_joints():
+    mjho = MjHO.__new__(MjHO)
+    mjho.nq = 10
+    mjho.nq_hand = 10
+
+    qpos_target = np.asarray([1.0, 2.0, 3.0, 1.0, 0.0, 0.0, 0.0, 9.0, 8.0, 7.0])
+    prepared_joints = np.asarray([0.1, 0.2, 0.3])
+
+    qpos_prepared = mjho.build_pregrasp_qpos(qpos_target, prepared_joints)
+
+    assert np.allclose(qpos_prepared[:7], qpos_target[:7])
+    assert np.allclose(qpos_prepared[7:], prepared_joints)

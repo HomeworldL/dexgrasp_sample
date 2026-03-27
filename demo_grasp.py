@@ -26,17 +26,16 @@ def _hold_viewer(mjho: MjHO) -> None:
         time.sleep(1.0 / 60.0)
 
 
-def run_demo(
+def run_demo_grasp(
     cfg: Dict,
     object_scale_key: str,
-    hand_name: str,
     hand_xml_path: str,
     object_mjcf_path: str,
     points: np.ndarray,
     normals: np.ndarray,
     verbose: bool,
     total_stage_start: float,
-) -> bool:
+) -> int:
     object_name, _ = parse_object_scale_key(object_scale_key)
     obj_info = {"name": object_name, "xml_abs": object_mjcf_path}
     target_body_params = cfg["hand"]["target_body_params"]
@@ -45,7 +44,7 @@ def run_demo(
         obj_info,
         hand_xml_path,
         target_body_params=target_body_params,
-        visualize=False,
+        visualize=True,
     )
     sampling_cfg = cfg["sampling"]
     pts_for_sim, norms_for_sim, _ = downsample_fps(
@@ -55,14 +54,6 @@ def run_demo(
         seed=int(cfg["seed"]),
     )
     mjho._set_obj_pts_norms(pts_for_sim, norms_for_sim)
-
-    mjho_valid = MjHO(
-        obj_info,
-        hand_xml_path,
-        target_body_params=target_body_params,
-        object_fixed=False,
-        visualize=True,
-    )
 
     ts = time.time()
     transforms_np = sample_frames_from_points(cfg, points, normals)
@@ -79,12 +70,8 @@ def run_demo(
     max_time_sec = float(cfg["output"]["max_time_sec"])
     contact_min_count = int(cfg["sim_grasp"]["contact_min_count"])
     sim_grasp_cfg = dict(cfg.get("sim_grasp", {}))
-    extforce_cfg = dict(cfg.get("extforce", {}))
-    extforce_sim_cfg = dict(extforce_cfg)
     sim_grasp_cfg.pop("visualize", None)
     sim_grasp_cfg.pop("contact_min_count", None)
-    extforce_sim_cfg.pop("visualize", None)
-    extforce_sim_cfg.pop("grip_delta", None)
 
     num_no_col = 0
     num_valid = 0
@@ -114,56 +101,30 @@ def run_demo(
         num_no_col += 1
         mjho.set_hand_qpos(qpos_prepared[i])
         qpos_grasp, _ = mjho.sim_grasp(visualize=True, **sim_grasp_cfg)
+        qpos_grasp = as_array(qpos_grasp)
         ho_contact_num = mjho.get_contact_num(obj_margin=0.00)
         if ho_contact_num < contact_min_count:
             continue
 
-        qpos_grasp = as_array(qpos_grasp)
-        qpos_squeeze = mjho_valid.build_squeeze_qpos(
-            qpos_grasp,
-            grip_delta=float(extforce_cfg.get("grip_delta", 0.0)),
-        )
-        qpos_prepared_valid = mjho_valid.build_pregrasp_qpos(
-            qpos_squeeze,
-            qpos_prepared[i][7:],
-        )
-        qpos_squeeze = as_array(qpos_squeeze)
-        qpos_prepared_valid = as_array(qpos_prepared_valid)
-        success, pos_delta, angle_delta = mjho_valid.sim_under_extforce(
-            qpos_squeeze.copy(),
-            qpos_prepared_valid.copy(),
-            visualize=True,
-            **extforce_sim_cfg,
-        )
-        if not success:
-            continue
-
         num_valid += 1
-        stop_reason = "first_success"
         print(
-            f"[{object_scale_key}] success at candidate={i} "
-            f"contact_count={ho_contact_num} pos_delta={pos_delta:.6f} "
-            f"angle_delta={angle_delta:.6f}"
+            f"[{object_scale_key}] valid_grasp={num_valid} candidate={i} "
+            f"contact_count={ho_contact_num}"
         )
-        print(
-            f"[{object_scale_key}] samples_checked={i + 1} no_col={num_no_col} "
-            f"valid={num_valid} stop_reason={stop_reason}"
-        )
-        _hold_viewer(mjho_valid)
-        return True
+        mjho.set_hand_qpos(qpos_grasp)
+        mjho._render_viewer()
 
     print(
         f"[{object_scale_key}] samples={num_samples} no_col={num_no_col} "
         f"valid={num_valid} stop_reason={stop_reason}"
     )
-    if mjho_valid._viewer_alive():
-        _hold_viewer(mjho_valid)
-    return False
+    _hold_viewer(mjho)
+    return num_valid
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Visual demo of the run.py grasp pipeline, stopping at first extforce success."
+        description="Visual demo of grasp sampling and sim_grasp without extforce."
     )
     parser.add_argument(
         "--object-scale-key",
@@ -207,17 +168,19 @@ def main() -> None:
         print(f"Using object-scale key: {args.object_scale_key}")
 
     hand_xml_path = os.path.abspath(cfg["hand"]["xml_path"])
-    hand_name = Path(hand_xml_path).stem
     n_points = int(cfg["sampling"]["n_points"])
-    pts, norms = sample_surface_o3d(args.coacd_path, n_points=n_points, method="poisson")
-    run_demo(
+    points, normals = sample_surface_o3d(
+        args.coacd_path,
+        n_points=n_points,
+        method="poisson",
+    )
+    run_demo_grasp(
         cfg=cfg,
         object_scale_key=args.object_scale_key,
-        hand_name=hand_name,
         hand_xml_path=hand_xml_path,
         object_mjcf_path=args.mjcf_path,
-        points=pts,
-        normals=norms,
+        points=points,
+        normals=normals,
         verbose=verbose,
         total_stage_start=total_stage_start,
     )

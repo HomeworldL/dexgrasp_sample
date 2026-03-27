@@ -13,9 +13,9 @@ from src.sample import downsample_fps
 from utils.utils_file import DEFAULT_RUN_CONFIG_PATH, load_config
 from utils.utils_pointcloud import sample_surface_o3d
 from utils.utils_sample import (
-    GRASP_ARRAY_DTYPE,
-    GRASP_H5_DTYPE,
-    as_grasp_array,
+    ARRAY_DTYPE,
+    H5_DTYPE,
+    as_array,
     build_pose_candidates,
     encode_h5_str,
     grasp_outputs_exist,
@@ -94,11 +94,11 @@ def run_sampling(
         hf.create_dataset("hand_name", data=encode_h5_str(hand_name))
         hf.create_dataset("rot_repr", data=encode_h5_str("wxyz+qpos"))
 
-        ds_init = hf.create_dataset("qpos_init", shape=(max_cap, d), maxshape=(None, d), dtype=GRASP_H5_DTYPE)
-        ds_approach = hf.create_dataset("qpos_approach", shape=(max_cap, d), maxshape=(None, d), dtype=GRASP_H5_DTYPE)
-        ds_prepared = hf.create_dataset("qpos_prepared", shape=(max_cap, d), maxshape=(None, d), dtype=GRASP_H5_DTYPE)
-        ds_grasp = hf.create_dataset("qpos_grasp", shape=(max_cap, d), maxshape=(None, d), dtype=GRASP_H5_DTYPE)
-        ds_squeeze = hf.create_dataset("qpos_squeeze", shape=(max_cap, d), maxshape=(None, d), dtype=GRASP_H5_DTYPE)
+        ds_init = hf.create_dataset("qpos_init", shape=(max_cap, d), maxshape=(None, d), dtype=H5_DTYPE)
+        ds_approach = hf.create_dataset("qpos_approach", shape=(max_cap, d), maxshape=(None, d), dtype=H5_DTYPE)
+        ds_prepared = hf.create_dataset("qpos_prepared", shape=(max_cap, d), maxshape=(None, d), dtype=H5_DTYPE)
+        ds_grasp = hf.create_dataset("qpos_grasp", shape=(max_cap, d), maxshape=(None, d), dtype=H5_DTYPE)
+        ds_squeeze = hf.create_dataset("qpos_squeeze", shape=(max_cap, d), maxshape=(None, d), dtype=H5_DTYPE)
 
         for i in tqdm(
             range(qpos_prepared.shape[0]),
@@ -131,23 +131,29 @@ def run_sampling(
             ho_contact_num = mjho.get_contact_num(obj_margin=0.00)
 
             if ho_contact_num >= contact_min_count:
-                qpos_grasp = as_grasp_array(qpos_grasp)
+                qpos_grasp = as_array(qpos_grasp)
                 qpos_squeeze = mjho_valid.build_squeeze_qpos(
                     qpos_grasp,
                     grip_delta=float(extforce_cfg.get("grip_delta", 0.0)),
                 )
-                qpos_squeeze = as_grasp_array(qpos_squeeze)
+                qpos_prepared_valid = mjho_valid.build_pregrasp_qpos(
+                    qpos_squeeze,
+                    qpos_prepared[i][7:],
+                )
+                qpos_squeeze = as_array(qpos_squeeze)
+                qpos_prepared_valid = as_array(qpos_prepared_valid)
                 is_valid, _, _ = mjho_valid.sim_under_extforce(
                     qpos_squeeze.copy(),
+                    qpos_prepared_valid.copy(),
                     visualize=False,
                     **extforce_sim_cfg,
                 )
                 if is_valid:
-                    ds_init[num_valid] = qpos_init[i].astype(GRASP_ARRAY_DTYPE, copy=False)
-                    ds_approach[num_valid] = qpos_approach[i].astype(GRASP_ARRAY_DTYPE, copy=False)
-                    ds_prepared[num_valid] = qpos_prepared[i].astype(GRASP_ARRAY_DTYPE, copy=False)
-                    ds_grasp[num_valid] = qpos_grasp.astype(GRASP_ARRAY_DTYPE, copy=False)
-                    ds_squeeze[num_valid] = qpos_squeeze.astype(GRASP_ARRAY_DTYPE, copy=False)
+                    ds_init[num_valid] = qpos_init[i].astype(ARRAY_DTYPE, copy=False)
+                    ds_approach[num_valid] = qpos_approach[i].astype(ARRAY_DTYPE, copy=False)
+                    ds_prepared[num_valid] = qpos_prepared[i].astype(ARRAY_DTYPE, copy=False)
+                    ds_grasp[num_valid] = qpos_grasp.astype(ARRAY_DTYPE, copy=False)
+                    ds_squeeze[num_valid] = qpos_squeeze.astype(ARRAY_DTYPE, copy=False)
                     num_valid += 1
 
             if flush_every > 0 and (i + 1) % flush_every == 0:

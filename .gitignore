@@ -218,6 +218,9 @@ logs/
 outputs/
 checkpoints/
 MUJOCO_LOG.TXT
+
+# Training artifacts
+train/artifacts/
 world_id
 
 # Session planning/change logs

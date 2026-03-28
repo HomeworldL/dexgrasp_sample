@@ -51,7 +51,8 @@
   - 要求足够的手-物体接触数（`sim_grasp.contact_min_count`，当前默认 `>=4`）
   - 基于 `qpos_grasp` 叠加 `extforce.grip_delta` 构建 `qpos_squeeze`
   - 在第二个模拟器中执行两阶段外力稳定性验证（`object_fixed=False`）：
-    - 先进行无外力 settle 漂移门控
+    - 先用 `qpos_squeeze` 的位姿和保存的 prepared joints 重建验证用 `qpos_prepared`
+    - 从重建后的 `qpos_prepared` 向 `qpos_squeeze` 闭合，并进行无外力 settle 漂移门控
     - 再以 settle 后位姿为基准施加六个方向的外力
   - 仅保留验证通过的抓取
 - 先以 HDF5 格式持久化输出（`grasp.h5`）：
@@ -61,7 +62,9 @@
   - 长时间运行时周期性 flush/GC
 - `grasp.h5` 完成后，加载同一批数组并转换为 `grasp.npy`（数值必须与 HDF5 完全一致）。
 - `sim_dataset.py` 是基于 `train.json` / `test.json` 的数据集级回放/验证入口。
-  - 使用保存的 `qpos_squeeze` 做复验
+  - 保留保存的 `qpos_init` 预检查
+  - 使用保存的 `qpos_squeeze` 位姿和 prepared joints 重建回放用 `qpos_prepared`
+  - 通过 `sim_under_extforce(qpos_target, rebuilt_qpos_prepared, ...)` 对保存的 `qpos_squeeze` 做复验
   - 支持 `--dtype float32` 或 `--dtype float64`，用于比较对精度敏感的 extforce 成功率
 - 抓取输出完成后，使用 Warp 渲染物体局部点云，并保存到：
   - `datasets/<dataset_tag>/<object>/scaleXXX/<warp_render.output_subdir>/`
@@ -115,6 +118,8 @@
     - `qpos_grasp: [tx,ty,tz,qw,qx,qy,qz,q1...qN]`
     - `qpos_squeeze: [tx,ty,tz,qw,qx,qy,qz,q1...qN]`
     - `meta: {}`
+  - 保存的 `qpos_prepared` 仍然是原始候选 pregrasp 状态
+  - 回放/extforce 验证时会使用 `qpos_squeeze` 的位姿加上保存的 prepared joints 重建 pregrasp，而不是直接回放保存的 `qpos_prepared` 位姿
   - 点云单独存储，不得打包进 `grasp.npy`
   - 局部点云渲染输出（后处理，独立于抓取数组）：
     - `cam_in.npy`

@@ -51,7 +51,8 @@ Mainline work focuses on offline grasp configuration generation.
   - require sufficient hand-object contacts (`sim_grasp.contact_min_count`, current default `>=4`)
   - build `qpos_squeeze` from `qpos_grasp` using `extforce.grip_delta`
   - run external-force stability validation in a second simulator (`object_fixed=False`) with two stages:
-    - first gate no-force settling drift
+    - rebuild a validation pregrasp from `qpos_squeeze` pose plus the saved prepared joints
+    - close from rebuilt `qpos_prepared` toward `qpos_squeeze`, then gate no-force settling drift
     - then apply six-direction external forces using the settled pose as the baseline
   - keep only validated grasps
 - Persist outputs as HDF5 first (`grasp.h5`):
@@ -61,7 +62,9 @@ Mainline work focuses on offline grasp configuration generation.
   - periodic flush/GC during long runs
 - After `grasp.h5` is finalized, load the same arrays and convert them to `grasp.npy` (values must be identical to HDF5).
 - `sim_dataset.py` is the dataset-level replay/validation entrypoint for `train.json` / `test.json`.
-  - it validates stored `qpos_squeeze`
+  - it keeps the stored `qpos_init` pre-check
+  - it rebuilds replay `qpos_prepared` from stored `qpos_squeeze` pose plus saved prepared joints
+  - it validates stored `qpos_squeeze` with `sim_under_extforce(qpos_target, rebuilt_qpos_prepared, ...)`
   - support `--dtype float32` or `--dtype float64` to compare precision-sensitive extforce success rates
 - After grasp outputs are ready, render object partial point clouds with Warp and save under:
   - `datasets/<dataset_tag>/<object>/scaleXXX/<warp_render.output_subdir>/`
@@ -115,6 +118,8 @@ Mainline work focuses on offline grasp configuration generation.
     - `qpos_grasp: [tx,ty,tz,qw,qx,qy,qz,q1...qN]`
     - `qpos_squeeze: [tx,ty,tz,qw,qx,qy,qz,q1...qN]`
     - `meta: {}`
+  - stored `qpos_prepared` remains the original candidate pregrasp state
+  - replay/extforce validation rebuilds a pregrasp using `qpos_squeeze` pose plus stored prepared joints; it does not directly replay the saved `qpos_prepared` pose
   - point cloud is stored separately and must not be bundled into `grasp.npy`
   - partial point cloud rendering output (post-processing, separate from grasp arrays):
     - `cam_in.npy`

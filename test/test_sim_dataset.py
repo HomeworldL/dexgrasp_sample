@@ -148,7 +148,8 @@ def test_simulate_dataset_manifest_counts_successes(tmp_path: Path, monkeypatch)
     assert summary["items"][0]["success_count"] == 1
     assert summary["items"][0]["grasp_count"] == 3
     assert summary["items"][0]["validated_qpos_key"] == "qpos_squeeze"
-    assert summary["items"][0]["attempts"][1]["failure_stage"] == "qpos_prepared_contact"
+    assert summary["items"][0]["attempts"][1]["success"] is False
+    assert "failure_stage" not in summary["items"][0]["attempts"][1]
     assert summary["items"][0]["attempts"][2]["failure_stage"] == "qpos_init_contact"
     assert summary["qpos_dtype"] == "float32"
 

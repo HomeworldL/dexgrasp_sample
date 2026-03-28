@@ -149,6 +149,11 @@ datasets/graspdata_YCB_liberhand/<object>/scaleXXX/
 
 这些数组目前统一按 `float32` 存储。
 
+当前回放语义补充：
+- 保存的 `qpos_prepared` 仍然是原始候选 pregrasp 状态
+- extforce 回放会使用 `qpos_squeeze` 的位姿加上保存的 prepared joints 重建验证用 pregrasp
+- `sim_dataset.py` 保留保存的 `qpos_init` 预检查，然后调用 `sim_under_extforce(qpos_target, rebuilt_qpos_prepared, ...)`
+
 ### 数据集切分规则
 
 `build_dataset_splits.py` 会在这里输出数据集清单：
@@ -184,6 +189,36 @@ python run.py \
 - `--coacd-path`
 - `--mjcf-path`
 - `--output-dir`
+
+### 可视化辅助脚本
+
+在线抓取采样可视化，不做 extforce：
+
+```bash
+python demo_grasp.py \
+  --object-scale-key YCB_002_master_chef_can__scale120 \
+  --coacd-path datasets/graspdata_YCB_liberhand/YCB_002_master_chef_can/scale120/coacd.obj \
+  --mjcf-path datasets/graspdata_YCB_liberhand/YCB_002_master_chef_can/scale120/object.xml \
+  -c configs/run_YCB_liberhand.json -v
+```
+
+在线可视化，找到第一个通过 extforce 的抓取后停止：
+
+```bash
+python demo.py \
+  --object-scale-key YCB_002_master_chef_can__scale120 \
+  --coacd-path datasets/graspdata_YCB_liberhand/YCB_002_master_chef_can/scale120/coacd.obj \
+  --mjcf-path datasets/graspdata_YCB_liberhand/YCB_002_master_chef_can/scale120/object.xml \
+  -c configs/run_YCB_liberhand.json -v
+```
+
+对单个 object-scale 的所有已保存抓取做 MuJoCo extforce 回放可视化：
+
+```bash
+python vis_grasp_mujoco.py \
+  --object-scale-dir datasets/graspdata_YCB_liberhand/YCB_002_master_chef_can/scale120 \
+  -c configs/run_YCB_liberhand.json -v
+```
 
 ### CPU：整数据集并行
 

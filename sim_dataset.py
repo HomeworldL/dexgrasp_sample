@@ -140,20 +140,6 @@ def evaluate_dataset_manifest(
                         }
                     )
                     continue
-                mjho_collision.reset()
-                mjho_collision.set_hand_qpos(prepared_qpos.copy())
-                if visualize:
-                    mjho_collision._render_viewer()
-                if mjho_collision.is_contact():
-                    total_attempts += 1
-                    attempt_details.append(
-                        {
-                            "grasp_index": int(grasp_idx),
-                            "success": False,
-                            "failure_stage": "qpos_prepared_contact",
-                        }
-                    )
-                    continue
                 success, pos_delta, angle_delta = mjho_valid.sim_under_extforce(
                     grasp_qpos.copy(),
                     prepared_qpos.copy(),

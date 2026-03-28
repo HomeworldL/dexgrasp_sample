@@ -149,6 +149,11 @@ Inside `grasp.h5` / `grasp.npy`, the mainline grasp arrays are:
 
 All of them are stored as `float32` in the current mainline.
 
+Current replay note:
+- stored `qpos_prepared` remains the original candidate pregrasp state
+- extforce replay rebuilds a validation pregrasp from `qpos_squeeze` pose plus the stored prepared joints
+- `sim_dataset.py` keeps the stored `qpos_init` pre-check, then calls `sim_under_extforce(qpos_target, rebuilt_qpos_prepared, ...)`
+
 ### Dataset Split Policy
 
 `build_dataset_splits.py` writes dataset manifests under:
@@ -184,6 +189,36 @@ Required arguments:
 - `--coacd-path`
 - `--mjcf-path`
 - `--output-dir`
+
+### Visualization Helpers
+
+Online grasp-only visualization without extforce:
+
+```bash
+python demo_grasp.py \
+  --object-scale-key YCB_002_master_chef_can__scale120 \
+  --coacd-path datasets/graspdata_YCB_liberhand/YCB_002_master_chef_can/scale120/coacd.obj \
+  --mjcf-path datasets/graspdata_YCB_liberhand/YCB_002_master_chef_can/scale120/object.xml \
+  -c configs/run_YCB_liberhand.json -v
+```
+
+Online visualization that stops at the first grasp passing extforce:
+
+```bash
+python demo.py \
+  --object-scale-key YCB_002_master_chef_can__scale120 \
+  --coacd-path datasets/graspdata_YCB_liberhand/YCB_002_master_chef_can/scale120/coacd.obj \
+  --mjcf-path datasets/graspdata_YCB_liberhand/YCB_002_master_chef_can/scale120/object.xml \
+  -c configs/run_YCB_liberhand.json -v
+```
+
+Replay all saved grasps for one object-scale under MuJoCo extforce:
+
+```bash
+python vis_grasp_mujoco.py \
+  --object-scale-dir datasets/graspdata_YCB_liberhand/YCB_002_master_chef_can/scale120 \
+  -c configs/run_YCB_liberhand.json -v
+```
 
 ### CPU: Whole Dataset in Parallel
 

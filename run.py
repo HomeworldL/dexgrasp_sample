@@ -18,7 +18,9 @@ from utils.utils_sample import (
     as_array,
     build_pose_candidates,
     encode_h5_str,
+    global_pc_exists,
     grasp_outputs_exist,
+    write_global_pc,
     make_qpos_triplets,
     parse_object_scale_key,
     sample_frames_from_points,
@@ -285,15 +287,28 @@ def main():
         print(f"Using object-scale key: {args.object_scale_key}")
     h5_name = str(cfg["output"]["h5_name"])
     npy_name = str(cfg["output"]["npy_name"])
-    if (not args.force) and grasp_outputs_exist(args.output_dir, h5_name=h5_name, npy_name=npy_name):
+    render_subdir = str(cfg["warp_render"]["output_subdir"])
+    has_grasp_outputs = grasp_outputs_exist(args.output_dir, h5_name=h5_name, npy_name=npy_name)
+    has_global_pc = global_pc_exists(args.output_dir, render_subdir)
+    if (not args.force) and has_grasp_outputs and has_global_pc:
         if verbose:
-            print(f"[{args.object_scale_key}] skip existing {h5_name} and {npy_name} in {args.output_dir}")
+            print(
+                f"[{args.object_scale_key}] skip existing {h5_name}, {npy_name}, "
+                f"and {render_subdir}/global_pc.npy in {args.output_dir}"
+            )
         return
 
     hand_xml_path = os.path.abspath(cfg["hand"]["xml_path"])
     hand_name = Path(hand_xml_path).stem
     n_points = int(cfg["sampling"]["n_points"])
     pts, norms = sample_surface_o3d(args.coacd_path, n_points=n_points, method="poisson")
+    global_pc_path = write_global_pc(pts, args.output_dir, render_subdir)
+    if verbose:
+        print(f"[{args.object_scale_key}] saved global_pc to {global_pc_path}")
+    if (not args.force) and has_grasp_outputs:
+        if verbose:
+            print(f"[{args.object_scale_key}] grasp outputs already exist, skip grasp sampling.")
+        return
     run_sampling(
         cfg=cfg,
         object_scale_key=args.object_scale_key,

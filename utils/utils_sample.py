@@ -43,6 +43,25 @@ def grasp_outputs_exist(
     return (out_dir / str(h5_name)).exists() and (out_dir / str(npy_name)).exists()
 
 
+def global_pc_path(output_dir_abs: str, render_subdir: str) -> Path:
+    return Path(output_dir_abs) / str(render_subdir) / "global_pc.npy"
+
+
+def global_pc_exists(output_dir_abs: str, render_subdir: str) -> bool:
+    path = global_pc_path(output_dir_abs, render_subdir)
+    if not path.exists():
+        return False
+    arr = np.load(path, allow_pickle=True)
+    return arr.size > 0
+
+
+def write_global_pc(points: np.ndarray, output_dir_abs: str, render_subdir: str) -> Path:
+    path = global_pc_path(output_dir_abs, render_subdir)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    np.save(path, np.asarray(points, dtype=np.float32))
+    return path
+
+
 def grasp_h5_nonempty(h5_path: Path) -> Tuple[bool, str]:
     try:
         with h5py.File(h5_path, "r") as hf:

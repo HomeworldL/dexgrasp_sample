@@ -19,7 +19,7 @@ from utils.utils_file import (
     load_config,
     safe_filename,
 )
-from utils.utils_sample import grasp_outputs_exist
+from utils.utils_sample import global_pc_exists, grasp_outputs_exist
 
 _RUN_PROCS = []
 _RUN_PROCS_LOCK = threading.Lock()
@@ -144,25 +144,35 @@ def main():
 
     h5_name = str(cfg["output"]["h5_name"])
     npy_name = str(cfg["output"]["npy_name"])
+    render_subdir = str(cfg["warp_render"]["output_subdir"])
     if not args.force:
         total_entries = len(entries)
         entries = [
             it
             for it in entries
-            if not grasp_outputs_exist(
-                str(it["output_dir_abs"]),
-                h5_name=h5_name,
-                npy_name=npy_name,
+            if not (
+                grasp_outputs_exist(
+                    str(it["output_dir_abs"]),
+                    h5_name=h5_name,
+                    npy_name=npy_name,
+                )
+                and global_pc_exists(
+                    str(it["output_dir_abs"]),
+                    render_subdir=render_subdir,
+                )
             )
         ]
         skipped = total_entries - len(entries)
         if skipped > 0:
             print(
                 f"Pre-skip existing results: {skipped}/{total_entries} entries already have "
-                f"{h5_name} and {npy_name}."
+                f"{h5_name}, {npy_name}, and {render_subdir}/global_pc.npy."
             )
         if not entries:
-            print(f"所有 object-scale 条目都已存在 {h5_name} 和 {npy_name}，跳过执行。")
+            print(
+                f"所有 object-scale 条目都已存在 {h5_name}、{npy_name} 和 "
+                f"{render_subdir}/global_pc.npy，跳过执行。"
+            )
             return
 
     print(

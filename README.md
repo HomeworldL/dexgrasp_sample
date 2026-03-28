@@ -170,9 +170,9 @@ Failure sample note:
 - otherwise failure samples are deterministically shuffled with config `seed` and truncated to `floor(output.fail_keep_ratio * valid_count)`
 
 Global point cloud note:
-- `pc_warp/global_pc.npy` is exported independently from rendered partial views
-- it is not a merge of `partial_pc_XX.npy`
-- current mainline default is world-frame `float32` with shape `(4096, 3)`, sampled directly from `coacd.obj`
+- `pc_warp/global_pc.npy` is written by `run.py` / `run_mjw.py`
+- it stores the initial world-frame object points sampled for grasp generation, not a merge of `partial_pc_XX.npy`
+- its current mainline shape is `(sampling.n_points, 3)` with `float32`
 
 ### Dataset Split Policy
 
@@ -400,7 +400,7 @@ python vis_grasp.py -c configs/run_YCB_liberhand.json -i 0 --vis-ids 0,10,-1 --f
 Saved partial point clouds:
 
 ```bash
-python vis_partial_pc.py -c configs/run_YCB_liberhand.json -i 0 --show-cam-frames
+python vis_pc.py -c configs/run_YCB_liberhand.json -i 0 --show-cam-frames
 ```
 
 Plot grasp pose distributions:
@@ -448,7 +448,7 @@ PYTHONPATH=. python tools/visualization/plot_grasp_pose_plotly.py -c configs/run
 - [vis_obj_scale.py](/home/ccs/repositories/dexgrasp_sample/vis_obj_scale.py)
 - [vis_ho.py](/home/ccs/repositories/dexgrasp_sample/vis_ho.py)
 - [vis_grasp.py](/home/ccs/repositories/dexgrasp_sample/vis_grasp.py)
-- [vis_partial_pc.py](/home/ccs/repositories/dexgrasp_sample/vis_partial_pc.py)
+- [vis_pc.py](/home/ccs/repositories/dexgrasp_sample/vis_pc.py)
 
 ## Notes
 

@@ -1,16 +1,17 @@
 import argparse
+import io
 import multiprocessing as mp
 import os
+import time
+from contextlib import redirect_stdout
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Union
 
 import numpy as np
 import torch
-from tqdm import tqdm
 
 from src.dataset_objects import DatasetObjects
 from utils.utils_file import DEFAULT_RUN_CONFIG_PATH, dataset_tag_from_config, load_config
-from utils.utils_pointcloud import sample_surface_o3d
 from utils.utils_warp_render import (
     WarpPointCloudRenderer,
     get_camera_matrix,
@@ -37,9 +38,6 @@ def _validate_render_config(cfg: Dict) -> Dict:
         "output_subdir",
         "max_point_num",
         "save_pc",
-        "save_global_pc",
-        "global_pc_num",
-        "global_pc_method",
         "save_depth",
         "save_rgb",
         "skip_existing",
@@ -70,8 +68,6 @@ def _validate_render_config(cfg: Dict) -> Dict:
         raise ValueError("warp_render.n_cols and warp_render.n_rows must be > 0.")
     if int(wr["max_point_num"]) <= 0:
         raise ValueError("warp_render.max_point_num must be > 0.")
-    if int(wr["global_pc_num"]) <= 0:
-        raise ValueError("warp_render.global_pc_num must be > 0.")
     return wr
 
 
@@ -134,41 +130,43 @@ def _all_cam_ex_exist(folder: Path, batch: int) -> bool:
     return True
 
 
-def _global_pc_exists(folder: Path) -> bool:
-    path = folder / "global_pc.npy"
-    if not path.exists():
-        return False
-    arr = np.load(path, allow_pickle=True)
-    return arr.size > 0
-
-
 def _render_entry(
     renderer: WarpPointCloudRenderer,
     entry: Dict,
     render_cfg: Dict,
     rng: np.random.Generator,
-) -> str:
+) -> Dict[str, Union[str, float, int]]:
+    entry_start = time.perf_counter()
     out_dir = Path(entry["output_dir_abs"]).resolve() / str(render_cfg["output_subdir"])
     out_dir.mkdir(parents=True, exist_ok=True)
 
     batch = renderer.num_tiles
     if bool(render_cfg["skip_existing"]):
-        has_global_pc = (not bool(render_cfg["save_global_pc"])) or _global_pc_exists(out_dir)
-        if bool(render_cfg["save_pc"]) and _all_pc_exist(out_dir, batch) and has_global_pc:
-            return f"skip {entry['object_scale_key']}"
+        if bool(render_cfg["save_pc"]) and _all_pc_exist(out_dir, batch):
+            return {
+                "object_scale_key": str(entry["object_scale_key"]),
+                "status": "skip",
+                "mesh_sec": 0.0,
+                "render_sec": 0.0,
+                "save_sec": 0.0,
+                "total_sec": float(time.perf_counter() - entry_start),
+            }
         if (not bool(render_cfg["save_pc"])) and _all_cam_ex_exist(out_dir, batch):
-            return f"skip {entry['object_scale_key']}"
+            return {
+                "object_scale_key": str(entry["object_scale_key"]),
+                "status": "skip",
+                "mesh_sec": 0.0,
+                "render_sec": 0.0,
+                "save_sec": 0.0,
+                "total_sec": float(time.perf_counter() - entry_start),
+            }
 
-    if bool(render_cfg["save_global_pc"]):
-        global_pc, _ = sample_surface_o3d(
-            str(entry["coacd_abs"]),
-            n_points=int(render_cfg["global_pc_num"]),
-            method=str(render_cfg["global_pc_method"]),
-        )
-        np.save(out_dir / "global_pc.npy", np.asarray(global_pc, dtype=np.float32))
-
+    mesh_start = time.perf_counter()
     mesh = mesh_from_path(str(entry["coacd_abs"]))
     mesh_radius = float(np.max(np.linalg.norm(np.asarray(mesh.vertices, dtype=np.float64), axis=1)))
+    mesh_sec = float(time.perf_counter() - mesh_start)
+
+    render_start = time.perf_counter()
     camera_view = get_camera_matrix(
         render_cfg["camera"],
         sample_num=batch,
@@ -176,7 +174,9 @@ def _render_entry(
         min_radius=mesh_radius,
     )
     view_matrix = renderer.render_mesh(mesh=mesh, view_matrix=camera_view)
+    render_sec = float(time.perf_counter() - render_start)
 
+    save_start = time.perf_counter()
     cam_in_path = out_dir / "cam_in.npy"
     if not cam_in_path.exists():
         np.save(cam_in_path, renderer.projection_matrices[0])
@@ -226,8 +226,16 @@ def _render_entry(
                 pc_cam = pc_cam[idx]
             np.save(out_dir / f"partial_pc_{data_id}.npy", pc_world.detach().cpu().numpy().astype(np.float16))
             np.save(out_dir / f"partial_pc_cam_{data_id}.npy", pc_cam.detach().cpu().numpy().astype(np.float16))
+    save_sec = float(time.perf_counter() - save_start)
 
-    return f"done {entry['object_scale_key']}"
+    return {
+        "object_scale_key": str(entry["object_scale_key"]),
+        "status": "done",
+        "mesh_sec": mesh_sec,
+        "render_sec": render_sec,
+        "save_sec": save_sec,
+        "total_sec": float(time.perf_counter() - entry_start),
+    }
 
 
 def _batch_worker(
@@ -268,10 +276,7 @@ def _batch_worker(
                 "Check GPU/EGL/driver availability and headless OpenGL permissions."
             ) from exc
 
-        iterator = entries
-        if verbose:
-            iterator = tqdm(entries, desc=f"warp-{device}-w{worker_idx}", leave=False)
-        for entry in iterator:
+        for entry in entries:
             _render_entry(renderer=renderer, entry=entry, render_cfg=render_cfg, rng=rng)
 
 
@@ -285,6 +290,7 @@ def _split_entries(entries: List[Dict], parts: int) -> List[List[Dict]]:
 
 
 def main() -> None:
+    total_start = time.perf_counter()
     parser = argparse.ArgumentParser(description="Render partial point clouds with NVIDIA Warp for each object-scale entry.")
     parser.add_argument("-c", "--config", type=str, default=DEFAULT_RUN_CONFIG_PATH)
     parser.add_argument("-i", "--obj-id", type=int, default=None)
@@ -307,14 +313,17 @@ def main() -> None:
         render_cfg["gpu_lst"] = [_parse_device_token(x) for x in args.gpu_lst.split(",") if x.strip()]
 
     config_stem = dataset_tag_from_config(args.config)
-    ds = DatasetObjects(
-        dataset_root=cfg["dataset"]["root"],
-        dataset_names=list(cfg["dataset"].get("include", [])),
-        scales=list(cfg["dataset"].get("scales", [])),
-        dataset_tag=config_stem,
-        dataset_output_root=cfg.get("output", {}).get("dataset_root", "datasets"),
-        verbose=bool(cfg["dataset"].get("verbose", False)),
-    )
+    ds_start = time.perf_counter()
+    with redirect_stdout(io.StringIO()):
+        ds = DatasetObjects(
+            dataset_root=cfg["dataset"]["root"],
+            dataset_names=list(cfg["dataset"].get("include", [])),
+            scales=list(cfg["dataset"].get("scales", [])),
+            dataset_tag=config_stem,
+            dataset_output_root=cfg.get("output", {}).get("dataset_root", "datasets"),
+            verbose=bool(cfg["dataset"].get("verbose", False)),
+        )
+    ds_sec = float(time.perf_counter() - ds_start)
 
     # Single-entry mode: use -i/--obj-id or -k/--obj-key.
     # Dataset mode: pass neither flag and iterate over all object-scale entries.
@@ -341,11 +350,7 @@ def main() -> None:
     chunks = _split_entries(entries, len(worker_devices))
     worker_devices = worker_devices[: len(chunks)]
 
-    print(f"[run_warp_render] entries={len(entries)} workers={len(worker_devices)}")
-    print(
-        f"[run_warp_render] views_per_entry={int(render_cfg['n_cols']) * int(render_cfg['n_rows'])} "
-        f"max_point_num={int(render_cfg['max_point_num'])} output_subdir={render_cfg['output_subdir']}"
-    )
+    print(f"[run_warp_render] dataset_index_sec={ds_sec:.3f}")
 
     mp.set_start_method("spawn", force=True)
     processes: List[mp.Process] = []
@@ -375,7 +380,7 @@ def main() -> None:
     if failed:
         raise RuntimeError("One or more warp rendering worker processes failed.")
 
-    print("[run_warp_render] all jobs finished")
+    print(f"[run_warp_render] all jobs finished total_sec={time.perf_counter() - total_start:.3f}")
 
 
 if __name__ == "__main__":

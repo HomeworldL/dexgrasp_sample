@@ -135,7 +135,7 @@
     }
   },
   "sampling": {
-    "n_points": 2048,
+    "n_points": 4096,
     "downsample_for_sim": 512,
     "Nd": 1,
     "rot_n": 8,
@@ -175,9 +175,6 @@
     ],
     "thread_per_gpu": 1,
     "output_subdir": "pc_warp",
-    "save_global_pc": true,
-    "global_pc_num": 4096,
-    "global_pc_method": "poisson",
     "max_point_num": 4096,
     "save_pc": true,
     "save_rgb": false,

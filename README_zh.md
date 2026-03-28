@@ -170,9 +170,9 @@ datasets/graspdata_YCB_liberhand/<object>/scaleXXX/
 - 否则失败样本会使用配置中的 `seed` 做 deterministic shuffle，并按 `floor(output.fail_keep_ratio * valid_count)` 截断保留
 
 全局点云补充：
-- `pc_warp/global_pc.npy` 是独立导出的全局物体点云
-- 它不是 `partial_pc_XX.npy` 的拼接结果
-- 当前主线默认是世界系 `float32`、shape 为 `(4096, 3)`，直接从 `coacd.obj` 表面采样
+- `pc_warp/global_pc.npy` 由 `run.py` / `run_mjw.py` 导出
+- 它保存的是抓取生成最开始采样到的世界系物体点云，不是 `partial_pc_XX.npy` 的拼接结果
+- 当前主线默认 shape 为 `(sampling.n_points, 3)`，dtype 为 `float32`
 
 ### 数据集切分规则
 
@@ -400,7 +400,7 @@ python vis_grasp.py -c configs/run_YCB_liberhand.json -i 0 --vis-ids 0,10,-1 --f
 已保存部分点云：
 
 ```bash
-python vis_partial_pc.py -c configs/run_YCB_liberhand.json -i 0 --show-cam-frames
+python vis_pc.py -c configs/run_YCB_liberhand.json -i 0 --show-cam-frames
 ```
 
 抓取姿态分布绘图：
@@ -448,7 +448,7 @@ PYTHONPATH=. python tools/visualization/plot_grasp_pose_plotly.py -c configs/run
 - [vis_obj_scale.py](/home/ccs/repositories/dexgrasp_sample/vis_obj_scale.py)
 - [vis_ho.py](/home/ccs/repositories/dexgrasp_sample/vis_ho.py)
 - [vis_grasp.py](/home/ccs/repositories/dexgrasp_sample/vis_grasp.py)
-- [vis_partial_pc.py](/home/ccs/repositories/dexgrasp_sample/vis_partial_pc.py)
+- [vis_pc.py](/home/ccs/repositories/dexgrasp_sample/vis_pc.py)
 
 ## 注意事项
 

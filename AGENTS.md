@@ -80,9 +80,9 @@ Mainline work focuses on offline grasp configuration generation.
   - `datasets/<dataset_tag>/<object>/scaleXXX/<warp_render.output_subdir>/`
   - `dataset_tag` rule: replace config stem prefix `run_` with `graspdata_`
   - default subdir: `pc_warp`
-  - additionally export `global_pc.npy` under the same `pc_warp/` directory
-  - `global_pc.npy` is a separate object-level point cloud, not a merge of rendered partial views
-  - current mainline default is world-frame `float32` points with shape `(4096, 3)`, sampled directly from `coacd.obj`
+  - `run.py` / `run_mjw.py` also save `global_pc.npy` under the same `pc_warp/` directory before or alongside grasp sampling
+  - `global_pc.npy` stores the initial sampled world-frame object points used by the sampler, not a merge of rendered partial views
+  - current mainline default is world-frame `float32` with shape `(sampling.n_points, 3)`
 - Point cloud is saved separately and must not be bundled into `grasp.npy`.
 
 ## Sampling Pipeline (GPU Version)

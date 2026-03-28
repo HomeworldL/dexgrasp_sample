@@ -99,7 +99,7 @@ def test_simulate_dataset_manifest_counts_successes(tmp_path: Path, monkeypatch)
                     "partial_pc_path": [],
                     "partial_pc_cam_path": [],
                     "cam_ex_path": [],
-                    "cam_in": "obj_a/scale080/partial_pc_warp/cam_in.npy",
+                    "cam_in": "obj_a/scale080/pc_warp/cam_in.npy",
                     "scale": 0.08,
                 }
             ]
@@ -182,7 +182,7 @@ def test_simulate_dataset_manifest_allows_explicit_float64_cast(tmp_path: Path, 
                     "partial_pc_path": [],
                     "partial_pc_cam_path": [],
                     "cam_ex_path": [],
-                    "cam_in": "obj_b/scale080/partial_pc_warp/cam_in.npy",
+                    "cam_in": "obj_b/scale080/pc_warp/cam_in.npy",
                     "scale": 0.08,
                 }
             ]
@@ -256,7 +256,7 @@ def test_simulate_dataset_manifest_requires_qpos_squeeze(tmp_path: Path, monkeyp
                     "partial_pc_path": [],
                     "partial_pc_cam_path": [],
                     "cam_ex_path": [],
-                    "cam_in": "obj_c/scale080/partial_pc_warp/cam_in.npy",
+                    "cam_in": "obj_c/scale080/pc_warp/cam_in.npy",
                     "scale": 0.08,
                 }
             ]

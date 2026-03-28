@@ -92,12 +92,19 @@ def main() -> None:
     elif args.obj_id is not None:
         info = ds.get_obj_info_by_index(int(args.obj_id))
     else:
-        raise ValueError("vis_partial_pc requires either --obj-id or --obj-key.")
+        raise ValueError("vis_pc requires either --obj-id or --obj-key.")
 
     subdir = args.pc_subdir or cfg.get("warp_render", {}).get("output_subdir", "pc_warp")
     pc_dir = Path(info["output_dir_abs"]).resolve() / subdir
     if not pc_dir.exists():
         raise FileNotFoundError(f"Pointcloud directory not found: {pc_dir}")
+
+    global_pc_path = pc_dir / "global_pc.npy"
+    if not global_pc_path.exists():
+        raise FileNotFoundError(f"Global point cloud not found: {global_pc_path}")
+    global_pc = np.asarray(np.load(global_pc_path, allow_pickle=True), dtype=np.float32)
+    if global_pc.ndim != 2 or global_pc.shape[1] != 3:
+        raise ValueError(f"Invalid global point cloud shape in {global_pc_path}: {global_pc.shape}")
 
     prefix = "partial_pc_cam_" if args.coord == "cam" else "partial_pc_"
     pc_files = sorted(
@@ -116,11 +123,18 @@ def main() -> None:
 
     colors = generate_ncolors(len(selected))
     pointclouds: Dict[str, tuple] = {}
+    global_cols = np.tile(np.array([[180, 180, 180]], dtype=np.uint8), (global_pc.shape[0], 1))
+    pointclouds["global_pc"] = {
+        "points": global_pc,
+        "colors": global_cols,
+        "point_size": 0.0008,
+    }
+    print(f"[vis_pc] global_pc shape={global_pc.shape} file={global_pc_path.name}")
     for i, vid in enumerate(selected):
         pts = np.asarray(np.load(pc_files[vid], allow_pickle=True), dtype=np.float32)
         if pts.ndim != 2 or pts.shape[1] != 3:
             raise ValueError(f"Invalid point cloud shape in {pc_files[vid]}: {pts.shape}")
-        print(f"[vis_partial_pc] view={vid:02d} shape={pts.shape} file={pc_files[vid].name}")
+        print(f"[vis_pc] view={vid:02d} shape={pts.shape} file={pc_files[vid].name}")
         cols = np.tile(colors[i : i + 1], (pts.shape[0], 1))
         pointclouds[f"partial_pc_{vid:02d}"] = (pts, cols)
 
@@ -139,8 +153,9 @@ def main() -> None:
             frames = np.stack(frame_list, axis=0)
 
     print(
-        f"[vis_partial_pc] id={info['global_id']} key={info['object_scale_key']} "
-        f"pc_dir={pc_dir} coord={args.coord} views={selected}"
+        f"[vis_pc] id={info['global_id']} key={info['object_scale_key']} "
+        f"pc_dir={pc_dir} coord={args.coord} views={selected} "
+        f"global_frame=world"
     )
     visualize_with_viser(meshes=meshes, pointclouds=pointclouds, frames=frames, blocking=True)
 

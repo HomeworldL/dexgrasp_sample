@@ -80,9 +80,9 @@
   - `datasets/<dataset_tag>/<object>/scaleXXX/<warp_render.output_subdir>/`
   - `dataset_tag` 规则：将配置文件 stem 前缀 `run_` 替换为 `graspdata_`
   - 默认子目录：`pc_warp`
-  - 同时在同一 `pc_warp/` 目录下导出 `global_pc.npy`
-  - `global_pc.npy` 是独立的物体级点云，不是多视角 partial point cloud 的拼接
-  - 当前主线默认是世界系 `float32`、shape 为 `(4096, 3)`，直接从 `coacd.obj` 表面采样
+  - `run.py` / `run_mjw.py` 会在抓取采样前或采样同时，把 `global_pc.npy` 保存到同一 `pc_warp/` 目录下
+  - `global_pc.npy` 保存的是采样器最初使用的世界系物体点云，不是多视角 partial point cloud 的拼接
+  - 当前主线默认是世界系 `float32`、shape 为 `(sampling.n_points, 3)`
 - 点云单独保存，不得打包进 `grasp.npy`。
 
 ## 采样流水线（GPU版本）

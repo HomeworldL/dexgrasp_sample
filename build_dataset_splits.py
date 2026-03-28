@@ -22,12 +22,16 @@ def _collect_entry_record(
     entry: Dict,
     dataset_dir: Path,
     render_subdir: str,
+    grasp_h5_name: str,
+    grasp_npy_name: str,
+    grasp_fail_h5_name: str,
+    grasp_fail_npy_name: str,
 ) -> Tuple[Optional[Dict], Optional[str]]:
     output_dir = Path(str(entry["output_dir_abs"])).resolve()
-    grasp_h5_path = output_dir / "grasp.h5"
-    grasp_npy_path = output_dir / "grasp.npy"
-    grasp_fail_h5_path = output_dir / "grasp_fail.h5"
-    grasp_fail_npy_path = output_dir / "grasp_fail.npy"
+    grasp_h5_path = output_dir / str(grasp_h5_name)
+    grasp_npy_path = output_dir / str(grasp_npy_name)
+    grasp_fail_h5_path = output_dir / str(grasp_fail_h5_name)
+    grasp_fail_npy_path = output_dir / str(grasp_fail_npy_name)
     if not grasp_h5_path.exists():
         return None, f"missing {grasp_h5_path.name}"
     if not grasp_npy_path.exists():
@@ -93,6 +97,10 @@ def build_split_records(
     entries: Sequence[Dict],
     dataset_dir: Path,
     render_subdir: str,
+    grasp_h5_name: str = "grasp.h5",
+    grasp_npy_name: str = "grasp.npy",
+    grasp_fail_h5_name: str = "grasp_fail.h5",
+    grasp_fail_npy_name: str = "grasp_fail.npy",
 ) -> Tuple[List[Dict], List[Tuple[str, str]]]:
     records: List[Dict] = []
     skipped: List[Tuple[str, str]] = []
@@ -101,6 +109,10 @@ def build_split_records(
             entry=entry,
             dataset_dir=dataset_dir,
             render_subdir=render_subdir,
+            grasp_h5_name=grasp_h5_name,
+            grasp_npy_name=grasp_npy_name,
+            grasp_fail_h5_name=grasp_fail_h5_name,
+            grasp_fail_npy_name=grasp_fail_npy_name,
         )
         if record is None:
             skipped.append((str(entry["object_scale_key"]), str(reason)))
@@ -151,11 +163,19 @@ def write_split_jsons(
     dataset_dir: Path,
     render_subdir: str,
     split_seed: int,
+    grasp_h5_name: str,
+    grasp_npy_name: str,
+    grasp_fail_h5_name: str,
+    grasp_fail_npy_name: str,
 ) -> Tuple[Path, Path]:
     records, skipped = build_split_records(
         entries=entries,
         dataset_dir=dataset_dir,
         render_subdir=render_subdir,
+        grasp_h5_name=grasp_h5_name,
+        grasp_npy_name=grasp_npy_name,
+        grasp_fail_h5_name=grasp_fail_h5_name,
+        grasp_fail_npy_name=grasp_fail_npy_name,
     )
     train_records, test_records = split_records_by_object(records, seed=split_seed)
     train_records, empty_train = filter_nonempty_grasp_records(train_records, dataset_dir)
@@ -209,6 +229,10 @@ def main() -> None:
         dataset_dir=dataset_dir,
         render_subdir=str(cfg["warp_render"]["output_subdir"]),
         split_seed=int(cfg["seed"]),
+        grasp_h5_name=str(cfg["output"]["h5_name"]),
+        grasp_npy_name=str(cfg["output"]["npy_name"]),
+        grasp_fail_h5_name=str(cfg["output"]["fail_h5_name"]),
+        grasp_fail_npy_name=str(cfg["output"]["fail_npy_name"]),
     )
 
 

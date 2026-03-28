@@ -63,6 +63,11 @@
 - 失败样本单独持久化为 `grasp_fail.h5` 和 `grasp_fail.npy`：
   - 字段：`qpos_fail`、`failure_stage`
   - 当前保留的失败阶段为 `prepared_contact`、`insufficient_contact` 和 `extforce_failure`
+  - `approach_contact` 和 `init_contact` 不进入失败数据集
+  - `qpos_fail` 保存该阶段对应的失败状态：
+    - `prepared_contact` 保存发生碰撞的 prepared 状态
+    - `insufficient_contact` 保存闭合后的 `qpos_grasp`
+    - `extforce_failure` 保存失败的 `qpos_squeeze`
   - 如果 `valid_count < output.min_valid_count`，则正样本和失败样本文件都必须截断为 0 行
   - 否则失败样本使用配置中的 seed 做 deterministic shuffle，并截断到 `floor(output.fail_keep_ratio * valid_count)`
 - `grasp.h5` 完成后，加载同一批数组并转换为 `grasp.npy`（数值必须与 HDF5 完全一致）。
@@ -75,6 +80,9 @@
   - `datasets/<dataset_tag>/<object>/scaleXXX/<warp_render.output_subdir>/`
   - `dataset_tag` 规则：将配置文件 stem 前缀 `run_` 替换为 `graspdata_`
   - 默认子目录：`pc_warp`
+  - 同时在同一 `pc_warp/` 目录下导出 `global_pc.npy`
+  - `global_pc.npy` 是独立的物体级点云，不是多视角 partial point cloud 的拼接
+  - 当前主线默认是世界系 `float32`、shape 为 `(4096, 3)`，直接从 `coacd.obj` 表面采样
 - 点云单独保存，不得打包进 `grasp.npy`。
 
 ## 采样流水线（GPU版本）
@@ -90,7 +98,11 @@
 - 使用 `build_dataset_splits.py` 扫描已完成的抓取/渲染输出，并生成 `datasets/<dataset_tag>/train.json` 与 `datasets/<dataset_tag>/test.json`。
 - 按 `object_name` 做切分，而不是按 object-scale 条目切分；同一物体的所有 scale 必须留在同一个 split 中，避免泄漏。
 - 默认按唯一物体数做约 `80/20` 切分，并使用配置中的 `seed` 打乱。
-- 只有当 `grasp.h5`、`grasp.npy` 以及所需渲染输出都存在时，该条记录才可进入 split。
+- 只有当正样本 grasp 输出、失败样本 grasp 输出以及所需渲染输出都存在时，该条记录才可进入 split。
+- split 记录必须包含：
+  - `grasp_h5_path`、`grasp_npy_path`
+  - `grasp_h5_fail_path`、`grasp_fail_npy_path`
+  - `global_pc_path`
 - 空的 grasp 文件在最终 manifest 使用前必须过滤掉。
 - manifest 中的路径应保存为相对 dataset root 的相对路径，便于数据集整体迁移。
 
@@ -111,6 +123,8 @@
 - 内部样本表示应包含：
   - 每个 object-scale 一个必需输出：`grasp.h5`
   - 每个 object-scale 一个必需派生输出：`grasp.npy`
+  - 每个 object-scale 一个必需失败输出：`grasp_fail.h5`
+  - 每个 object-scale 一个必需失败派生输出：`grasp_fail.npy`
   - `grasp.npy` 必须由 `grasp.h5` 转换而来，且抓取数值完全一致
   - `grasp.h5` 样本 schema：
     - `object_name: str`
@@ -123,10 +137,18 @@
     - `qpos_grasp: [tx,ty,tz,qw,qx,qy,qz,q1...qN]`
     - `qpos_squeeze: [tx,ty,tz,qw,qx,qy,qz,q1...qN]`
     - `meta: {}`
+  - `grasp_fail.h5` 样本 schema：
+    - `object_name: str`
+    - `scale: float`
+    - `hand_name: str`
+    - `rot_repr: "wxyz+qpos"`
+    - `qpos_fail: [tx,ty,tz,qw,qx,qy,qz,q1...qN]`
+    - `failure_stage: str`
   - 保存的 `qpos_prepared` 仍然是原始候选 pregrasp 状态
   - 回放/extforce 验证时会使用 `qpos_squeeze` 的位姿加上保存的 prepared joints 重建 pregrasp，而不是直接回放保存的 `qpos_prepared` 位姿
   - 点云单独存储，不得打包进 `grasp.npy`
   - 局部点云渲染输出（后处理，独立于抓取数组）：
+    - `global_pc.npy`
     - `cam_in.npy`
     - `cam_ex_XX.npy`
     - `partial_pc_XX.npy`

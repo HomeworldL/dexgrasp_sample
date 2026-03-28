@@ -63,6 +63,11 @@ Mainline work focuses on offline grasp configuration generation.
 - Persist failure samples separately as `grasp_fail.h5` and `grasp_fail.npy`:
   - fields: `qpos_fail`, `failure_stage`
   - current retained stages are `prepared_contact`, `insufficient_contact`, and `extforce_failure`
+  - `approach_contact` and `init_contact` are not exported into the failure dataset
+  - `qpos_fail` stores the stage-specific failed state:
+    - `prepared_contact` stores the colliding prepared state
+    - `insufficient_contact` stores the post-close `qpos_grasp`
+    - `extforce_failure` stores the failed `qpos_squeeze`
   - if `valid_count < output.min_valid_count`, both positive and failure files must be truncated to zero rows
   - otherwise failure samples are deterministically shuffled with config seed and truncated to `floor(output.fail_keep_ratio * valid_count)`
 - After `grasp.h5` is finalized, load the same arrays and convert them to `grasp.npy` (values must be identical to HDF5).
@@ -75,6 +80,9 @@ Mainline work focuses on offline grasp configuration generation.
   - `datasets/<dataset_tag>/<object>/scaleXXX/<warp_render.output_subdir>/`
   - `dataset_tag` rule: replace config stem prefix `run_` with `graspdata_`
   - default subdir: `pc_warp`
+  - additionally export `global_pc.npy` under the same `pc_warp/` directory
+  - `global_pc.npy` is a separate object-level point cloud, not a merge of rendered partial views
+  - current mainline default is world-frame `float32` points with shape `(4096, 3)`, sampled directly from `coacd.obj`
 - Point cloud is saved separately and must not be bundled into `grasp.npy`.
 
 ## Sampling Pipeline (GPU Version)
@@ -90,7 +98,11 @@ Mainline work focuses on offline grasp configuration generation.
 - Use `build_dataset_splits.py` to scan completed grasp/render outputs and write `datasets/<dataset_tag>/train.json` and `datasets/<dataset_tag>/test.json`.
 - Split by `object_name`, not by object-scale entry; all scales of the same object must stay in the same split to avoid leakage.
 - Default split ratio is approximately 80/20 over unique objects, shuffled with the config seed.
-- A split record is valid only when `grasp.h5`, `grasp.npy`, and the required render outputs all exist.
+- A split record is valid only when positive grasp outputs, failure grasp outputs, and the required render outputs all exist.
+- The split record must include:
+  - `grasp_h5_path`, `grasp_npy_path`
+  - `grasp_h5_fail_path`, `grasp_fail_npy_path`
+  - `global_pc_path`
 - Empty grasp files must be filtered out before the final manifests are used.
 - Manifest paths should be stored relative to the dataset root so the dataset can be moved without rewriting absolute paths.
 
@@ -111,6 +123,8 @@ Mainline work focuses on offline grasp configuration generation.
 - Internal sample representation should include:
   - one required output per object-scale: `grasp.h5`
   - one required derived output per object-scale: `grasp.npy`
+  - one required failure output per object-scale: `grasp_fail.h5`
+  - one required derived failure output per object-scale: `grasp_fail.npy`
   - `grasp.npy` must be converted from `grasp.h5` with identical stored grasp values
   - `grasp.h5` sample schema:
     - `object_name: str`
@@ -123,10 +137,18 @@ Mainline work focuses on offline grasp configuration generation.
     - `qpos_grasp: [tx,ty,tz,qw,qx,qy,qz,q1...qN]`
     - `qpos_squeeze: [tx,ty,tz,qw,qx,qy,qz,q1...qN]`
     - `meta: {}`
+  - `grasp_fail.h5` sample schema:
+    - `object_name: str`
+    - `scale: float`
+    - `hand_name: str`
+    - `rot_repr: "wxyz+qpos"`
+    - `qpos_fail: [tx,ty,tz,qw,qx,qy,qz,q1...qN]`
+    - `failure_stage: str`
   - stored `qpos_prepared` remains the original candidate pregrasp state
   - replay/extforce validation rebuilds a pregrasp using `qpos_squeeze` pose plus stored prepared joints; it does not directly replay the saved `qpos_prepared` pose
   - point cloud is stored separately and must not be bundled into `grasp.npy`
   - partial point cloud rendering output (post-processing, separate from grasp arrays):
+    - `global_pc.npy`
     - `cam_in.npy`
     - `cam_ex_XX.npy`
     - `partial_pc_XX.npy`

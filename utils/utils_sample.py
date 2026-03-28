@@ -34,9 +34,13 @@ def parse_object_scale_key(object_scale_key: str) -> Tuple[str, Optional[float]]
     return object_name, float(int(digits)) / 1000.0
 
 
-def grasp_outputs_exist(output_dir_abs: str) -> bool:
+def grasp_outputs_exist(
+    output_dir_abs: str,
+    h5_name: str = "grasp.h5",
+    npy_name: str = "grasp.npy",
+) -> bool:
     out_dir = Path(output_dir_abs)
-    return (out_dir / "grasp.h5").exists() and (out_dir / "grasp.npy").exists()
+    return (out_dir / str(h5_name)).exists() and (out_dir / str(npy_name)).exists()
 
 
 def grasp_h5_nonempty(h5_path: Path) -> Tuple[bool, str]:

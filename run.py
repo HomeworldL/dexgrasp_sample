@@ -118,8 +118,8 @@ def run_sampling(
 
     out_dir = Path(output_dir_abs)
     out_dir.mkdir(parents=True, exist_ok=True)
-    h5_path = out_dir / "grasp.h5"
-    npy_path = out_dir / "grasp.npy"
+    h5_path = out_dir / str(cfg["output"]["h5_name"])
+    npy_path = out_dir / str(cfg["output"]["npy_name"])
     fail_h5_path = out_dir / str(cfg["output"]["fail_h5_name"])
     fail_npy_path = out_dir / str(cfg["output"]["fail_npy_name"])
 
@@ -272,7 +272,7 @@ def main():
     p.add_argument("--coacd-path", type=str, required=True, help="Path to scaled COACD mesh OBJ.")
     p.add_argument("--mjcf-path", type=str, required=True, help="Path to scaled object MJCF.")
     p.add_argument("--output-dir", type=str, required=True, help="Output directory for grasp artifacts.")
-    p.add_argument("--force", action="store_true", help="Re-run even if grasp.h5 and grasp.npy already exist.")
+    p.add_argument("--force", action="store_true", help="Re-run even if configured grasp outputs already exist.")
     p.add_argument("-v", "--verbose", action="store_true", help="Enable verbose logs.")
     p.add_argument("-c", "--config", type=str, default=DEFAULT_RUN_CONFIG_PATH, help="JSON config path.")
     args = p.parse_args()
@@ -283,9 +283,11 @@ def main():
     total_stage_start = time.perf_counter()
     if verbose:
         print(f"Using object-scale key: {args.object_scale_key}")
-    if (not args.force) and grasp_outputs_exist(args.output_dir):
+    h5_name = str(cfg["output"]["h5_name"])
+    npy_name = str(cfg["output"]["npy_name"])
+    if (not args.force) and grasp_outputs_exist(args.output_dir, h5_name=h5_name, npy_name=npy_name):
         if verbose:
-            print(f"[{args.object_scale_key}] skip existing grasp.h5 and grasp.npy in {args.output_dir}")
+            print(f"[{args.object_scale_key}] skip existing {h5_name} and {npy_name} in {args.output_dir}")
         return
 
     hand_xml_path = os.path.abspath(cfg["hand"]["xml_path"])

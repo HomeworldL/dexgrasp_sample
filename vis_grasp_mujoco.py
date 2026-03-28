@@ -31,9 +31,14 @@ def _resolve_qpos_dtype(dtype_name: str) -> np.dtype:
     )
 
 
-def _load_grasp_arrays(object_scale_dir: Path, qpos_dtype: np.dtype) -> Dict[str, np.ndarray]:
-    grasp_npy_path = object_scale_dir / "grasp.npy"
-    grasp_h5_path = object_scale_dir / "grasp.h5"
+def _load_grasp_arrays(
+    object_scale_dir: Path,
+    qpos_dtype: np.dtype,
+    grasp_h5_name: str,
+    grasp_npy_name: str,
+) -> Dict[str, np.ndarray]:
+    grasp_npy_path = object_scale_dir / str(grasp_npy_name)
+    grasp_h5_path = object_scale_dir / str(grasp_h5_name)
     required_keys = ("qpos_prepared", "qpos_squeeze")
 
     if grasp_npy_path.exists():
@@ -63,7 +68,12 @@ def visualize_extforce_grasps(
     qpos_dtype_name: str,
 ) -> int:
     qpos_dtype = _resolve_qpos_dtype(qpos_dtype_name)
-    grasp_arrays = _load_grasp_arrays(object_scale_dir, qpos_dtype=qpos_dtype)
+    grasp_arrays = _load_grasp_arrays(
+        object_scale_dir,
+        qpos_dtype=qpos_dtype,
+        grasp_h5_name=str(cfg["output"]["h5_name"]),
+        grasp_npy_name=str(cfg["output"]["npy_name"]),
+    )
     qpos_squeeze = grasp_arrays["qpos_squeeze"]
     qpos_prepared_raw = grasp_arrays["qpos_prepared"]
 
@@ -131,7 +141,7 @@ def main() -> None:
         "--object-scale-dir",
         type=str,
         required=True,
-        help="Object-scale directory containing grasp.npy/grasp.h5 and object.xml.",
+        help="Object-scale directory containing configured grasp outputs and object.xml.",
     )
     parser.add_argument(
         "--dtype",

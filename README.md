@@ -161,8 +161,18 @@ Failure sample note:
 - `run.py` also exports `grasp_fail.h5` and `grasp_fail.npy`
 - it stores `qpos_fail` plus `failure_stage`
 - current retained failure stages are `prepared_contact`, `insufficient_contact`, and `extforce_failure`
+- `approach_contact` and `init_contact` are not exported into the failure dataset
+- `qpos_fail` stores the stage-specific failed state:
+  - `prepared_contact`: colliding prepared state
+  - `insufficient_contact`: post-close `qpos_grasp`
+  - `extforce_failure`: failed `qpos_squeeze`
 - if `valid_count < output.min_valid_count`, both positive and failure grasp files are truncated to zero rows
 - otherwise failure samples are deterministically shuffled with config `seed` and truncated to `floor(output.fail_keep_ratio * valid_count)`
+
+Global point cloud note:
+- `pc_warp/global_pc.npy` is exported independently from rendered partial views
+- it is not a merge of `partial_pc_XX.npy`
+- current mainline default is world-frame `float32` with shape `(4096, 3)`, sampled directly from `coacd.obj`
 
 ### Dataset Split Policy
 
@@ -174,7 +184,11 @@ Current split rules:
 - split by `object_name`, not by object-scale row
 - keep all scales of the same object in the same split
 - default ratio is approximately `80/20` over unique objects, shuffled with config `seed`
-- require `grasp.h5`, `grasp.npy`, and required render outputs to exist
+- require positive grasp outputs, failure grasp outputs, and required render outputs to exist
+- each manifest row includes:
+  - `grasp_h5_path`, `grasp_npy_path`
+  - `grasp_h5_fail_path`, `grasp_fail_npy_path`
+  - `global_pc_path`
 - filter out empty grasp files before writing final manifests
 - store paths relative to dataset root for portability
 

@@ -120,3 +120,49 @@ def test_empty_grasp_h5_is_filtered_after_split(tmp_path: Path):
     assert filtered_test == []
     assert empty_train == []
     assert empty_test == [("obj_e__scale080", "qpos_grasp has zero rows")]
+
+
+def test_build_split_records_respects_configured_grasp_filenames(tmp_path: Path):
+    dataset_dir = tmp_path / "datasets" / "graspdata_YCB_liberhand"
+    output_dir = dataset_dir / "obj_cfg" / "scale080"
+    _touch(output_dir / "coacd.obj")
+    _touch(output_dir / "object.xml")
+    _touch(output_dir / "convex_parts" / "part_000.obj")
+    _touch(output_dir / "custom_grasp.h5")
+    _touch(output_dir / "custom_grasp.npy")
+    _touch(output_dir / "custom_fail.h5")
+    _touch(output_dir / "custom_fail.npy")
+    render_dir = output_dir / "pc_warp"
+    _touch(render_dir / "cam_in.npy")
+    _touch(render_dir / "cam_ex_00.npy")
+    _touch(render_dir / "global_pc.npy")
+    _touch(render_dir / "partial_pc_00.npy")
+    _touch(render_dir / "partial_pc_cam_00.npy")
+
+    entry = {
+        "global_id": 0,
+        "object_scale_key": "obj_cfg__scale080",
+        "object_name": "obj_cfg",
+        "output_dir_abs": str(output_dir),
+        "coacd_abs": str(output_dir / "coacd.obj"),
+        "convex_parts_abs": [str(output_dir / "convex_parts" / "part_000.obj")],
+        "mjcf_abs": str(output_dir / "object.xml"),
+        "scale": 0.08,
+    }
+
+    records, skipped = build_split_records(
+        entries=[entry],
+        dataset_dir=dataset_dir,
+        render_subdir="pc_warp",
+        grasp_h5_name="custom_grasp.h5",
+        grasp_npy_name="custom_grasp.npy",
+        grasp_fail_h5_name="custom_fail.h5",
+        grasp_fail_npy_name="custom_fail.npy",
+    )
+
+    assert skipped == []
+    assert len(records) == 1
+    assert records[0]["grasp_h5_path"] == "obj_cfg/scale080/custom_grasp.h5"
+    assert records[0]["grasp_npy_path"] == "obj_cfg/scale080/custom_grasp.npy"
+    assert records[0]["grasp_h5_fail_path"] == "obj_cfg/scale080/custom_fail.h5"
+    assert records[0]["grasp_fail_npy_path"] == "obj_cfg/scale080/custom_fail.npy"

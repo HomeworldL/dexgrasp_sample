@@ -32,7 +32,7 @@ def _resolve_qpos_dtype(dtype_name: str) -> np.dtype:
 
 def _load_qpos_grasp(grasp_h5_path: Path, qpos_dtype: np.dtype) -> Dict[str, np.ndarray]:
     if not grasp_h5_path.exists():
-        raise FileNotFoundError(f"grasp.h5 not found: {grasp_h5_path}")
+        raise FileNotFoundError(f"Configured grasp HDF5 not found: {grasp_h5_path}")
     with h5py.File(grasp_h5_path, "r") as handle:
         required = ["qpos_init", "qpos_prepared", "qpos_grasp", "qpos_squeeze"]
         missing = [key for key in required if key not in handle]

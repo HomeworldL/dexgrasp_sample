@@ -161,8 +161,18 @@ datasets/graspdata_YCB_liberhand/<object>/scaleXXX/
 - `run.py` 还会额外导出 `grasp_fail.h5` 和 `grasp_fail.npy`
 - 其中保存 `qpos_fail` 和 `failure_stage`
 - 当前保留的失败阶段包括 `prepared_contact`、`insufficient_contact` 和 `extforce_failure`
+- `approach_contact` 和 `init_contact` 不进入失败数据集
+- `qpos_fail` 保存该阶段对应的失败状态：
+  - `prepared_contact`：发生碰撞的 prepared 状态
+  - `insufficient_contact`：闭合后的 `qpos_grasp`
+  - `extforce_failure`：失败的 `qpos_squeeze`
 - 如果 `valid_count < output.min_valid_count`，则正样本和失败样本文件都会被截断为 0 行
 - 否则失败样本会使用配置中的 `seed` 做 deterministic shuffle，并按 `floor(output.fail_keep_ratio * valid_count)` 截断保留
+
+全局点云补充：
+- `pc_warp/global_pc.npy` 是独立导出的全局物体点云
+- 它不是 `partial_pc_XX.npy` 的拼接结果
+- 当前主线默认是世界系 `float32`、shape 为 `(4096, 3)`，直接从 `coacd.obj` 表面采样
 
 ### 数据集切分规则
 
@@ -174,7 +184,11 @@ datasets/graspdata_YCB_liberhand/<object>/scaleXXX/
 - 按 `object_name` 切分，而不是按 object-scale 条目切分
 - 同一个物体的所有 scale 必须留在同一个 split 中
 - 默认按唯一物体数做约 `80/20` 切分，并使用配置中的 `seed` 打乱
-- 只有 `grasp.h5`、`grasp.npy` 和所需渲染输出都存在，条目才会进入清单
+- 只有正样本 grasp 输出、失败样本 grasp 输出和所需渲染输出都存在，条目才会进入清单
+- 每条 manifest 会记录：
+  - `grasp_h5_path`、`grasp_npy_path`
+  - `grasp_h5_fail_path`、`grasp_fail_npy_path`
+  - `global_pc_path`
 - 写出最终 manifest 前会过滤空 grasp 文件
 - manifest 中保存相对 dataset root 的相对路径，便于整体迁移
 

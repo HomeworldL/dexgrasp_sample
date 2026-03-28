@@ -36,7 +36,7 @@ def parse_args():
         default=DEFAULT_RUN_CONFIG_PATH,
         help="运行配置 JSON（默认 configs/run_YCB_liberhand.json）",
     )
-    p.add_argument("--force", action="store_true", help="即使已有 grasp.h5 和 grasp.npy 也强制重跑")
+    p.add_argument("--force", action="store_true", help="即使已存在配置指定的抓取输出也强制重跑")
     p.add_argument("-v", "--verbose", action="store_true", help="仅透传详细日志给子进程 run_mjw.py")
     p.add_argument("--batch-size", type=int, default=512)
     p.add_argument("--device", type=str, default="cuda:0")
@@ -142,14 +142,27 @@ def main():
         print("没有发现任何 object-scale 条目，退出。")
         return
 
+    h5_name = str(cfg["output"]["h5_name"])
+    npy_name = str(cfg["output"]["npy_name"])
     if not args.force:
         total_entries = len(entries)
-        entries = [it for it in entries if not grasp_outputs_exist(str(it["output_dir_abs"]))]
+        entries = [
+            it
+            for it in entries
+            if not grasp_outputs_exist(
+                str(it["output_dir_abs"]),
+                h5_name=h5_name,
+                npy_name=npy_name,
+            )
+        ]
         skipped = total_entries - len(entries)
         if skipped > 0:
-            print(f"Pre-skip existing results: {skipped}/{total_entries} entries already have grasp.h5 and grasp.npy.")
+            print(
+                f"Pre-skip existing results: {skipped}/{total_entries} entries already have "
+                f"{h5_name} and {npy_name}."
+            )
         if not entries:
-            print("所有 object-scale 条目都已存在 grasp.h5 和 grasp.npy，跳过执行。")
+            print(f"所有 object-scale 条目都已存在 {h5_name} 和 {npy_name}，跳过执行。")
             return
 
     print(

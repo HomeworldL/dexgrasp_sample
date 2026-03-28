@@ -64,6 +64,16 @@ def write_grasp_npy_from_h5(h5_path: Path, npy_path: Path) -> None:
     np.save(npy_path, payload, allow_pickle=True)
 
 
+def write_fail_npy_from_h5(h5_path: Path, npy_path: Path) -> None:
+    payload: Dict[str, np.ndarray] = {}
+    with h5py.File(h5_path, "r") as hf:
+        for key in ("qpos_fail", "failure_stage"):
+            if key not in hf:
+                raise KeyError(f"Missing dataset '{key}' in {h5_path}")
+            payload[key] = np.asarray(hf[key][:])
+    np.save(npy_path, payload, allow_pickle=True)
+
+
 def compose_rot_grasp_to_palm(cfg: Dict) -> np.ndarray:
     transform_cfg = cfg["hand"]["transform"]
     base = np.asarray(transform_cfg["base_rot_grasp_to_palm"], dtype=float)

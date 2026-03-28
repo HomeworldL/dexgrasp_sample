@@ -133,7 +133,10 @@ datasets/graspdata_YCB_liberhand/<object>/scaleXXX/
   convex_parts/*.obj
   grasp.h5
   grasp.npy
-  partial_pc_warp/
+  grasp_fail.h5
+  grasp_fail.npy
+  pc_warp/
+    global_pc.npy
     cam_in.npy
     cam_ex_XX.npy
     partial_pc_XX.npy
@@ -153,6 +156,13 @@ datasets/graspdata_YCB_liberhand/<object>/scaleXXX/
 - 保存的 `qpos_prepared` 仍然是原始候选 pregrasp 状态
 - extforce 回放会使用 `qpos_squeeze` 的位姿加上保存的 prepared joints 重建验证用 pregrasp
 - `sim_dataset.py` 保留保存的 `qpos_init` 预检查，然后调用 `sim_under_extforce(qpos_target, rebuilt_qpos_prepared, ...)`
+
+失败样本补充：
+- `run.py` 还会额外导出 `grasp_fail.h5` 和 `grasp_fail.npy`
+- 其中保存 `qpos_fail` 和 `failure_stage`
+- 当前保留的失败阶段包括 `prepared_contact`、`insufficient_contact` 和 `extforce_failure`
+- 如果 `valid_count < output.min_valid_count`，则正样本和失败样本文件都会被截断为 0 行
+- 否则失败样本会使用配置中的 `seed` 做 deterministic shuffle，并按 `floor(output.fail_keep_ratio * valid_count)` 截断保留
 
 ### 数据集切分规则
 

@@ -60,6 +60,11 @@ Mainline work focuses on offline grasp configuration generation.
   - mainline stored dtype for grasp arrays is `float32`
   - use preallocated capacity + runtime truncate to the final valid size
   - periodic flush/GC during long runs
+- Persist failure samples separately as `grasp_fail.h5` and `grasp_fail.npy`:
+  - fields: `qpos_fail`, `failure_stage`
+  - current retained stages are `prepared_contact`, `insufficient_contact`, and `extforce_failure`
+  - if `valid_count < output.min_valid_count`, both positive and failure files must be truncated to zero rows
+  - otherwise failure samples are deterministically shuffled with config seed and truncated to `floor(output.fail_keep_ratio * valid_count)`
 - After `grasp.h5` is finalized, load the same arrays and convert them to `grasp.npy` (values must be identical to HDF5).
 - `sim_dataset.py` is the dataset-level replay/validation entrypoint for `train.json` / `test.json`.
   - it keeps the stored `qpos_init` pre-check
@@ -69,7 +74,7 @@ Mainline work focuses on offline grasp configuration generation.
 - After grasp outputs are ready, render object partial point clouds with Warp and save under:
   - `datasets/<dataset_tag>/<object>/scaleXXX/<warp_render.output_subdir>/`
   - `dataset_tag` rule: replace config stem prefix `run_` with `graspdata_`
-  - default subdir: `partial_pc_warp`
+  - default subdir: `pc_warp`
 - Point cloud is saved separately and must not be bundled into `grasp.npy`.
 
 ## Sampling Pipeline (GPU Version)

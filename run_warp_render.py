@@ -10,6 +10,7 @@ from tqdm import tqdm
 
 from src.dataset_objects import DatasetObjects
 from utils.utils_file import DEFAULT_RUN_CONFIG_PATH, dataset_tag_from_config, load_config
+from utils.utils_pointcloud import sample_surface_o3d
 from utils.utils_warp_render import (
     WarpPointCloudRenderer,
     get_camera_matrix,
@@ -36,6 +37,9 @@ def _validate_render_config(cfg: Dict) -> Dict:
         "output_subdir",
         "max_point_num",
         "save_pc",
+        "save_global_pc",
+        "global_pc_num",
+        "global_pc_method",
         "save_depth",
         "save_rgb",
         "skip_existing",
@@ -66,6 +70,8 @@ def _validate_render_config(cfg: Dict) -> Dict:
         raise ValueError("warp_render.n_cols and warp_render.n_rows must be > 0.")
     if int(wr["max_point_num"]) <= 0:
         raise ValueError("warp_render.max_point_num must be > 0.")
+    if int(wr["global_pc_num"]) <= 0:
+        raise ValueError("warp_render.global_pc_num must be > 0.")
     return wr
 
 
@@ -128,6 +134,14 @@ def _all_cam_ex_exist(folder: Path, batch: int) -> bool:
     return True
 
 
+def _global_pc_exists(folder: Path) -> bool:
+    path = folder / "global_pc.npy"
+    if not path.exists():
+        return False
+    arr = np.load(path, allow_pickle=True)
+    return arr.size > 0
+
+
 def _render_entry(
     renderer: WarpPointCloudRenderer,
     entry: Dict,
@@ -139,10 +153,19 @@ def _render_entry(
 
     batch = renderer.num_tiles
     if bool(render_cfg["skip_existing"]):
-        if bool(render_cfg["save_pc"]) and _all_pc_exist(out_dir, batch):
+        has_global_pc = (not bool(render_cfg["save_global_pc"])) or _global_pc_exists(out_dir)
+        if bool(render_cfg["save_pc"]) and _all_pc_exist(out_dir, batch) and has_global_pc:
             return f"skip {entry['object_scale_key']}"
         if (not bool(render_cfg["save_pc"])) and _all_cam_ex_exist(out_dir, batch):
             return f"skip {entry['object_scale_key']}"
+
+    if bool(render_cfg["save_global_pc"]):
+        global_pc, _ = sample_surface_o3d(
+            str(entry["coacd_abs"]),
+            n_points=int(render_cfg["global_pc_num"]),
+            method=str(render_cfg["global_pc_method"]),
+        )
+        np.save(out_dir / "global_pc.npy", np.asarray(global_pc, dtype=np.float32))
 
     mesh = mesh_from_path(str(entry["coacd_abs"]))
     mesh_radius = float(np.max(np.linalg.norm(np.asarray(mesh.vertices, dtype=np.float64), axis=1)))

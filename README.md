@@ -133,7 +133,10 @@ datasets/graspdata_YCB_liberhand/<object>/scaleXXX/
   convex_parts/*.obj
   grasp.h5
   grasp.npy
-  partial_pc_warp/
+  grasp_fail.h5
+  grasp_fail.npy
+  pc_warp/
+    global_pc.npy
     cam_in.npy
     cam_ex_XX.npy
     partial_pc_XX.npy
@@ -153,6 +156,13 @@ Current replay note:
 - stored `qpos_prepared` remains the original candidate pregrasp state
 - extforce replay rebuilds a validation pregrasp from `qpos_squeeze` pose plus the stored prepared joints
 - `sim_dataset.py` keeps the stored `qpos_init` pre-check, then calls `sim_under_extforce(qpos_target, rebuilt_qpos_prepared, ...)`
+
+Failure sample note:
+- `run.py` also exports `grasp_fail.h5` and `grasp_fail.npy`
+- it stores `qpos_fail` plus `failure_stage`
+- current retained failure stages are `prepared_contact`, `insufficient_contact`, and `extforce_failure`
+- if `valid_count < output.min_valid_count`, both positive and failure grasp files are truncated to zero rows
+- otherwise failure samples are deterministically shuffled with config `seed` and truncated to `floor(output.fail_keep_ratio * valid_count)`
 
 ### Dataset Split Policy
 

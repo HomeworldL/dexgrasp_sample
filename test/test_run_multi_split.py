@@ -18,9 +18,12 @@ def _make_entry(dataset_dir: Path, global_id: int, object_name: str, scale_tag: 
     _touch(output_dir / "convex_parts" / "part_000.obj")
     _touch(output_dir / "grasp.h5")
     _touch(output_dir / "grasp.npy")
-    render_dir = output_dir / "partial_pc_warp"
+    _touch(output_dir / "grasp_fail.h5")
+    _touch(output_dir / "grasp_fail.npy")
+    render_dir = output_dir / "pc_warp"
     _touch(render_dir / "cam_in.npy")
     _touch(render_dir / "cam_ex_00.npy")
+    _touch(render_dir / "global_pc.npy")
     _touch(render_dir / "partial_pc_00.npy")
     _touch(render_dir / "partial_pc_cam_00.npy")
     return {
@@ -59,17 +62,20 @@ def test_build_split_records_and_split_by_object(tmp_path: Path):
     records, skipped = build_split_records(
         entries=entries,
         dataset_dir=dataset_dir,
-        render_subdir="partial_pc_warp",
+        render_subdir="pc_warp",
     )
 
     assert skipped == []
     assert len(records) == len(entries)
     assert records[0]["output_path"] == "obj_a/scale080"
     assert records[0]["grasp_h5_path"] == "obj_a/scale080/grasp.h5"
-    assert records[0]["partial_pc_path"] == ["obj_a/scale080/partial_pc_warp/partial_pc_00.npy"]
-    assert records[0]["partial_pc_cam_path"] == ["obj_a/scale080/partial_pc_warp/partial_pc_cam_00.npy"]
-    assert records[0]["cam_ex_path"] == ["obj_a/scale080/partial_pc_warp/cam_ex_00.npy"]
-    assert records[0]["cam_in"] == "obj_a/scale080/partial_pc_warp/cam_in.npy"
+    assert records[0]["grasp_h5_fail_path"] == "obj_a/scale080/grasp_fail.h5"
+    assert records[0]["grasp_fail_npy_path"] == "obj_a/scale080/grasp_fail.npy"
+    assert records[0]["partial_pc_path"] == ["obj_a/scale080/pc_warp/partial_pc_00.npy"]
+    assert records[0]["partial_pc_cam_path"] == ["obj_a/scale080/pc_warp/partial_pc_cam_00.npy"]
+    assert records[0]["cam_ex_path"] == ["obj_a/scale080/pc_warp/cam_ex_00.npy"]
+    assert records[0]["cam_in"] == "obj_a/scale080/pc_warp/cam_in.npy"
+    assert records[0]["global_pc_path"] == "obj_a/scale080/pc_warp/global_pc.npy"
 
     train_records, test_records = split_records_by_object(records, seed=0)
     train_records_repeat, test_records_repeat = split_records_by_object(records, seed=0)
@@ -103,7 +109,7 @@ def test_empty_grasp_h5_is_filtered_after_split(tmp_path: Path):
 
     from build_dataset_splits import build_split_records, filter_nonempty_grasp_records
 
-    records, skipped = build_split_records(entries, dataset_dir, "partial_pc_warp")
+    records, skipped = build_split_records(entries, dataset_dir, "pc_warp")
     assert skipped == []
 
     train_records, test_records = split_records_by_object(records, seed=7)

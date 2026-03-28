@@ -2,7 +2,7 @@ import argparse
 import os
 import time
 from pathlib import Path
-from typing import Dict, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import h5py
 import numpy as np
@@ -22,9 +22,61 @@ from utils.utils_sample import (
     make_qpos_triplets,
     parse_object_scale_key,
     sample_frames_from_points,
+    write_fail_npy_from_h5,
     write_grasp_npy_from_h5,
 )
 from utils.utils_seed import set_seed
+
+
+def _select_fail_samples(
+    fail_qpos_rows: List[np.ndarray],
+    fail_stages: List[str],
+    valid_count: int,
+    min_valid_count: int,
+    fail_keep_ratio: float,
+    seed: int,
+) -> Tuple[List[np.ndarray], List[str]]:
+    if valid_count < min_valid_count:
+        return [], []
+    keep_count = min(
+        len(fail_qpos_rows),
+        int(np.floor(float(fail_keep_ratio) * float(valid_count))),
+    )
+    if keep_count <= 0:
+        return [], []
+    indices = np.random.default_rng(int(seed)).permutation(len(fail_qpos_rows))[:keep_count]
+    selected_qpos = [fail_qpos_rows[int(idx)] for idx in indices]
+    selected_stages = [fail_stages[int(idx)] for idx in indices]
+    return selected_qpos, selected_stages
+
+
+def _write_fail_h5(
+    fail_h5_path: Path,
+    object_name: str,
+    scale: Optional[float],
+    hand_name: str,
+    qpos_dim: int,
+    qpos_fail: List[np.ndarray],
+    failure_stages: List[str],
+) -> None:
+    if qpos_fail:
+        qpos_fail_np = np.asarray(qpos_fail, dtype=ARRAY_DTYPE)
+        failure_stage_np = np.asarray(failure_stages, dtype=object)
+    else:
+        qpos_fail_np = np.zeros((0, qpos_dim), dtype=ARRAY_DTYPE)
+        failure_stage_np = np.asarray([], dtype=object)
+    failure_stage_dtype = h5py.string_dtype(encoding="utf-8")
+    with h5py.File(fail_h5_path, "w") as hf:
+        hf.create_dataset("object_name", data=encode_h5_str(object_name))
+        hf.create_dataset("scale", data=np.float32(scale if scale is not None else np.nan))
+        hf.create_dataset("hand_name", data=encode_h5_str(hand_name))
+        hf.create_dataset("rot_repr", data=encode_h5_str("wxyz+qpos"))
+        hf.create_dataset("qpos_fail", data=qpos_fail_np, dtype=H5_DTYPE)
+        hf.create_dataset(
+            "failure_stage",
+            data=failure_stage_np,
+            dtype=failure_stage_dtype,
+        )
 
 
 def run_sampling(
@@ -68,11 +120,15 @@ def run_sampling(
     out_dir.mkdir(parents=True, exist_ok=True)
     h5_path = out_dir / "grasp.h5"
     npy_path = out_dir / "grasp.npy"
+    fail_h5_path = out_dir / str(cfg["output"]["fail_h5_name"])
+    fail_npy_path = out_dir / str(cfg["output"]["fail_npy_name"])
 
     d = qpos_prepared.shape[1]
     max_cap = int(cfg["output"]["max_cap"])
     max_time_sec = float(cfg["output"]["max_time_sec"])
+    min_valid_count = int(cfg["output"]["min_valid_count"])
     flush_every = int(cfg["output"]["flush_every"])
+    fail_keep_ratio = float(cfg["output"]["fail_keep_ratio"])
     contact_min_count = int(cfg["sim_grasp"]["contact_min_count"])
     sim_grasp_cfg = dict(cfg.get("sim_grasp", {}))
     extforce_cfg = dict(cfg.get("extforce", {}))
@@ -87,6 +143,8 @@ def run_sampling(
     num_samples = transforms_np.shape[0]
     ts = time.time()
     stop_reason = "depleted"
+    fail_qpos_rows: List[np.ndarray] = []
+    fail_stages: List[str] = []
 
     with h5py.File(h5_path, "w") as hf:
         hf.create_dataset("object_name", data=encode_h5_str(object_name))
@@ -117,6 +175,8 @@ def run_sampling(
 
             mjho.set_hand_qpos(qpos_prepared[i])
             if mjho.is_contact():
+                fail_qpos_rows.append(as_array(qpos_prepared[i]))
+                fail_stages.append("prepared_contact")
                 continue
             mjho.set_hand_qpos(qpos_approach[i])
             if mjho.is_contact():
@@ -155,11 +215,17 @@ def run_sampling(
                     ds_grasp[num_valid] = qpos_grasp.astype(ARRAY_DTYPE, copy=False)
                     ds_squeeze[num_valid] = qpos_squeeze.astype(ARRAY_DTYPE, copy=False)
                     num_valid += 1
+                else:
+                    fail_qpos_rows.append(qpos_squeeze.astype(ARRAY_DTYPE, copy=False))
+                    fail_stages.append("extforce_failure")
+            else:
+                fail_qpos_rows.append(qpos_grasp.astype(ARRAY_DTYPE, copy=False))
+                fail_stages.append("insufficient_contact")
 
             if flush_every > 0 and (i + 1) % flush_every == 0:
                 hf.flush()
 
-        final_size = num_valid
+        final_size = num_valid if num_valid >= min_valid_count else 0
         ds_init.resize((final_size, d))
         ds_approach.resize((final_size, d))
         ds_prepared.resize((final_size, d))
@@ -167,11 +233,32 @@ def run_sampling(
         ds_squeeze.resize((final_size, d))
         hf.flush()
 
+    num_valid = final_size
+    kept_fail_qpos, kept_fail_stages = _select_fail_samples(
+        fail_qpos_rows=fail_qpos_rows,
+        fail_stages=fail_stages,
+        valid_count=num_valid,
+        min_valid_count=min_valid_count,
+        fail_keep_ratio=fail_keep_ratio,
+        seed=int(cfg["seed"]),
+    )
+    _write_fail_h5(
+        fail_h5_path=fail_h5_path,
+        object_name=object_name,
+        scale=scale,
+        hand_name=hand_name,
+        qpos_dim=d,
+        qpos_fail=kept_fail_qpos,
+        failure_stages=kept_fail_stages,
+    )
+    write_fail_npy_from_h5(fail_h5_path, fail_npy_path)
+
     duration = time.time() - ts
     total_elapsed = time.perf_counter() - total_stage_start
     print(
         f"[{object_scale_key}] samples={num_samples} no_col={num_no_col} "
-        f"valid={num_valid} time={duration:.2f}s total_elapsed={total_elapsed:.2f}s "
+        f"valid={num_valid} fail={len(kept_fail_qpos)} "
+        f"time={duration:.2f}s total_elapsed={total_elapsed:.2f}s "
         f"stop_reason={stop_reason} out={h5_path}"
     )
     write_grasp_npy_from_h5(h5_path, npy_path)

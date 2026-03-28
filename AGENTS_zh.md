@@ -60,6 +60,11 @@
   - 主线中抓取数组存储 dtype 为 `float32`
   - 使用预分配容量并在运行时截断到最终有效长度
   - 长时间运行时周期性 flush/GC
+- 失败样本单独持久化为 `grasp_fail.h5` 和 `grasp_fail.npy`：
+  - 字段：`qpos_fail`、`failure_stage`
+  - 当前保留的失败阶段为 `prepared_contact`、`insufficient_contact` 和 `extforce_failure`
+  - 如果 `valid_count < output.min_valid_count`，则正样本和失败样本文件都必须截断为 0 行
+  - 否则失败样本使用配置中的 seed 做 deterministic shuffle，并截断到 `floor(output.fail_keep_ratio * valid_count)`
 - `grasp.h5` 完成后，加载同一批数组并转换为 `grasp.npy`（数值必须与 HDF5 完全一致）。
 - `sim_dataset.py` 是基于 `train.json` / `test.json` 的数据集级回放/验证入口。
   - 保留保存的 `qpos_init` 预检查
@@ -69,7 +74,7 @@
 - 抓取输出完成后，使用 Warp 渲染物体局部点云，并保存到：
   - `datasets/<dataset_tag>/<object>/scaleXXX/<warp_render.output_subdir>/`
   - `dataset_tag` 规则：将配置文件 stem 前缀 `run_` 替换为 `graspdata_`
-  - 默认子目录：`partial_pc_warp`
+  - 默认子目录：`pc_warp`
 - 点云单独保存，不得打包进 `grasp.npy`。
 
 ## 采样流水线（GPU版本）

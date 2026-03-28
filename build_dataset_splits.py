@@ -26,15 +26,24 @@ def _collect_entry_record(
     output_dir = Path(str(entry["output_dir_abs"])).resolve()
     grasp_h5_path = output_dir / "grasp.h5"
     grasp_npy_path = output_dir / "grasp.npy"
+    grasp_fail_h5_path = output_dir / "grasp_fail.h5"
+    grasp_fail_npy_path = output_dir / "grasp_fail.npy"
     if not grasp_h5_path.exists():
         return None, f"missing {grasp_h5_path.name}"
     if not grasp_npy_path.exists():
         return None, f"missing {grasp_npy_path.name}"
+    if not grasp_fail_h5_path.exists():
+        return None, f"missing {grasp_fail_h5_path.name}"
+    if not grasp_fail_npy_path.exists():
+        return None, f"missing {grasp_fail_npy_path.name}"
 
     render_dir = output_dir / render_subdir
     cam_in_path = render_dir / "cam_in.npy"
+    global_pc_path = render_dir / "global_pc.npy"
     if not cam_in_path.exists():
         return None, f"missing {render_subdir}/cam_in.npy"
+    if not global_pc_path.exists():
+        return None, f"missing {render_subdir}/global_pc.npy"
 
     partial_pc_paths = list_existing_files(render_dir, "partial_pc_")
     partial_pc_cam_paths = list_existing_files(render_dir, "partial_pc_cam_")
@@ -66,12 +75,15 @@ def _collect_entry_record(
         "mjcf_path": relpath_str(Path(str(entry["mjcf_abs"])), dataset_dir),
         "grasp_h5_path": relpath_str(grasp_h5_path, dataset_dir),
         "grasp_npy_path": relpath_str(grasp_npy_path, dataset_dir),
+        "grasp_h5_fail_path": relpath_str(grasp_fail_h5_path, dataset_dir),
+        "grasp_fail_npy_path": relpath_str(grasp_fail_npy_path, dataset_dir),
         "partial_pc_path": [relpath_str(path, dataset_dir) for path in partial_pc_paths],
         "partial_pc_cam_path": [
             relpath_str(path, dataset_dir) for path in partial_pc_cam_paths
         ],
         "cam_ex_path": [relpath_str(path, dataset_dir) for path in cam_ex_paths],
         "cam_in": relpath_str(cam_in_path, dataset_dir),
+        "global_pc_path": relpath_str(global_pc_path, dataset_dir),
         "scale": float(entry["scale"]),
     }
     return record, None

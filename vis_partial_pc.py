@@ -94,7 +94,7 @@ def main() -> None:
     else:
         raise ValueError("vis_partial_pc requires either --obj-id or --obj-key.")
 
-    subdir = args.pc_subdir or cfg.get("warp_render", {}).get("output_subdir", "partial_pc_warp")
+    subdir = args.pc_subdir or cfg.get("warp_render", {}).get("output_subdir", "pc_warp")
     pc_dir = Path(info["output_dir_abs"]).resolve() / subdir
     if not pc_dir.exists():
         raise FileNotFoundError(f"Pointcloud directory not found: {pc_dir}")

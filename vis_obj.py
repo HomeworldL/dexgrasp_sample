@@ -64,7 +64,13 @@ def main():
     input()
 
     hand_xml = os.path.abspath(cfg["hand"]["xml_path"])
-    env = MjHO({"name": obj_name, "xml_abs": info["mjcf_abs"], "scale": 1.0}, hand_xml, object_fixed=False, visualize=True)
+    env = MjHO(
+        {"name": obj_name, "xml_abs": info["mjcf_abs"], "scale": 1.0},
+        hand_xml,
+        friction_coef=cfg["hand"]["friction_coef"],
+        object_fixed=False,
+        visualize=True,
+    )
     print("[vis_obj] MuJoCo viewer opened. Ctrl+C to quit.")
     try:
         while env._viewer_alive():

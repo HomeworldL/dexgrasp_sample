@@ -107,6 +107,10 @@
         0.2
       ]
     },
+    "friction_coef": [
+      0.3,
+      0.01
+    ],
     "transform": {
       "base_rot_grasp_to_palm": [
         [
@@ -153,7 +157,8 @@
     "angle_thresh": 10.0,
     "grip_delta": 0.05,
     "force_mag": 1.0,
-    "check_step": 50
+    "close_steps": 100,
+    "check_steps": 50
   },
   "output": {
     "max_cap": 100,

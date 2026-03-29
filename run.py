@@ -97,8 +97,14 @@ def run_sampling(
     scale = parsed_scale
     obj_info = {"name": object_name, "xml_abs": object_mjcf_path}
     target_body_params = cfg["hand"]["target_body_params"]
+    friction_coef = cfg["hand"]["friction_coef"]
 
-    mjho = MjHO(obj_info, hand_xml_path, target_body_params=target_body_params)
+    mjho = MjHO(
+        obj_info,
+        hand_xml_path,
+        target_body_params=target_body_params,
+        friction_coef=friction_coef,
+    )
     sampling_cfg = cfg["sampling"]
     pts_for_sim, norms_for_sim, _ = downsample_fps(
         points,
@@ -108,7 +114,13 @@ def run_sampling(
     )
     mjho._set_obj_pts_norms(pts_for_sim, norms_for_sim)
 
-    mjho_valid = MjHO(obj_info, hand_xml_path, target_body_params=target_body_params, object_fixed=False)
+    mjho_valid = MjHO(
+        obj_info,
+        hand_xml_path,
+        target_body_params=target_body_params,
+        friction_coef=friction_coef,
+        object_fixed=False,
+    )
 
     ts = time.time()
     transforms_np = sample_frames_from_points(cfg, points, normals)

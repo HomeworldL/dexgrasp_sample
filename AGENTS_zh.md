@@ -114,9 +114,7 @@
 - 当前主线配置分组顺序为：
   - `seed`、`dataset`、`hand`、`sampling`、`sim_grasp`、`extforce`、`output`、`warp_render`
 - 配置集命名：
-  - `<dataset_group>_<hand>.json`，其中 dataset group 属于 `{YCB, DGN, DGN2, HOPE}`，hand 属于 `{liberhand, inspire, liberhand2}`。
-- `DGN2` 表示合并数据集：
-  - `["ShapeNetCore", "ShapeNetSem", "DDG", "MSO"]`
+  - `<dataset_group>_<hand>.json`，其中 dataset group 属于 `{YCB, DGN}`，hand 属于 `{liberhand, inspire, liberhand2}`。
 - 缺失或非法的配置字段必须快速失败，并给出明确错误。
 
 ## 统一数据集格式（摘要）

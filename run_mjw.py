@@ -351,8 +351,8 @@ def run_sampling(
 
             dt = float(mjw_valid.mj_model.opt.timestep)
             n_steps = max(1, int(float(extforce_cfg["duration"]) / max(dt, 1e-8)))
-            check_step = max(int(extforce_cfg["check_step"]), 1)
-            n_chunks = max(1, int(np.ceil(n_steps / check_step)))
+            check_steps = max(int(extforce_cfg["check_steps"]), 1)
+            n_chunks = max(1, int(np.ceil(n_steps / check_steps)))
             trans_thresh = float(extforce_cfg["trans_thresh"])
             angle_thresh = float(extforce_cfg["angle_thresh"])
             force_mag = float(extforce_cfg["force_mag"])
@@ -468,7 +468,7 @@ def run_sampling(
                 mjw_valid.set_object_force_to_worlds(active_world_ids, active_force)
 
                 ts = time.perf_counter()
-                mjw_valid.step_batch(check_step)
+                mjw_valid.step_batch(check_steps)
                 extforce_time += time.perf_counter() - ts
                 extforce_batches += 1
 

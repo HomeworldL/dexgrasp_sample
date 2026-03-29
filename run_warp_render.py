@@ -116,9 +116,9 @@ def _all_pc_exist(folder: Path, batch: int) -> bool:
             return False
         arr = np.load(world_path, allow_pickle=True)
         arr_cam = np.load(cam_path, allow_pickle=True)
-        if arr.size == 0:
+        if arr.ndim != 2 or arr.shape[1] != 3:
             return False
-        if arr_cam.size == 0:
+        if arr_cam.ndim != 2 or arr_cam.shape[1] != 3:
             return False
     return True
 
@@ -174,12 +174,6 @@ def _render_entry(
         min_radius=mesh_radius,
     )
     view_matrix = renderer.render_mesh(mesh=mesh, view_matrix=camera_view)
-    render_sec = float(time.perf_counter() - render_start)
-
-    save_start = time.perf_counter()
-    cam_in_path = out_dir / "cam_in.npy"
-    if not cam_in_path.exists():
-        np.save(cam_in_path, renderer.projection_matrices[0])
 
     if bool(render_cfg["save_rgb"]):
         rgb = renderer.get_image(mode="rgb")
@@ -191,16 +185,22 @@ def _render_entry(
     else:
         depth = None
 
-    if bool(render_cfg["save_pc"]):
+    if not bool(render_cfg["save_pc"]):
+        all_pc_world = None
+        all_pc_cam = None
+        depth_mask = None
+    else:
         all_pc_world = renderer.depth_to_world_point_cloud(depth)
         all_pc_cam = renderer.depth_to_camera_point_cloud(depth)
         depth_mask = (depth.reshape(batch, -1) > 0) & (
             depth.reshape(batch, -1) < float(render_cfg["depth_max"])
         )
-    else:
-        all_pc_world = None
-        all_pc_cam = None
-        depth_mask = None
+    render_sec = float(time.perf_counter() - render_start)
+
+    save_start = time.perf_counter()
+    cam_in_path = out_dir / "cam_in.npy"
+    if not cam_in_path.exists():
+        np.save(cam_in_path, renderer.projection_matrices[0])
 
     for b in range(batch):
         data_id = str(b).zfill(2)

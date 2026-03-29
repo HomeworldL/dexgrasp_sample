@@ -20,6 +20,7 @@ def _make_fake_mjho(poses, contacts):
     mjho._poses = [np.asarray(p, dtype=float) for p in poses]
     mjho._contacts = [bool(v) for v in contacts]
     mjho._idx = 0
+    mjho._ctrl_log = []
 
     def reset():
         mjho._idx = 0
@@ -29,10 +30,12 @@ def _make_fake_mjho(poses, contacts):
         return None
 
     def qpos2ctrl(qpos):
-        return np.zeros((1,), dtype=float)
+        return np.asarray([float(np.asarray(qpos, dtype=float)[7])], dtype=float)
 
     def step(n_steps=1, ctrl=None):
         for _ in range(int(n_steps)):
+            if ctrl is not None:
+                mjho._ctrl_log.append(float(np.asarray(ctrl, dtype=float)[0]))
             if mjho._idx < (len(mjho._poses) - 1):
                 mjho._idx += 1
 
@@ -67,12 +70,13 @@ def test_sim_under_extforce_rejects_large_no_force_settle_drift():
         duration=1.0,
         trans_thresh=0.05,
         angle_thresh=10.0,
-        check_step=1,
+        check_steps=1,
+        close_steps=2,
     )
 
     assert bool(success) is False
-    assert np.isinf(pos_delta)
-    assert np.isinf(angle_delta)
+    assert np.isclose(pos_delta, 0.06)
+    assert np.isclose(angle_delta, 0.0)
 
 
 def test_sim_under_extforce_uses_settled_pose_as_force_baseline():
@@ -92,12 +96,34 @@ def test_sim_under_extforce_uses_settled_pose_as_force_baseline():
         duration=1.0,
         trans_thresh=0.05,
         angle_thresh=10.0,
-        check_step=1,
+        check_steps=1,
+        close_steps=2,
     )
 
     assert bool(success) is True
     assert np.isclose(pos_delta, 0.04)
     assert np.isclose(angle_delta, 0.0)
+
+
+def test_sim_under_extforce_interpolates_close_ctrl_over_close_steps():
+    mjho = _make_fake_mjho(
+        poses=[_make_pose(0.0)] * 32,
+        contacts=[True] * 32,
+    )
+    qpos_prepared = np.zeros((8,), dtype=float)
+    qpos_target = np.zeros((8,), dtype=float)
+    qpos_target[7] = 1.0
+
+    success, _, _ = mjho.sim_under_extforce(
+        qpos_target,
+        qpos_prepared,
+        duration=0.0,
+        check_steps=1,
+        close_steps=4,
+    )
+
+    assert bool(success) is True
+    assert np.allclose(mjho._ctrl_log[:4], [0.25, 0.5, 0.75, 1.0])
 
 
 def test_build_pregrasp_qpos_uses_target_pose_and_prepared_joints():

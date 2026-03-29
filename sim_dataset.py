@@ -99,6 +99,7 @@ def evaluate_dataset_manifest(
                 {"name": object_name, "xml_abs": str(mjcf_path.resolve())},
                 cfg["hand"]["xml_path"],
                 target_body_params=cfg["hand"]["target_body_params"],
+                friction_coef=cfg["hand"]["friction_coef"],
                 object_fixed=True,
                 visualize=visualize,
             )
@@ -106,6 +107,7 @@ def evaluate_dataset_manifest(
                 {"name": object_name, "xml_abs": str(mjcf_path.resolve())},
                 cfg["hand"]["xml_path"],
                 target_body_params=cfg["hand"]["target_body_params"],
+                friction_coef=cfg["hand"]["friction_coef"],
                 object_fixed=False,
                 visualize=visualize,
             )

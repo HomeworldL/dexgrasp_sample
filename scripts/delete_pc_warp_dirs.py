@@ -2,13 +2,12 @@
 from __future__ import annotations
 
 import argparse
-import shutil
 from pathlib import Path
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Delete pc_warp subdirectories under a dataset root."
+        description="Delete pc_warp contents except global_pc.npy under a dataset root."
     )
     parser.add_argument(
         "--dataset-dir",
@@ -20,14 +19,22 @@ def parse_args() -> argparse.Namespace:
         "--subdir",
         type=str,
         default="pc_warp",
-        help="Name of the render output subdirectory to delete.",
+        help="Name of the render output subdirectory to clean.",
     )
     parser.add_argument(
         "--execute",
         action="store_true",
-        help="Actually delete matched directories. Without this flag the script is dry-run only.",
+        help="Actually delete matched files. Without this flag the script is dry-run only.",
     )
     return parser.parse_args()
+
+
+def _collect_delete_targets(pc_dir: Path) -> list[Path]:
+    return sorted(
+        path
+        for path in pc_dir.rglob("*")
+        if path.is_file() and path.name != "global_pc.npy"
+    )
 
 
 def main() -> None:
@@ -37,22 +44,34 @@ def main() -> None:
         raise FileNotFoundError(f"Dataset directory not found: {dataset_dir}")
 
     targets = sorted(path for path in dataset_dir.glob(f"*/scale*/{args.subdir}") if path.is_dir())
-    total = len(targets)
+    total_dirs = len(targets)
+    delete_targets: list[Path] = []
     total_bytes = 0
     for path in targets:
-        total_bytes += sum(file_path.stat().st_size for file_path in path.rglob("*") if file_path.is_file())
+        dir_targets = _collect_delete_targets(path)
+        delete_targets.extend(dir_targets)
+        total_bytes += sum(file_path.stat().st_size for file_path in dir_targets)
 
     action = "delete" if args.execute else "dry-run"
     print(
         f"[delete_pc_warp_dirs] mode={action} dataset_dir={dataset_dir} "
-        f"matched_dirs={total} total_bytes={total_bytes}"
+        f"matched_dirs={total_dirs} matched_files={len(delete_targets)} total_bytes={total_bytes}"
     )
-    for path in targets:
+    for path in delete_targets:
         print(path)
         if args.execute:
-            shutil.rmtree(path)
+            path.unlink()
 
     if args.execute:
+        for pc_dir in targets:
+            empty_dirs = sorted(
+                (path for path in pc_dir.rglob("*") if path.is_dir()),
+                key=lambda path: len(path.parts),
+                reverse=True,
+            )
+            for empty_dir in empty_dirs:
+                if not any(empty_dir.iterdir()):
+                    empty_dir.rmdir()
         print("[delete_pc_warp_dirs] deletion finished")
 
 

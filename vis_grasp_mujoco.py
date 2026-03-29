@@ -94,6 +94,7 @@ def visualize_extforce_grasps(
         {"name": object_name, "xml_abs": str(object_mjcf_path)},
         cfg["hand"]["xml_path"],
         target_body_params=cfg["hand"]["target_body_params"],
+        friction_coef=cfg["hand"]["friction_coef"],
         object_fixed=False,
         visualize=True,
     )

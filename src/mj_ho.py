@@ -59,6 +59,27 @@ def _default_hand_profiles() -> Dict[str, Dict]:
     }
 
 
+def _normalize_friction_coef(
+    friction_coef: float | Sequence[float],
+) -> Tuple[np.ndarray, int]:
+    values = np.asarray(friction_coef, dtype=float).reshape(-1)
+    if values.size == 0:
+        raise ValueError("friction_coef must not be empty.")
+    if values.size == 1:
+        coeffs = np.array([float(values[0]), float(values[0])], dtype=float)
+    elif values.size in {2, 3}:
+        coeffs = values.astype(float)
+    else:
+        raise ValueError(
+            "friction_coef must have length 1, 2, or 3. "
+            f"Got shape {tuple(values.shape)}."
+        )
+    if np.any(coeffs < 0.0):
+        raise ValueError(f"friction coefficients must be non-negative, got {coeffs.tolist()}.")
+    condim = 6 if coeffs.shape[0] == 3 else 4
+    return coeffs, condim
+
+
 class MjHO:
     def __init__(
         self,
@@ -66,7 +87,7 @@ class MjHO:
         hand_xml_path: str,
         target_body_params: Optional[Dict] = None,
         hand_profile: Optional[Dict] = None,
-        friction_coef: Sequence[float] = (0.2, 0.2),
+        friction_coef: Sequence[float] = (0.3, 0.01),
         object_fixed: bool = True,
         visualize: bool = False,
     ):
@@ -74,7 +95,7 @@ class MjHO:
         Args:
             obj_info: dict returned by DatasetObjects entry query methods
             hand_xml_path: path to hand MJCF (used as base)
-            friction_coef: scalar or sequence (len 2 or 3) for friction
+            friction_coef: scalar or sequence (len 1, 2 or 3) for friction
             object_fixed: if True, weld object to world (no DOFs)
         """
         self.obj_info = obj_info
@@ -84,7 +105,6 @@ class MjHO:
         self.hand_profile = dict(profiles.get(self.hand_name, {}))
         if hand_profile:
             self.hand_profile.update(hand_profile)
-        self.friction_coef = friction_coef
         self.object_fixed = object_fixed
 
         # load hand spec as base
@@ -93,8 +113,8 @@ class MjHO:
         # add object assets/geoms
         self._add_object(self.obj_info, fixed=self.object_fixed)
 
-        # apply friction to object collision geoms
-        self._set_friction(self.friction_coef)
+        # apply contact friction settings to geoms
+        self._set_friction(friction_coef)
 
         # set solimp and solref
         self._set_sol()
@@ -257,13 +277,14 @@ class MjHO:
                     self.spec.delete(j)
                     break
 
-    def _set_friction(self, test_friction):
+    def _set_friction(self, friction_coef):
         self.spec.option.cone = mujoco.mjtCone.mjCONE_ELLIPTIC
         self.spec.option.noslip_iterations = 2
         self.spec.option.impratio = 10
+        friction, condim = _normalize_friction_coef(friction_coef)
         for g in self.spec.geoms:
-            g.friction[:2] = test_friction
-            g.condim = 4
+            g.friction[: friction.shape[0]] = friction
+            g.condim = condim
         return
 
     def _set_margin(self, obj_margin):
@@ -794,7 +815,8 @@ class MjHO:
         trans_thresh: float = 0.05,
         angle_thresh: float = 10.0,
         force_mag: float = 1.0,
-        check_step: int = 50,
+        check_steps: int = 50,
+        close_steps: int = 100,
         visualize: bool = False,
     ) -> bool:
 
@@ -839,19 +861,25 @@ class MjHO:
         # compute number of simulation steps for duration (use model timestep)
         dt = float(self.model.opt.timestep)
         n_steps = int(duration / dt)
-        n_chunks = n_steps // check_step
-        settle_steps = check_step * 2
+        check_steps = max(int(check_steps), 1)
+        n_chunks = n_steps // check_steps
+        close_steps = max(int(close_steps), 1)
 
         # perform tests for each direction
         for dir_vec in external_force_dirs:
             self.reset()
             self.set_hand_qpos(qpos_prepared)
-            if visualize:
-                self._render_viewer()
-                time.sleep(0.03)
             # Close from prepared joints to target joints before applying external forces.
             initial_obj_pose = self.get_obj_pose().copy()  # [x,y,z,qw,qx,qy,qz]
-            self.step(settle_steps, ctrl=hand_ctrl)
+            for step_idx in range(close_steps):
+                alpha = float(step_idx + 1) / float(close_steps)
+                qpos_interp = qpos_prepared + alpha * (qpos_target - qpos_prepared)
+                ctrl_interp = self.qpos2ctrl(qpos_interp)
+                self.step(1, ctrl=ctrl_interp)
+                if visualize:
+                    self._render_viewer()
+                    time.sleep(0.003)
+        
             if not self.is_contact():
                 if visualize:
                     print("Object lost contact during settling phase.")
@@ -864,7 +892,7 @@ class MjHO:
             ):
                 if visualize:
                     print(f"Object moved too much during settling phase: {settle_pos_delta:.6f}, {settle_angle_delta:.6f}")
-                return False, np.inf, np.inf
+                return False, settle_pos_delta, settle_angle_delta
             settled_obj_pose = self.get_obj_pose().copy()
             # print(f"Testing direction: {dir_vec}")
             # print(f"obj pos after reset: {self.get_obj_pose()}")
@@ -879,31 +907,30 @@ class MjHO:
             # apply force for n_steps
             for chunk_i in range(n_chunks):
                 # step simulation forward by one mj_step
-                self.step(check_step, ctrl=hand_ctrl)
+                self.step(check_steps, ctrl=hand_ctrl)
 
                 if visualize:
                     self._render_viewer()
-                    time.sleep(0.03)
+                    time.sleep(0.003)
 
                 # check if object has moved
-                if self.is_contact():
-
-                    pos_delta, angle_delta = self.get_pose_delta(
-                        settled_obj_pose, self.get_obj_pose()
-                    )
-
-                    succ_flag = (pos_delta < trans_thresh) & (
-                        angle_delta < angle_thresh
-                    )
-                    # print(f"Step {step_i}: {succ_flag}, {pos_delta}, {angle_delta}")
-                    if not succ_flag:
-                        if visualize:
-                            print(f"Object moved too much during force application: {pos_delta:.6f}, {angle_delta:.6f}")
-                        return False, np.inf, np.inf
-                else:
+                if not self.is_contact():
                     if visualize:
                         print("Object lost contact during force application.")
                     return False, np.inf, np.inf
+            
+                pos_delta, angle_delta = self.get_pose_delta(
+                    settled_obj_pose, self.get_obj_pose()
+                )
+                succ_flag = (pos_delta < trans_thresh) & (
+                    angle_delta < angle_thresh
+                )
+                # print(f"Step {step_i}: {succ_flag}, {pos_delta}, {angle_delta}")
+                if not succ_flag:
+                    if visualize:
+                        print(f"Object moved too much during force application: {pos_delta:.6f}, {angle_delta:.6f}")
+                    return False, pos_delta, angle_delta
+
             self.data.xfrc_applied[obj_body_id] = np.zeros(6, dtype=float)
 
         # all directions passed

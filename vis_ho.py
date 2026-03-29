@@ -44,7 +44,13 @@ def main():
 
     hand_xml = os.path.abspath(cfg["hand"]["xml_path"])
     target_body_params = cfg["hand"]["target_body_params"]
-    env = MjHO({"name": obj_name, "xml_abs": info["mjcf_abs"]}, hand_xml, target_body_params=target_body_params, object_fixed=False)
+    env = MjHO(
+        {"name": obj_name, "xml_abs": info["mjcf_abs"]},
+        hand_xml,
+        target_body_params=target_body_params,
+        friction_coef=cfg["hand"]["friction_coef"],
+        object_fixed=False,
+    )
 
     prepared_joints = np.asarray(cfg["hand"]["prepared_joints"], dtype=np.float32)
     hand_qpos = env.get_hand_qpos().copy()

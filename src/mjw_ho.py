@@ -774,7 +774,7 @@ class MjWarpHO:
         angle_thresh: float = 10.0,
         grip_delta: float = 0.05,
         force_mag: float = 1.0,
-        check_step: int = 50,
+        check_steps: int = 50,
         visualize: bool = False,
     ) -> ExtForceBatchResult:
         del visualize
@@ -798,7 +798,7 @@ class MjWarpHO:
 
         dt = float(self.mj_model.opt.timestep)
         n_steps = max(1, int(duration / max(dt, 1e-8)))
-        chunk_size = max(int(check_step), 1)
+        chunk_size = max(int(check_steps), 1)
         full_chunks, remainder = divmod(n_steps, chunk_size)
         chunk_steps = [chunk_size] * full_chunks
         if remainder > 0:

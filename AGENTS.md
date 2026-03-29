@@ -114,9 +114,7 @@ Mainline work focuses on offline grasp configuration generation.
 - Current mainline config grouping order is:
   - `seed`, `dataset`, `hand`, `sampling`, `sim_grasp`, `extforce`, `output`, `warp_render`
 - Config set naming:
-  - `<dataset_group>_<hand>.json`, where dataset group is in `{YCB, DGN, DGN2, HOPE}` and hand is in `{liberhand, inspire, liberhand2}`.
-- `DGN2` means merged datasets:
-  - `["ShapeNetCore", "ShapeNetSem", "DDG", "MSO"]`
+  - `<dataset_group>_<hand>.json`, where dataset group is in `{YCB, DGN}` and hand is in `{liberhand, inspire, liberhand2}`.
 - Invalid or missing config fields should fail fast with explicit errors.
 
 ## Unified Dataset Format (Summary)

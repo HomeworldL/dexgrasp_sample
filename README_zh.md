@@ -88,8 +88,6 @@ python run_mjw.py --help
 assets/objects/processed/
   YCB/
   DGN/
-  DGN2/
-  HOPE/
 ```
 
 本仓库通常通过软链接接外部 mesh 仓库：

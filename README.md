@@ -88,8 +88,6 @@ python run_mjw.py --help
 assets/objects/processed/
   YCB/
   DGN/
-  DGN2/
-  HOPE/
 ```
 
 This repo commonly uses a symlinked mesh source:

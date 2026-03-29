@@ -15,10 +15,19 @@ def _write_grasp_h5(path: Path, rows):
 
 
 class _FakeMjHO:
-    def __init__(self, obj_info, hand_xml_path, target_body_params, object_fixed=False, visualize=False):
+    def __init__(
+        self,
+        obj_info,
+        hand_xml_path,
+        target_body_params,
+        friction_coef=None,
+        object_fixed=False,
+        visualize=False,
+    ):
         self.obj_info = obj_info
         self.hand_xml_path = hand_xml_path
         self.target_body_params = target_body_params
+        self.friction_coef = friction_coef
         self.object_fixed = object_fixed
         self.visualize = visualize
         self.current_qpos = None
@@ -120,6 +129,7 @@ def test_simulate_dataset_manifest_counts_successes(tmp_path: Path, monkeypatch)
                     "approach_joints": [0.0] * 20,
                     "shift_local": [0.0, 0.0, -0.02],
                     "target_body_params": {"finger": [1.0, 1.0]},
+                    "friction_coef": [0.3, 0.01],
                     "transform": {
                         "base_rot_grasp_to_palm": [[1, 0, 0], [0, 1, 0], [0, 0, 1]],
                         "extra_euler": {"axis": "x", "degrees": 0.0},
@@ -128,7 +138,7 @@ def test_simulate_dataset_manifest_counts_successes(tmp_path: Path, monkeypatch)
                 "sampling": {"n_points": 1, "downsample_for_sim": 1, "Nd": 1, "rot_n": 1, "d_min": 0.01, "d_max": 0.02},
                 "sim_grasp": {"contact_min_count": 4},
                 "output": {"max_cap": 10, "max_time_sec": 90.0, "h5_name": "grasp.h5", "npy_name": "grasp.npy", "dataset_root": str(tmp_path / "datasets")},
-                "extforce": {"duration": 0.5, "trans_thresh": 0.05, "angle_thresh": 10.0, "grip_delta": 0.05, "force_mag": 1.0, "check_step": 50},
+                "extforce": {"duration": 0.5, "trans_thresh": 0.05, "angle_thresh": 10.0, "grip_delta": 0.05, "force_mag": 1.0, "check_steps": 50},
             }
         ),
         encoding="utf-8",
@@ -203,6 +213,7 @@ def test_simulate_dataset_manifest_allows_explicit_float64_cast(tmp_path: Path, 
                     "approach_joints": [0.0] * 20,
                     "shift_local": [0.0, 0.0, -0.02],
                     "target_body_params": {"finger": [1.0, 1.0]},
+                    "friction_coef": [0.3, 0.01],
                     "transform": {
                         "base_rot_grasp_to_palm": [[1, 0, 0], [0, 1, 0], [0, 0, 1]],
                         "extra_euler": {"axis": "x", "degrees": 0.0},
@@ -211,7 +222,7 @@ def test_simulate_dataset_manifest_allows_explicit_float64_cast(tmp_path: Path, 
                 "sampling": {"n_points": 1, "downsample_for_sim": 1, "Nd": 1, "rot_n": 1, "d_min": 0.01, "d_max": 0.02},
                 "sim_grasp": {"contact_min_count": 4},
                 "output": {"max_cap": 10, "max_time_sec": 90.0, "h5_name": "grasp.h5", "npy_name": "grasp.npy", "dataset_root": str(tmp_path / "datasets")},
-                "extforce": {"duration": 0.5, "trans_thresh": 0.05, "angle_thresh": 10.0, "grip_delta": 0.05, "force_mag": 1.0, "check_step": 50},
+                "extforce": {"duration": 0.5, "trans_thresh": 0.05, "angle_thresh": 10.0, "grip_delta": 0.05, "force_mag": 1.0, "check_steps": 50},
             }
         ),
         encoding="utf-8",
@@ -282,6 +293,7 @@ def test_simulate_dataset_manifest_requires_qpos_squeeze(tmp_path: Path, monkeyp
                     "approach_joints": [0.0] * 20,
                     "shift_local": [0.0, 0.0, -0.02],
                     "target_body_params": {"finger": [1.0, 1.0]},
+                    "friction_coef": [0.3, 0.01],
                     "transform": {
                         "base_rot_grasp_to_palm": [[1, 0, 0], [0, 1, 0], [0, 0, 1]],
                         "extra_euler": {"axis": "x", "degrees": 0.0},
@@ -309,7 +321,7 @@ def test_simulate_dataset_manifest_requires_qpos_squeeze(tmp_path: Path, monkeyp
                     "angle_thresh": 10.0,
                     "grip_delta": 0.05,
                     "force_mag": 1.0,
-                    "check_step": 50,
+                    "check_steps": 50,
                 },
             }
         ),

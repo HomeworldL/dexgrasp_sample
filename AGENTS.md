@@ -155,6 +155,7 @@ Mainline work focuses on offline grasp configuration generation.
 ## Collaboration Rules
 - Keep edits focused on the requested task.
 - Avoid structural rewrites of `src/mj_ho.py` unless strictly necessary.
+- Do not push commits or branches unless the user explicitly asks to push.
 
 ## Planning Index
 - Active plan: `TODO.md`

@@ -871,15 +871,11 @@ class MjHO:
             self.set_hand_qpos(qpos_prepared)
             # Close from prepared joints to target joints before applying external forces.
             initial_obj_pose = self.get_obj_pose().copy()  # [x,y,z,qw,qx,qy,qz]
-            for step_idx in range(close_steps):
-                alpha = float(step_idx + 1) / float(close_steps)
-                qpos_interp = qpos_prepared + alpha * (qpos_target - qpos_prepared)
-                ctrl_interp = self.qpos2ctrl(qpos_interp)
-                self.step(1, ctrl=ctrl_interp)
-                if visualize:
-                    self._render_viewer()
-                    time.sleep(0.003)
-        
+            self.step(close_steps, ctrl=hand_ctrl)
+            if visualize:
+                self._render_viewer()
+                time.sleep(0.003)
+
             if not self.is_contact():
                 if visualize:
                     print("Object lost contact during settling phase.")

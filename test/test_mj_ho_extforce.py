@@ -105,7 +105,7 @@ def test_sim_under_extforce_uses_settled_pose_as_force_baseline():
     assert np.isclose(angle_delta, 0.0)
 
 
-def test_sim_under_extforce_interpolates_close_ctrl_over_close_steps():
+def test_sim_under_extforce_direct_close_reuses_target_ctrl_over_close_steps():
     mjho = _make_fake_mjho(
         poses=[_make_pose(0.0)] * 32,
         contacts=[True] * 32,
@@ -123,7 +123,7 @@ def test_sim_under_extforce_interpolates_close_ctrl_over_close_steps():
     )
 
     assert bool(success) is True
-    assert np.allclose(mjho._ctrl_log[:4], [0.25, 0.5, 0.75, 1.0])
+    assert np.allclose(mjho._ctrl_log[:4], [1.0, 1.0, 1.0, 1.0])
 
 
 def test_build_pregrasp_qpos_uses_target_pose_and_prepared_joints():

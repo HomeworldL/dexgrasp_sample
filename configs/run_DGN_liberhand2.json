@@ -185,8 +185,8 @@
     "depth_max": 5.0,
     "tile_width": 640,
     "tile_height": 480,
-    "n_cols": 2,
-    "n_rows": 2,
+    "n_cols": 5,
+    "n_rows": 5,
     "z_near": 0.1,
     "z_far": 10.0,
     "intrinsics": {

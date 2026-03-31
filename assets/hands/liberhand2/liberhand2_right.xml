@@ -1,0 +1,203 @@
+<mujoco model="liberhand2_right">
+  <compiler angle="radian" autolimits="true"/>
+  <option gravity="0 0 0" timestep="0.001"/>
+
+  <asset>
+    <texture type="skybox" builtin="gradient" rgb1="1 1 1" rgb2="1 1 1" width="32" height="512"/>
+  </asset>
+
+  <visual>
+    <global offwidth="3840" offheight="2160"/>
+  </visual>
+
+  <asset>
+    <mesh name="palm" file="./meshes/palm.STL"/>
+    <mesh name="f11" file="./meshes/f11.STL"/>
+    <mesh name="f12" file="./meshes/f12.STL"/>
+    <mesh name="f13" file="./meshes/f13.STL"/>
+    <mesh name="f14" file="./meshes/f14.STL"/>
+    <mesh name="f51" file="./meshes/f51.STL"/>
+    <mesh name="f52" file="./meshes/f52.STL"/>
+    <mesh name="f53" file="./meshes/f53.STL"/>
+    <mesh name="f54" file="./meshes/f54.STL"/>
+  </asset>
+
+  <worldbody>
+    <light pos="0 0 5" dir="0 0 -1" directional="true"/>
+
+    <body name="hand_right_palm">
+      <!-- <inertial pos="0.0070966 -0.0031475 0.053109" quat="0.469302 0.882909 -0.0117236 -0.00950504" mass="0.11625" diaginertia="9.33985e-05 6.34817e-05 4.23767e-05"/> -->
+      <inertial pos="0.0070966 -0.0031475 0.053109" quat="0.469302 0.882909 -0.0117236 -0.00950504" mass="11625000" diaginertia="9339.85 6348.17 4237.67"/>
+      <joint name="world_to_hand_right_palm_fixed" type="free"/>
+      <geom type="mesh" rgba="0.2 0.2 0.2 1" mesh="palm"/>
+      <body name="hand_right_grasp" pos="0.03 0 0.065" quat="0.0  0.38268343 0.0  0.92387953">
+      </body>
+      <body name="hand_right_f11" pos="0.005 0.033582 0.11939" quat="0.49341 -0.506502 -0.493414 0.506502">
+        <inertial pos="2.0603e-10 -0.00085711 0.0072915" quat="0.516033 0.483436 0.516033 0.483436" mass="0.0026864" diaginertia="1.41472e-07 9.3903e-08 8.0682e-08"/>
+        <joint name="hand_right_f11_joint" pos="0 0 0" axis="0 0 1" range="-0.4 0.4" actuatorfrcrange="-30 30" damping="0.1" armature="0.0002" frictionloss="0.0"/>
+        <geom type="mesh" rgba="0.913725 0.913725 0.847059 1" mesh="f11"/>
+        <body name="hand_right_f12" quat="0.402774 -0.581181 0.402778 -0.581181">
+          <inertial pos="0.030506 0.0059536 7.3438e-05" quat="0.0119325 0.711307 0.0337833 0.701968" mass="0.011203" diaginertia="1.23218e-06 1.15228e-06 4.87658e-07"/>
+          <joint name="hand_right_f12_joint" pos="0 0 0" axis="0 0 1" range="0 1.97" actuatorfrcrange="-30 30" damping="0.1" armature="0.0002" frictionloss="0.0"/>
+          <geom type="mesh" rgba="0.913725 0.913725 0.847059 1" mesh="f12"/>
+          <body name="hand_right_f13" pos="0.052226 0 0" quat="0.999759 0 0 0.0219507">
+            <inertial pos="0.0146522 0.00253587 5.04009e-05" quat="-0.00472486 0.711076 0.0165668 0.702905" mass="0.00384774" diaginertia="3.06304e-07 2.72327e-07 9.49776e-08"/>
+            <joint name="hand_right_f13_joint" pos="0 0 0" axis="0 0 1" range="0 1.6" actuatorfrcrange="-30 30" damping="0.1" armature="0.0002" frictionloss="0.0"/>
+            <geom type="mesh" rgba="0.913725 0.913725 0.847059 1" mesh="f13"/>
+            <body name="hand_right_f14" pos="0.029867 0 0" quat="0.988035 0 0 -0.154232">
+              <inertial pos="0.0103005 0.0016323 2.05438e-06" quat="0.521477 0.521746 0.477264 0.477559" mass="0.00413281" diaginertia="2.21527e-07 2.1622e-07 9.28508e-08"/>
+              <joint name="hand_right_f14_joint" pos="0 0 0" axis="0 0 1" range="0 1.6" actuatorfrcrange="-30 30" damping="0.0" armature="0.0" frictionloss="0.0"/>
+              <geom type="mesh" rgba="0.913725 0.913725 0.847059 1" mesh="f14"/>
+              <body name="hand_right_f14_end" pos="0.019348 0.00714645 0" quat="0.984727 0 0 -0.174108"/>
+              <body name="hand_right_f1_eef" pos="0.02264 0.004994 0" quat="0.921061 0 0 -0.389418"/>
+            </body>
+          </body>
+        </body>
+      </body>
+      <body name="hand_right_f21" pos="0.005 0.008 0.1293" quat="0.499998 -0.5 -0.500002 0.5">
+        <inertial pos="2.0603e-10 -0.00085711 0.0072915" quat="0.516033 0.483436 0.516033 0.483436" mass="0.0026864" diaginertia="1.41472e-07 9.3903e-08 8.0682e-08"/>
+        <joint name="hand_right_f21_joint" pos="0 0 0" axis="0 0 1" range="-0.4 0.4" actuatorfrcrange="-30 30" damping="0.1" armature="0.0002" frictionloss="0.0"/>
+        <geom type="mesh" rgba="0.913725 0.913725 0.847059 1" mesh="f11"/>
+        <body name="hand_right_f22" quat="0.402774 -0.581181 0.402778 -0.581181">
+          <inertial pos="0.030506 0.0059536 7.3438e-05" quat="0.0119325 0.711307 0.0337833 0.701968" mass="0.011203" diaginertia="1.23218e-06 1.15228e-06 4.87658e-07"/>
+          <joint name="hand_right_f22_joint" pos="0 0 0" axis="0 0 1" range="0 1.97" actuatorfrcrange="-30 30" damping="0.1" armature="0.0002" frictionloss="0.0"/>
+          <geom type="mesh" rgba="0.913725 0.913725 0.847059 1" mesh="f12"/>
+          <body name="hand_right_f23" pos="0.052226 0 0" quat="0.999759 0 0 0.0219507">
+            <inertial pos="0.0146522 0.00253587 5.04009e-05" quat="-0.00472486 0.711076 0.0165668 0.702905" mass="0.00384774" diaginertia="3.06304e-07 2.72327e-07 9.49776e-08"/>
+            <joint name="hand_right_f23_joint" pos="0 0 0" axis="0 0 1" range="0 1.6" actuatorfrcrange="-30 30" damping="0.1" armature="0.0002" frictionloss="0.0"/>
+            <geom type="mesh" rgba="0.913725 0.913725 0.847059 1" mesh="f13"/>
+            <body name="hand_right_f24" pos="0.029867 0 0" quat="0.988035 0 0 -0.154232">
+              <inertial pos="0.0103005 0.0016323 2.05438e-06" quat="0.521477 0.521746 0.477264 0.477559" mass="0.00413281" diaginertia="2.21527e-07 2.1622e-07 9.28508e-08"/>
+              <joint name="hand_right_f24_joint" pos="0 0 0" axis="0 0 1" range="0 1.6" actuatorfrcrange="-30 30" damping="0.0" armature="0.0" frictionloss="0.0"/>
+              <geom type="mesh" rgba="0.913725 0.913725 0.847059 1" mesh="f14"/>
+              <body name="hand_right_f24_end" pos="0.019348 0.00714645 0" quat="0.984727 0 0 -0.174108"/>
+              <body name="hand_right_f2_eef" pos="0.02264 0.004994 0" quat="0.921061 0 0 -0.389418"/>
+            </body>
+          </body>
+        </body>
+      </body>
+      <body name="hand_right_f31" pos="0.005 -0.016 0.1193" quat="0.499998 -0.5 -0.500002 0.5">
+        <inertial pos="2.0603e-10 -0.00085711 0.0072915" quat="0.516033 0.483436 0.516033 0.483436" mass="0.0026864" diaginertia="1.41472e-07 9.3903e-08 8.0682e-08"/>
+        <joint name="hand_right_f31_joint" pos="0 0 0" axis="0 0 1" range="-0.4 0.4" actuatorfrcrange="-30 30" damping="0.1" armature="0.0002" frictionloss="0.0"/>
+        <geom type="mesh" rgba="0.913725 0.913725 0.847059 1" mesh="f11"/>
+        <body name="hand_right_f32" quat="0.402774 -0.581181 0.402778 -0.581181">
+          <inertial pos="0.030506 0.0059536 7.3438e-05" quat="0.0119325 0.711307 0.0337833 0.701968" mass="0.011203" diaginertia="1.23218e-06 1.15228e-06 4.87658e-07"/>
+          <joint name="hand_right_f32_joint" pos="0 0 0" axis="0 0 1" range="0 1.97" actuatorfrcrange="-30 30" damping="0.1" armature="0.0002" frictionloss="0.0"/>
+          <geom type="mesh" rgba="0.913725 0.913725 0.847059 1" mesh="f12"/>
+          <body name="hand_right_f33" pos="0.052226 0 0" quat="0.999759 0 0 0.0219507">
+            <inertial pos="0.0146522 0.00253587 5.04009e-05" quat="-0.00472486 0.711076 0.0165668 0.702905" mass="0.00384774" diaginertia="3.06304e-07 2.72327e-07 9.49776e-08"/>
+            <joint name="hand_right_f33_joint" pos="0 0 0" axis="0 0 1" range="0 1.6" actuatorfrcrange="-30 30" damping="0.1" armature="0.0002" frictionloss="0.0"/>
+            <geom type="mesh" rgba="0.913725 0.913725 0.847059 1" mesh="f13"/>
+            <body name="hand_right_f34" pos="0.029867 0 0" quat="0.988035 0 0 -0.154232">
+              <inertial pos="0.0103005 0.0016323 2.05438e-06" quat="0.521477 0.521746 0.477264 0.477559" mass="0.00413281" diaginertia="2.21527e-07 2.1622e-07 9.28508e-08"/>
+              <joint name="hand_right_f34_joint" pos="0 0 0" axis="0 0 1" range="0 1.6" actuatorfrcrange="-30 30" damping="0.0" armature="0.0" frictionloss="0.0"/>
+              <geom type="mesh" rgba="0.913725 0.913725 0.847059 1" mesh="f14"/>
+              <body name="hand_right_f34_end" pos="0.019348 0.00714645 0" quat="0.984727 0 0 -0.174108"/>
+              <body name="hand_right_f3_eef" pos="0.02264 0.004994 0" quat="0.921061 0 0 -0.389418"/>
+            </body>
+          </body>
+        </body>
+      </body>
+      <body name="hand_right_f41" pos="0.005 -0.0419411 0.104676" quat="0.508647 -0.491199 -0.50865 0.491199">
+        <inertial pos="2.0603e-10 -0.00085711 0.0072915" quat="0.516033 0.483436 0.516033 0.483436" mass="0.0026864" diaginertia="1.41472e-07 9.3903e-08 8.0682e-08"/>
+        <joint name="hand_right_f41_joint" pos="0 0 0" axis="0 0 1" range="-0.4 0.4" actuatorfrcrange="-30 30" damping="0.1" armature="0.0002" frictionloss="0.0"/>
+        <geom type="mesh" rgba="0.913725 0.913725 0.847059 1" mesh="f11"/>
+        <body name="hand_right_f42" quat="0.402774 -0.581181 0.402778 -0.581181">
+          <inertial pos="0.030506 0.0059536 7.3438e-05" quat="0.0119325 0.711307 0.0337833 0.701968" mass="0.011203" diaginertia="1.23218e-06 1.15228e-06 4.87658e-07"/>
+          <joint name="hand_right_f42_joint" pos="0 0 0" axis="0 0 1" range="0 1.97" actuatorfrcrange="-30 30" damping="0.1" armature="0.0002" frictionloss="0.0"/>
+          <geom type="mesh" rgba="0.913725 0.913725 0.847059 1" mesh="f12"/>
+          <body name="hand_right_f43" pos="0.052226 0 0" quat="0.999759 0 0 0.0219507">
+            <inertial pos="0.0146522 0.00253587 5.04009e-05" quat="-0.00472486 0.711076 0.0165668 0.702905" mass="0.00384774" diaginertia="3.06304e-07 2.72327e-07 9.49776e-08"/>
+            <joint name="hand_right_f43_joint" pos="0 0 0" axis="0 0 1" range="0 1.6" actuatorfrcrange="-30 30" damping="0.1" armature="0.0002" frictionloss="0.0"/>
+            <geom type="mesh" rgba="0.913725 0.913725 0.847059 1" mesh="f13"/>
+            <body name="hand_right_f44" pos="0.029867 0 0" quat="0.988035 0 0 -0.154232">
+              <inertial pos="0.0103005 0.0016323 2.05438e-06" quat="0.521477 0.521746 0.477264 0.477559" mass="0.00413281" diaginertia="2.21527e-07 2.1622e-07 9.28508e-08"/>
+              <joint name="hand_right_f44_joint" pos="0 0 0" axis="0 0 1" range="0 1.6" actuatorfrcrange="-30 30" damping="0.0" armature="0.0" frictionloss="0.0"/>
+              <geom type="mesh" rgba="0.913725 0.913725 0.847059 1" mesh="f14"/>
+              <body name="hand_right_f44_end" pos="0.019348 0.00714645 0" quat="0.984727 0 0 -0.174108"/>
+              <body name="hand_right_f4_eef" pos="0.02264 0.004994 0" quat="0.921061 0 0 -0.389418"/>
+            </body>
+          </body>
+        </body>
+      </body>
+      <body name="hand_right_f51" pos="0.0285 0.012 0.009" quat="-2.59734e-06 0.707105 0.707108 -2.59735e-06">
+        <inertial pos="0.00172188 0.00880552 -0.0181022" quat="0.850246 0.522878 0.0593865 -0.0123844" mass="0.00853975" diaginertia="7.6241e-07 6.25295e-07 5.58701e-07"/>
+        <joint name="hand_right_f51_joint" pos="0 0 0" axis="0 0 1" range="0 1.64" actuatorfrcrange="-30 30" damping="0.1" armature="0.0002" frictionloss="0.0"/>
+        <geom type="mesh" rgba="0.913725 0.913725 0.847059 1" mesh="f51"/>
+        <body name="hand_right_f52" pos="0.0022521 0.0095014 -0.022073" quat="0.791578 -0.607062 0.0216862 -0.0664093">
+          <inertial pos="0.0308985 -0.00590518 -0.000281394" quat="0.511667 0.548539 0.44768 0.486708" mass="0.0234976" diaginertia="4.93498e-06 4.54811e-06 2.48883e-06"/>
+          <joint name="hand_right_f52_joint" pos="0 0 0" axis="0 0 1" range="0 1.5" actuatorfrcrange="-30 30" damping="0.1" armature="0.0002" frictionloss="0.0"/>
+          <geom type="mesh" rgba="0.913725 0.913725 0.847059 1" mesh="f52"/>
+          <body name="hand_right_f53" pos="0.0665 0 0" quat="0.998479 0 0 0.055137">
+            <inertial pos="0.0216083 0.00398134 3.85922e-05" quat="0.0318386 0.706343 -0.0343475 0.706319" mass="0.005302" diaginertia="6.61554e-07 6.10175e-07 1.31747e-07"/>
+            <joint name="hand_right_f53_joint" pos="0 0 0" axis="0 0 1" range="0 1.65" actuatorfrcrange="-30 30" damping="0.1" armature="0.0002" frictionloss="0.0"/>
+            <geom type="mesh" rgba="0.913725 0.913725 0.847059 1" mesh="f53"/>
+            <body name="hand_right_f54" pos="0.036 0 0" quat="0.984123 0 0 -0.17749">
+              <inertial pos="0.0145151 0.000539281 -9.01754e-05" quat="0.557259 0.557415 0.435155 0.435191" mass="0.0053405" diaginertia="3.36973e-07 2.64637e-07 1.90991e-07"/>
+              <joint name="hand_right_f54_joint" pos="0 0 0" axis="0 0 1" range="0 1.65" actuatorfrcrange="-30 30" damping="0.0" armature="0.0" frictionloss="0.0"/>
+              <geom type="mesh" rgba="0.913725 0.913725 0.847059 1" mesh="f54"/>
+              <body name="hand_right_f54_end" pos="0.0212547 0.0087286 0" quat="0.998201 0 0 -0.059964"/>
+              <body name="hand_right_f5_eef" pos="0.0251813 0.00609 0" quat="0.921061 0 0 -0.389418"/>
+            </body>
+          </body>
+        </body>
+      </body>
+    </body>
+  </worldbody>
+
+  <contact>
+      <exclude name="ex_r_palm_f11" body1="hand_right_palm" body2="hand_right_f11" />
+      <exclude name="ex_r_palm_f21" body1="hand_right_palm" body2="hand_right_f21" />
+      <exclude name="ex_r_palm_f31" body1="hand_right_palm" body2="hand_right_f31" />
+      <exclude name="ex_r_palm_f41" body1="hand_right_palm" body2="hand_right_f41" />
+      <exclude name="ex_r_palm_f51" body1="hand_right_palm" body2="hand_right_f51" />
+      <exclude name="ex_r_palm_f12" body1="hand_right_palm" body2="hand_right_f12" />
+      <exclude name="ex_r_palm_f22" body1="hand_right_palm" body2="hand_right_f22" />
+      <exclude name="ex_r_palm_f32" body1="hand_right_palm" body2="hand_right_f32" />
+      <exclude name="ex_r_palm_f42" body1="hand_right_palm" body2="hand_right_f42" />
+      <exclude name="ex_r_palm_f52" body1="hand_right_palm" body2="hand_right_f52" />
+      
+      <exclude name="ex_r_f11_f12" body1="hand_right_f11" body2="hand_right_f12" />
+      <exclude name="ex_r_f12_f13" body1="hand_right_f12" body2="hand_right_f13" />
+      <exclude name="ex_r_f13_f14" body1="hand_right_f13" body2="hand_right_f14" />
+      <exclude name="ex_r_f21_f22" body1="hand_right_f21" body2="hand_right_f22" />
+      <exclude name="ex_r_f22_f23" body1="hand_right_f22" body2="hand_right_f23" />
+      <exclude name="ex_r_f23_f24" body1="hand_right_f23" body2="hand_right_f24" />
+      <exclude name="ex_r_f31_f32" body1="hand_right_f31" body2="hand_right_f32" />
+      <exclude name="ex_r_f32_f33" body1="hand_right_f32" body2="hand_right_f33" />
+      <exclude name="ex_r_f33_f34" body1="hand_right_f33" body2="hand_right_f34" />
+      <exclude name="ex_r_f41_f42" body1="hand_right_f41" body2="hand_right_f42" />
+      <exclude name="ex_r_f42_f43" body1="hand_right_f42" body2="hand_right_f43" />
+      <exclude name="ex_r_f43_f44" body1="hand_right_f43" body2="hand_right_f44" />
+      <exclude name="ex_r_f51_f52" body1="hand_right_f51" body2="hand_right_f52" />
+      <exclude name="ex_r_f52_f53" body1="hand_right_f52" body2="hand_right_f53" />
+      <exclude name="ex_r_f53_f54" body1="hand_right_f53" body2="hand_right_f54" />
+
+  </contact>
+
+  <equality>
+      <joint joint1="hand_right_f14_joint" joint2="hand_right_f13_joint" polycoef=" 0.008511  2.077119 -1.375440  0.711526 -0.159754" solref="0.002 1" solimp="0.9 0.99 0.001"/>
+      <joint joint1="hand_right_f24_joint" joint2="hand_right_f23_joint" polycoef=" 0.008511  2.077119 -1.375440  0.711526 -0.159754" solref="0.002 1" solimp="0.9 0.99 0.001"/>
+      <joint joint1="hand_right_f34_joint" joint2="hand_right_f33_joint" polycoef=" 0.008511  2.077119 -1.375440  0.711526 -0.159754" solref="0.002 1" solimp="0.9 0.99 0.001"/>
+      <joint joint1="hand_right_f44_joint" joint2="hand_right_f43_joint" polycoef=" 0.008511  2.077119 -1.375440  0.711526 -0.159754" solref="0.002 1" solimp="0.9 0.99 0.001"/>
+      <joint joint1="hand_right_f54_joint" joint2="hand_right_f53_joint" polycoef=" 0.001007  1.573457 -0.688125  0.339102 -0.082525" solref="0.002 1" solimp="0.9 0.99 0.001"/>
+  </equality>
+
+  <actuator>
+      <position name="M_hand_right_f11_joint" joint="hand_right_f11_joint" kp="10" forcerange="-30 30" ctrlrange="-0.4 0.4"/>
+      <position name="M_hand_right_f12_joint" joint="hand_right_f12_joint" kp="10" forcerange="-30 30" ctrlrange="0.0 1.97"/>
+      <position name="M_hand_right_f13_joint" joint="hand_right_f13_joint" kp="10" forcerange="-30 30" ctrlrange="0.0 1.6"/>
+      <position name="M_hand_right_f21_joint" joint="hand_right_f21_joint" kp="10" forcerange="-30 30" ctrlrange="-0.4 0.4"/>
+      <position name="M_hand_right_f22_joint" joint="hand_right_f22_joint" kp="10" forcerange="-30 30" ctrlrange="0.0 1.97"/>
+      <position name="M_hand_right_f23_joint" joint="hand_right_f23_joint" kp="10" forcerange="-30 30" ctrlrange="0.0 1.6"/>
+      <position name="M_hand_right_f31_joint" joint="hand_right_f31_joint" kp="10" forcerange="-30 30" ctrlrange="-0.4 0.4"/>
+      <position name="M_hand_right_f32_joint" joint="hand_right_f32_joint" kp="10" forcerange="-30 30" ctrlrange="0.0 1.97"/>
+      <position name="M_hand_right_f33_joint" joint="hand_right_f33_joint" kp="10" forcerange="-30 30" ctrlrange="0.0 1.6"/>
+      <position name="M_hand_right_f41_joint" joint="hand_right_f41_joint" kp="10" forcerange="-30 30" ctrlrange="-0.4 0.4"/>
+      <position name="M_hand_right_f42_joint" joint="hand_right_f42_joint" kp="10" forcerange="-30 30" ctrlrange="0.0 1.97"/>
+      <position name="M_hand_right_f43_joint" joint="hand_right_f43_joint" kp="10" forcerange="-30 30" ctrlrange="0.0 1.6"/>
+      <position name="M_hand_right_f51_joint" joint="hand_right_f51_joint" kp="10" forcerange="-30 30" ctrlrange="0.0 1.64"/>
+      <position name="M_hand_right_f52_joint" joint="hand_right_f52_joint" kp="10" forcerange="-30 30" ctrlrange="0.0 1.6"/>
+      <position name="M_hand_right_f53_joint" joint="hand_right_f53_joint" kp="10" forcerange="-30 30" ctrlrange="0.0 1.65"/>
+  </actuator>
+</mujoco>

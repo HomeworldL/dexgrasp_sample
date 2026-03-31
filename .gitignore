@@ -208,6 +208,8 @@ __marimo__/
 
 assets/*
 !assets/objects
+!assets/hands
+!assets/hands/**
 assets/objects/processed/
 assets/objects/*/
 tmp/

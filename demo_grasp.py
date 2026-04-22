@@ -68,8 +68,8 @@ def run_demo_grasp(
     pose = build_pose_candidates(cfg, transforms_np)
     qpos_init, qpos_approach, qpos_prepared = make_qpos_triplets(cfg, pose)
 
-    max_cap = int(cfg["output"]["max_cap"])
-    max_time_sec = float(cfg["output"]["max_time_sec"])
+    max_cap = int(cfg["data"]["max_cap"])
+    max_time_sec = float(cfg["data"]["max_time_sec"])
     contact_min_count = int(cfg["sim_grasp"]["contact_min_count"])
     sim_grasp_cfg = dict(cfg.get("sim_grasp", {}))
     sim_grasp_cfg.pop("visualize", None)

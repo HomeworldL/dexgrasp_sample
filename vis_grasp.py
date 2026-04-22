@@ -9,7 +9,17 @@ import trimesh
 
 from src.dataset_objects import DatasetObjects
 from src.mj_ho import RobotKinematics
-from utils.utils_file import DEFAULT_RUN_CONFIG_PATH, dataset_tag_from_config, load_config
+from utils.utils_file import (
+    DEFAULT_RUN_CONFIG_PATH,
+    data_verbose_from_config,
+    generated_dataset_root_from_config,
+    graspdata_tag_from_config,
+    load_config,
+    objdata_tag_from_config,
+    raw_dataset_name_from_config,
+    raw_dataset_root_from_config,
+    run_scales_from_config,
+)
 from utils.utils_vis import visualize_with_plotly, visualize_with_viser
 
 QPOS_KEYS = ("qpos_init", "qpos_approach", "qpos_prepared", "qpos_grasp")
@@ -47,7 +57,7 @@ def _resolve_grasp_path(output_dir: Path, cfg: Dict, grasp_path_arg: Optional[st
             raise FileNotFoundError(f"grasp path not found: {p}")
         return p
 
-    output_cfg = cfg.get("output", {})
+    output_cfg = cfg.get("data", {})
     candidates = [
         output_dir / "grasp.h5",
         output_dir / str(output_cfg.get("h5_name", "")),
@@ -137,12 +147,13 @@ def main() -> None:
 
     cfg = load_config(args.config)
     ds = DatasetObjects(
-        dataset_root=cfg["dataset"]["root"],
-        dataset_names=list(cfg["dataset"].get("include", [])),
-        scales=list(cfg["dataset"].get("scales", [])),
-        dataset_tag=dataset_tag_from_config(args.config),
-        dataset_output_root=cfg.get("output", {}).get("dataset_root", "datasets"),
-        verbose=bool(cfg["dataset"].get("verbose", False)),
+        raw_dataset_root=raw_dataset_root_from_config(cfg),
+        raw_dataset_name=raw_dataset_name_from_config(cfg),
+        scales=run_scales_from_config(cfg),
+        objdata_tag=objdata_tag_from_config(cfg, args.config),
+        graspdata_tag=graspdata_tag_from_config(cfg, args.config),
+        generated_dataset_root=generated_dataset_root_from_config(cfg),
+        verbose=data_verbose_from_config(cfg),
     )
 
     if args.obj_key:

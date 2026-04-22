@@ -39,11 +39,13 @@ def test_sample_surface_mesh_with_coacd_path(tmp_path: Path):
     (tmp_path / "MSO" / "manifest.process_meshes.json").write_text(json.dumps(manifest), encoding="utf-8")
 
     ds = DatasetObjects(
-        dataset_root=str(tmp_path),
-        dataset_names=["MSO"],
+        raw_dataset_root=str(tmp_path),
+        raw_dataset_name="MSO",
         scales=[0.06],
-        dataset_tag="graspdata_YCB_liberhand",
-        dataset_output_root=str(tmp_path / "datasets"),
+        objdata_tag="objdata_MSO",
+        graspdata_tag="graspdata_YCB_liberhand",
+        generated_dataset_root=str(tmp_path / "datasets"),
+        rebuild_existing_assets=True,
         verbose=False,
     )
     info = ds.get_obj_info_by_index(0)

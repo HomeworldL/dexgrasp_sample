@@ -10,10 +10,16 @@ from typing import Dict, List, Optional, Sequence, Tuple
 from src.dataset_objects import DatasetObjects
 from utils.utils_file import (
     DEFAULT_RUN_CONFIG_PATH,
-    dataset_tag_from_config,
+    data_verbose_from_config,
+    generated_dataset_root_from_config,
+    graspdata_tag_from_config,
     list_existing_files,
     load_config,
+    objdata_tag_from_config,
+    raw_dataset_name_from_config,
+    raw_dataset_root_from_config,
     relpath_str,
+    run_scales_from_config,
 )
 from utils.utils_sample import grasp_h5_nonempty
 
@@ -28,6 +34,7 @@ def _collect_entry_record(
     grasp_fail_npy_name: str,
 ) -> Tuple[Optional[Dict], Optional[str]]:
     output_dir = Path(str(entry["output_dir_abs"])).resolve()
+    asset_dir = Path(str(entry.get("asset_dir_abs", entry["output_dir_abs"]))).resolve()
     grasp_h5_path = output_dir / str(grasp_h5_name)
     grasp_npy_path = output_dir / str(grasp_npy_name)
     grasp_fail_h5_path = output_dir / str(grasp_fail_h5_name)
@@ -41,7 +48,7 @@ def _collect_entry_record(
     if not grasp_fail_npy_path.exists():
         return None, f"missing {grasp_fail_npy_path.name}"
 
-    render_dir = output_dir / render_subdir
+    render_dir = asset_dir / render_subdir
     cam_in_path = render_dir / "cam_in.npy"
     global_pc_path = render_dir / "global_pc.npy"
     if not cam_in_path.exists():
@@ -75,6 +82,7 @@ def _collect_entry_record(
         "object_scale_key": str(entry["object_scale_key"]),
         "object_name": str(entry["object_name"]),
         "output_path": relpath_str(output_dir, dataset_dir),
+        "asset_path": relpath_str(asset_dir, dataset_dir),
         "coacd_path": relpath_str(Path(str(entry["coacd_abs"])), dataset_dir),
         "mjcf_path": relpath_str(Path(str(entry["mjcf_abs"])), dataset_dir),
         "grasp_h5_path": relpath_str(grasp_h5_path, dataset_dir),
@@ -213,26 +221,28 @@ def main() -> None:
     args = parser.parse_args()
 
     cfg = load_config(args.config)
-    dataset_tag = dataset_tag_from_config(args.config)
+    objdata_tag = objdata_tag_from_config(cfg, args.config)
+    graspdata_tag = graspdata_tag_from_config(cfg, args.config)
     ds = DatasetObjects(
-        cfg["dataset"]["root"],
-        dataset_names=list(cfg["dataset"].get("include", [])),
-        scales=list(cfg["dataset"].get("scales", [])),
-        dataset_tag=dataset_tag,
-        dataset_output_root=cfg.get("output", {}).get("dataset_root", "datasets"),
-        verbose=bool(cfg["dataset"].get("verbose", False)),
+        raw_dataset_root=raw_dataset_root_from_config(cfg),
+        raw_dataset_name=raw_dataset_name_from_config(cfg),
+        scales=run_scales_from_config(cfg),
+        objdata_tag=objdata_tag,
+        graspdata_tag=graspdata_tag,
+        generated_dataset_root=generated_dataset_root_from_config(cfg),
+        verbose=data_verbose_from_config(cfg),
     )
-    dataset_root = Path(cfg.get("output", {}).get("dataset_root", "datasets")).resolve()
-    dataset_dir = dataset_root / dataset_tag
+    dataset_root = Path(generated_dataset_root_from_config(cfg)).resolve()
+    dataset_dir = dataset_root / graspdata_tag
     write_split_jsons(
         entries=ds.get_entries(),
         dataset_dir=dataset_dir,
-        render_subdir=str(cfg["warp_render"]["output_subdir"]),
+        render_subdir=str(cfg.get("warp_render", {}).get("output_subdir", "pc_warp")),
         split_seed=int(cfg["seed"]),
-        grasp_h5_name=str(cfg["output"]["h5_name"]),
-        grasp_npy_name=str(cfg["output"]["npy_name"]),
-        grasp_fail_h5_name=str(cfg["output"]["fail_h5_name"]),
-        grasp_fail_npy_name=str(cfg["output"]["fail_npy_name"]),
+        grasp_h5_name=str(cfg["data"]["h5_name"]),
+        grasp_npy_name=str(cfg["data"]["npy_name"]),
+        grasp_fail_h5_name=str(cfg["data"]["fail_h5_name"]),
+        grasp_fail_npy_name=str(cfg["data"]["fail_npy_name"]),
     )
 
 

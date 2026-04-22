@@ -15,11 +15,17 @@ from src.dataset_objects import DatasetObjects
 from utils.utils_file import (
     DEFAULT_RUN_CONFIG_PATH,
     build_logs_dir,
-    dataset_tag_from_config,
+    data_verbose_from_config,
+    generated_dataset_root_from_config,
+    graspdata_tag_from_config,
     load_config,
+    objdata_tag_from_config,
+    raw_dataset_name_from_config,
+    raw_dataset_root_from_config,
+    run_scales_from_config,
     safe_filename,
 )
-from utils.utils_sample import global_pc_exists, grasp_outputs_exist
+from utils.utils_sample import grasp_outputs_exist
 
 # 全局进程注册（用于在主线程捕获中断时终止子进程）
 _RUN_PROCS = []
@@ -45,7 +51,7 @@ def parse_args():
         "--config",
         type=str,
         default=DEFAULT_RUN_CONFIG_PATH,
-        help="运行配置 JSON（默认 configs/run_YCB_liberhand.json）",
+        help="运行配置 JSON（默认 configs/run_YCB_liberhand_right.json）",
     )
     p.add_argument("--force", action="store_true", help="即使已存在配置指定的抓取输出也强制重跑")
     p.add_argument("-v", "--verbose", action="store_true", help="仅透传详细日志给子进程 run.py")
@@ -73,6 +79,8 @@ def run_one(
         str(entry["coacd_abs"]),
         "--mjcf-path",
         str(entry["mjcf_abs"]),
+        "--asset-dir",
+        str(entry["asset_dir_abs"]),
         "--output-dir",
         str(entry["output_dir_abs"]),
     ]
@@ -128,17 +136,19 @@ def main():
         "(manifest scan + per-scale existing-asset checks)"
     )
     cfg = load_config(args.config)
-    dataset_tag = dataset_tag_from_config(args.config)
-    logs_dir = build_logs_dir(args.script, dataset_tag)
+    objdata_tag = objdata_tag_from_config(cfg, args.config)
+    graspdata_tag = graspdata_tag_from_config(cfg, args.config)
+    logs_dir = build_logs_dir(args.script, graspdata_tag)
     logs_dir.mkdir(parents=True, exist_ok=True)
     discover_start = time.perf_counter()
     ds = DatasetObjects(
-        cfg["dataset"]["root"],
-        dataset_names=list(cfg["dataset"].get("include", [])),
-        scales=list(cfg["dataset"].get("scales", [])),
-        dataset_tag=dataset_tag,
-        dataset_output_root=cfg.get("output", {}).get("dataset_root", "datasets"),
-        verbose=bool(args.verbose),
+        raw_dataset_root_from_config(cfg),
+        raw_dataset_name=raw_dataset_name_from_config(cfg),
+        scales=run_scales_from_config(cfg),
+        objdata_tag=objdata_tag,
+        graspdata_tag=graspdata_tag,
+        generated_dataset_root=generated_dataset_root_from_config(cfg),
+        verbose=bool(args.verbose or data_verbose_from_config(cfg)),
     )
     discover_elapsed = time.perf_counter() - discover_start
     print(
@@ -150,9 +160,8 @@ def main():
         print("没有发现任何 object-scale 条目，退出。")
         return
 
-    h5_name = str(cfg["output"]["h5_name"])
-    npy_name = str(cfg["output"]["npy_name"])
-    render_subdir = str(cfg["warp_render"]["output_subdir"])
+    h5_name = str(cfg["data"]["h5_name"])
+    npy_name = str(cfg["data"]["npy_name"])
     if not args.force:
         total_entries = len(entries)
         entries = [
@@ -164,22 +173,18 @@ def main():
                     h5_name=h5_name,
                     npy_name=npy_name,
                 )
-                and global_pc_exists(
-                    str(it["output_dir_abs"]),
-                    render_subdir=render_subdir,
-                )
             )
         ]
         skipped = total_entries - len(entries)
         if skipped > 0:
             print(
                 f"Pre-skip existing results: {skipped}/{total_entries} entries already have "
-                f"{h5_name}, {npy_name}, and {render_subdir}/global_pc.npy."
+                f"{h5_name} and {npy_name}."
             )
         if not entries:
             print(
-                f"所有 object-scale 条目都已存在 {h5_name}、{npy_name} 和 {render_subdir}/global_pc.npy，"
-                "跳过并行执行，继续构建数据划分。"
+                f"所有 object-scale 条目都已存在 {h5_name} 和 {npy_name}，"
+                "跳过并行执行。"
             )
 
     print(f"Found {len(entries)} object-scale entries to run. Running with max parallel = {args.max_parallel}.")

@@ -11,7 +11,17 @@ from tqdm import tqdm
 from src.dataset_objects import DatasetObjects
 from src.mjw_ho import MjWarpHO
 from src.sample import downsample_fps, sample_grasp_frames
-from utils.utils_file import DEFAULT_RUN_CONFIG_PATH, dataset_tag_from_config, load_config
+from utils.utils_file import (
+    DEFAULT_RUN_CONFIG_PATH,
+    data_verbose_from_config,
+    generated_dataset_root_from_config,
+    graspdata_tag_from_config,
+    load_config,
+    objdata_tag_from_config,
+    raw_dataset_name_from_config,
+    raw_dataset_root_from_config,
+    run_scales_from_config,
+)
 from utils.utils_seed import set_seed
 
 
@@ -183,12 +193,13 @@ def main() -> None:
     set_seed(int(cfg["seed"]))
 
     ds = DatasetObjects(
-        dataset_root=cfg["dataset"]["root"],
-        dataset_names=list(cfg["dataset"].get("include", [])),
-        scales=list(cfg["dataset"].get("scales", [])),
-        dataset_tag=dataset_tag_from_config(args.config),
-        dataset_output_root=cfg.get("output", {}).get("dataset_root", "datasets"),
-        verbose=bool(cfg["dataset"].get("verbose", False)),
+        raw_dataset_root=raw_dataset_root_from_config(cfg),
+        raw_dataset_name=raw_dataset_name_from_config(cfg),
+        scales=run_scales_from_config(cfg),
+        objdata_tag=objdata_tag_from_config(cfg, args.config),
+        graspdata_tag=graspdata_tag_from_config(cfg, args.config),
+        generated_dataset_root=generated_dataset_root_from_config(cfg),
+        verbose=data_verbose_from_config(cfg),
     )
     info = resolve_object_info(ds, args.obj_id, args.obj_key)
 
@@ -219,9 +230,9 @@ def main() -> None:
     sim_grasp_cfg.pop("contact_min_count", None)
     extforce_cfg.pop("visualize", None)
     contact_min_count = int(cfg["sim_grasp"]["contact_min_count"])
-    target_valid_cap = int(cfg.get("output", {}).get("max_cap", 100))
+    target_valid_cap = int(cfg.get("data", {}).get("max_cap", 100))
     if target_valid_cap <= 0:
-        raise ValueError(f"output.max_cap must be positive, got {target_valid_cap}.")
+        raise ValueError(f"data.max_cap must be positive, got {target_valid_cap}.")
 
     sampling_cfg = cfg["sampling"]
     pts_for_sim, norms_for_sim, _ = downsample_fps(

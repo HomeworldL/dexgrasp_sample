@@ -11,23 +11,21 @@ from tqdm import tqdm
 from src.mj_ho import MjHO
 from src.sample import downsample_fps
 from utils.utils_file import DEFAULT_RUN_CONFIG_PATH, load_config
-from utils.utils_pointcloud import sample_surface_o3d
 from utils.utils_sample import (
     ARRAY_DTYPE,
     H5_DTYPE,
     as_array,
     build_pose_candidates,
     encode_h5_str,
-    global_pc_exists,
     grasp_outputs_exist,
-    write_global_pc,
+    load_global_pc_and_normals,
     make_qpos_triplets,
     parse_object_scale_key,
     sample_frames_from_points,
     write_fail_npy_from_h5,
     write_grasp_npy_from_h5,
 )
-from utils.utils_seed import set_seed
+from utils.utils_seed import set_seed, stable_seed
 
 
 def _select_fail_samples(
@@ -110,7 +108,7 @@ def run_sampling(
         points,
         normals,
         int(sampling_cfg["downsample_for_sim"]),
-        seed=int(cfg["seed"]),
+        seed=stable_seed(int(cfg["seed"]), object_scale_key, "downsample_for_sim"),
     )
     mjho._set_obj_pts_norms(pts_for_sim, norms_for_sim)
 
@@ -123,6 +121,7 @@ def run_sampling(
     )
 
     ts = time.time()
+    set_seed(stable_seed(int(cfg["seed"]), object_scale_key, "sample_frames"))
     transforms_np = sample_frames_from_points(cfg, points, normals)
     if verbose:
         print(f"[{object_scale_key}] frame sampling time: {time.time() - ts:.3f}s, N={len(transforms_np)}")
@@ -132,17 +131,17 @@ def run_sampling(
 
     out_dir = Path(output_dir_abs)
     out_dir.mkdir(parents=True, exist_ok=True)
-    h5_path = out_dir / str(cfg["output"]["h5_name"])
-    npy_path = out_dir / str(cfg["output"]["npy_name"])
-    fail_h5_path = out_dir / str(cfg["output"]["fail_h5_name"])
-    fail_npy_path = out_dir / str(cfg["output"]["fail_npy_name"])
+    h5_path = out_dir / str(cfg["data"]["h5_name"])
+    npy_path = out_dir / str(cfg["data"]["npy_name"])
+    fail_h5_path = out_dir / str(cfg["data"]["fail_h5_name"])
+    fail_npy_path = out_dir / str(cfg["data"]["fail_npy_name"])
 
     d = qpos_prepared.shape[1]
-    max_cap = int(cfg["output"]["max_cap"])
-    max_time_sec = float(cfg["output"]["max_time_sec"])
-    min_valid_count = int(cfg["output"]["min_valid_count"])
-    flush_every = int(cfg["output"]["flush_every"])
-    fail_keep_ratio = float(cfg["output"]["fail_keep_ratio"])
+    max_cap = int(cfg["data"]["max_cap"])
+    max_time_sec = float(cfg["data"]["max_time_sec"])
+    min_valid_count = int(cfg["data"]["min_valid_count"])
+    flush_every = int(cfg["data"]["flush_every"])
+    fail_keep_ratio = float(cfg["data"]["fail_keep_ratio"])
     contact_min_count = int(cfg["sim_grasp"]["contact_min_count"])
     sim_grasp_cfg = dict(cfg.get("sim_grasp", {}))
     extforce_cfg = dict(cfg.get("extforce", {}))
@@ -285,6 +284,7 @@ def main():
     p.add_argument("--object-scale-key", type=str, required=True, help="Unique object-scale key.")
     p.add_argument("--coacd-path", type=str, required=True, help="Path to scaled COACD mesh OBJ.")
     p.add_argument("--mjcf-path", type=str, required=True, help="Path to scaled object MJCF.")
+    p.add_argument("--asset-dir", type=str, default=None, help="Prepared object-scale asset directory.")
     p.add_argument("--output-dir", type=str, required=True, help="Output directory for grasp artifacts.")
     p.add_argument("--force", action="store_true", help="Re-run even if configured grasp outputs already exist.")
     p.add_argument("-v", "--verbose", action="store_true", help="Enable verbose logs.")
@@ -297,30 +297,24 @@ def main():
     total_stage_start = time.perf_counter()
     if verbose:
         print(f"Using object-scale key: {args.object_scale_key}")
-    h5_name = str(cfg["output"]["h5_name"])
-    npy_name = str(cfg["output"]["npy_name"])
-    render_subdir = str(cfg["warp_render"]["output_subdir"])
+    h5_name = str(cfg["data"]["h5_name"])
+    npy_name = str(cfg["data"]["npy_name"])
+    render_subdir = str(cfg.get("warp_render", {}).get("output_subdir", "pc_warp"))
     has_grasp_outputs = grasp_outputs_exist(args.output_dir, h5_name=h5_name, npy_name=npy_name)
-    has_global_pc = global_pc_exists(args.output_dir, render_subdir)
-    if (not args.force) and has_grasp_outputs and has_global_pc:
+    if (not args.force) and has_grasp_outputs:
         if verbose:
             print(
-                f"[{args.object_scale_key}] skip existing {h5_name}, {npy_name}, "
-                f"and {render_subdir}/global_pc.npy in {args.output_dir}"
+                f"[{args.object_scale_key}] skip existing {h5_name} and {npy_name} "
+                f"in {args.output_dir}"
             )
         return
 
     hand_xml_path = os.path.abspath(cfg["hand"]["xml_path"])
     hand_name = Path(hand_xml_path).stem
-    n_points = int(cfg["sampling"]["n_points"])
-    pts, norms = sample_surface_o3d(args.coacd_path, n_points=n_points, method="poisson")
-    global_pc_path = write_global_pc(pts, args.output_dir, render_subdir)
+    asset_dir = args.asset_dir or str(Path(args.coacd_path).resolve().parent)
+    pts, norms = load_global_pc_and_normals(asset_dir, render_subdir)
     if verbose:
-        print(f"[{args.object_scale_key}] saved global_pc to {global_pc_path}")
-    if (not args.force) and has_grasp_outputs:
-        if verbose:
-            print(f"[{args.object_scale_key}] grasp outputs already exist, skip grasp sampling.")
-        return
+        print(f"[{args.object_scale_key}] loaded global_pc/global_normals from {asset_dir}/{render_subdir}")
     run_sampling(
         cfg=cfg,
         object_scale_key=args.object_scale_key,

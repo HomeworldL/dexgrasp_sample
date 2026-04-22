@@ -47,6 +47,10 @@ def global_pc_path(output_dir_abs: str, render_subdir: str) -> Path:
     return Path(output_dir_abs) / str(render_subdir) / "global_pc.npy"
 
 
+def global_normals_path(output_dir_abs: str, render_subdir: str) -> Path:
+    return Path(output_dir_abs) / str(render_subdir) / "global_normals.npy"
+
+
 def global_pc_exists(output_dir_abs: str, render_subdir: str) -> bool:
     path = global_pc_path(output_dir_abs, render_subdir)
     if not path.exists():
@@ -60,6 +64,39 @@ def write_global_pc(points: np.ndarray, output_dir_abs: str, render_subdir: str)
     path.parent.mkdir(parents=True, exist_ok=True)
     np.save(path, np.asarray(points, dtype=np.float32))
     return path
+
+
+def write_global_normals(
+    normals: np.ndarray,
+    output_dir_abs: str,
+    render_subdir: str,
+) -> Path:
+    path = global_normals_path(output_dir_abs, render_subdir)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    np.save(path, np.asarray(normals, dtype=np.float32))
+    return path
+
+
+def load_global_pc_and_normals(
+    output_dir_abs: str,
+    render_subdir: str,
+) -> Tuple[np.ndarray, np.ndarray]:
+    pc_path = global_pc_path(output_dir_abs, render_subdir)
+    normals_path = global_normals_path(output_dir_abs, render_subdir)
+    if not pc_path.exists():
+        raise FileNotFoundError(f"global_pc.npy not found: {pc_path}")
+    if not normals_path.exists():
+        raise FileNotFoundError(f"global_normals.npy not found: {normals_path}")
+    points = np.asarray(np.load(pc_path, allow_pickle=False), dtype=ARRAY_DTYPE)
+    normals = np.asarray(np.load(normals_path, allow_pickle=False), dtype=ARRAY_DTYPE)
+    if points.ndim != 2 or points.shape[1] != 3:
+        raise ValueError(f"global_pc.npy must have shape (N, 3): {pc_path}")
+    if normals.shape != points.shape:
+        raise ValueError(
+            f"global_normals.npy shape {normals.shape} must match global_pc.npy shape {points.shape}: "
+            f"{normals_path}"
+        )
+    return points, normals
 
 
 def grasp_h5_nonempty(h5_path: Path) -> Tuple[bool, str]:

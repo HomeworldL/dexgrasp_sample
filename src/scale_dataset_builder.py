@@ -9,8 +9,6 @@ from typing import Dict, List, Sequence
 import numpy as np
 import trimesh
 
-DEFAULT_FIXED_SCALES = [0.06, 0.08, 0.10, 0.12, 0.14]
-
 
 class ScaleDatasetBuilder:
     """Generate scaled convex parts + coacd + MJCF for one object/scale."""

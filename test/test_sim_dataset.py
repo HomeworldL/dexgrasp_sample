@@ -121,7 +121,24 @@ def test_simulate_dataset_manifest_counts_successes(tmp_path: Path, monkeypatch)
         json.dumps(
             {
                 "seed": 0,
-                "dataset": {"include": ["YCB"], "root": "unused", "verbose": False, "scales": [0.08]},
+                "data": {
+                    "raw_dataset_name": "YCB",
+                    "raw_dataset_root": "unused",
+                    "generated_dataset_root": str(tmp_path / "datasets"),
+                    "objdata_tag": "objdata_YCB",
+                    "graspdata_tag": "graspdata_YCB_liberhand",
+                    "verbose": False,
+                    "scales": [0.08],
+                    "max_cap": 10,
+                    "max_time_sec": 90.0,
+                    "h5_name": "grasp.h5",
+                    "npy_name": "grasp.npy",
+                    "fail_h5_name": "grasp_fail.h5",
+                    "fail_npy_name": "grasp_fail.npy",
+                    "flush_every": 1,
+                    "fail_keep_ratio": 1.0,
+                    "min_valid_count": 1
+                },
                 "object": {"id": 0},
                 "hand": {
                     "xml_path": str(mjcf_path),
@@ -137,7 +154,6 @@ def test_simulate_dataset_manifest_counts_successes(tmp_path: Path, monkeypatch)
                 },
                 "sampling": {"n_points": 1, "downsample_for_sim": 1, "Nd": 1, "rot_n": 1, "d_min": 0.01, "d_max": 0.02},
                 "sim_grasp": {"contact_min_count": 4},
-                "output": {"max_cap": 10, "max_time_sec": 90.0, "h5_name": "grasp.h5", "npy_name": "grasp.npy", "dataset_root": str(tmp_path / "datasets")},
                 "extforce": {"duration": 0.5, "trans_thresh": 0.05, "angle_thresh": 10.0, "grip_delta": 0.05, "force_mag": 1.0, "check_steps": 50},
             }
         ),
@@ -205,7 +221,24 @@ def test_simulate_dataset_manifest_allows_explicit_float64_cast(tmp_path: Path, 
         json.dumps(
             {
                 "seed": 0,
-                "dataset": {"include": ["YCB"], "root": "unused", "verbose": False, "scales": [0.08]},
+                "data": {
+                    "raw_dataset_name": "YCB",
+                    "raw_dataset_root": "unused",
+                    "generated_dataset_root": str(tmp_path / "datasets"),
+                    "objdata_tag": "objdata_YCB",
+                    "graspdata_tag": "graspdata_YCB_liberhand",
+                    "verbose": False,
+                    "scales": [0.08],
+                    "max_cap": 10,
+                    "max_time_sec": 90.0,
+                    "h5_name": "grasp.h5",
+                    "npy_name": "grasp.npy",
+                    "fail_h5_name": "grasp_fail.h5",
+                    "fail_npy_name": "grasp_fail.npy",
+                    "flush_every": 1,
+                    "fail_keep_ratio": 1.0,
+                    "min_valid_count": 1
+                },
                 "object": {"id": 0},
                 "hand": {
                     "xml_path": str(mjcf_path),
@@ -221,7 +254,6 @@ def test_simulate_dataset_manifest_allows_explicit_float64_cast(tmp_path: Path, 
                 },
                 "sampling": {"n_points": 1, "downsample_for_sim": 1, "Nd": 1, "rot_n": 1, "d_min": 0.01, "d_max": 0.02},
                 "sim_grasp": {"contact_min_count": 4},
-                "output": {"max_cap": 10, "max_time_sec": 90.0, "h5_name": "grasp.h5", "npy_name": "grasp.npy", "dataset_root": str(tmp_path / "datasets")},
                 "extforce": {"duration": 0.5, "trans_thresh": 0.05, "angle_thresh": 10.0, "grip_delta": 0.05, "force_mag": 1.0, "check_steps": 50},
             }
         ),
@@ -280,11 +312,23 @@ def test_simulate_dataset_manifest_requires_qpos_squeeze(tmp_path: Path, monkeyp
         json.dumps(
             {
                 "seed": 0,
-                "dataset": {
-                    "include": ["YCB"],
-                    "root": "unused",
+                "data": {
+                    "raw_dataset_name": "YCB",
+                    "raw_dataset_root": "unused",
+                    "generated_dataset_root": str(tmp_path / "datasets"),
+                    "objdata_tag": "objdata_YCB",
+                    "graspdata_tag": "graspdata_YCB_liberhand",
                     "verbose": False,
                     "scales": [0.08],
+                    "max_cap": 10,
+                    "max_time_sec": 90.0,
+                    "h5_name": "grasp.h5",
+                    "npy_name": "grasp.npy",
+                    "fail_h5_name": "grasp_fail.h5",
+                    "fail_npy_name": "grasp_fail.npy",
+                    "flush_every": 1,
+                    "fail_keep_ratio": 1.0,
+                    "min_valid_count": 1
                 },
                 "object": {"id": 0},
                 "hand": {
@@ -308,13 +352,6 @@ def test_simulate_dataset_manifest_requires_qpos_squeeze(tmp_path: Path, monkeyp
                     "d_max": 0.02,
                 },
                 "sim_grasp": {"contact_min_count": 4},
-                "output": {
-                    "max_cap": 10,
-                    "max_time_sec": 90.0,
-                    "h5_name": "grasp.h5",
-                    "npy_name": "grasp.npy",
-                    "dataset_root": str(tmp_path / "datasets"),
-                },
                 "extforce": {
                     "duration": 0.5,
                     "trans_thresh": 0.05,

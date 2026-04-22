@@ -71,8 +71,8 @@ def visualize_extforce_grasps(
     grasp_arrays = _load_grasp_arrays(
         object_scale_dir,
         qpos_dtype=qpos_dtype,
-        grasp_h5_name=str(cfg["output"]["h5_name"]),
-        grasp_npy_name=str(cfg["output"]["npy_name"]),
+        grasp_h5_name=str(cfg["data"]["h5_name"]),
+        grasp_npy_name=str(cfg["data"]["npy_name"]),
     )
     qpos_squeeze = grasp_arrays["qpos_squeeze"]
     qpos_prepared_raw = grasp_arrays["qpos_prepared"]

@@ -160,17 +160,17 @@ def run_sampling(
 
     out_dir = Path(output_dir_abs)
     out_dir.mkdir(parents=True, exist_ok=True)
-    h5_path = out_dir / str(cfg["output"]["h5_name"])
-    npy_path = out_dir / str(cfg["output"]["npy_name"])
+    h5_path = out_dir / str(cfg["data"]["h5_name"])
+    npy_path = out_dir / str(cfg["data"]["npy_name"])
 
     d = qpos_prepared.shape[1]
-    max_cap = int(cfg["output"]["max_cap"])
+    max_cap = int(cfg["data"]["max_cap"])
     if max_cap <= 0:
-        raise ValueError(f"output.max_cap must be positive, got {max_cap}.")
-    extforce_max_time_sec = float(cfg["output"]["max_time_sec"])
+        raise ValueError(f"data.max_cap must be positive, got {max_cap}.")
+    extforce_max_time_sec = float(cfg["data"]["max_time_sec"])
     if extforce_max_time_sec <= 0.0:
-        raise ValueError(f"output.max_time_sec must be positive, got {extforce_max_time_sec}.")
-    flush_every = int(cfg.get("output", {}).get("flush_every", 0) or 0)
+        raise ValueError(f"data.max_time_sec must be positive, got {extforce_max_time_sec}.")
+    flush_every = int(cfg.get("data", {}).get("flush_every", 0) or 0)
     contact_min_count = int(cfg["sim_grasp"]["contact_min_count"])
     sim_grasp_cfg = dict(cfg.get("sim_grasp", {}))
     extforce_cfg = dict(cfg.get("extforce", {}))
@@ -610,8 +610,8 @@ def main() -> None:
     if verbose:
         print(f"Using object-scale key: {args.object_scale_key}")
 
-    h5_name = str(cfg["output"]["h5_name"])
-    npy_name = str(cfg["output"]["npy_name"])
+    h5_name = str(cfg["data"]["h5_name"])
+    npy_name = str(cfg["data"]["npy_name"])
     render_subdir = str(cfg["warp_render"]["output_subdir"])
     has_grasp_outputs = grasp_outputs_exist(args.output_dir, h5_name=h5_name, npy_name=npy_name)
     has_global_pc = global_pc_exists(args.output_dir, render_subdir)

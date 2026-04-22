@@ -1,10 +1,11 @@
 {
   "seed": 0,
-  "dataset": {
-    "root": "assets/objects/processed",
-    "include": [
-      "YCB"
-    ],
+  "data": {
+    "raw_dataset_name": "DGN",
+    "raw_dataset_root": "assets/objects/processed",
+    "generated_dataset_root": "datasets",
+    "objdata_tag": "objdata_DGN",
+    "graspdata_tag": "graspdata_DGN_inspire_right",
     "scales": [
       0.06,
       0.08,
@@ -12,10 +13,19 @@
       0.12,
       0.14
     ],
-    "verbose": false
+    "verbose": false,
+    "max_cap": 100,
+    "max_time_sec": 180.0,
+    "flush_every": 25,
+    "h5_name": "grasp.h5",
+    "npy_name": "grasp.npy",
+    "fail_h5_name": "grasp_fail.h5",
+    "fail_npy_name": "grasp_fail.npy",
+    "fail_keep_ratio": 1.2,
+    "min_valid_count": 5
   },
   "hand": {
-    "xml_path": "./assets/hands/inspire/inspire_right.xml",
+    "xml_path": "./assets/hands/inspire_hand/inspire_hand_right.xml",
     "prepared_joints": [
       0.0,
       0.0,
@@ -50,43 +60,43 @@
       -0.02
     ],
     "target_body_params": {
-      "hand_right_f13": [
+      "thumb_distal": [
         0.5,
         1.0
       ],
-      "hand_right_f14_end": [
+      "thumb_tip": [
         0.3,
         0.2
       ],
-      "hand_right_f23": [
+      "index_intermediate": [
         0.5,
         1.0
       ],
-      "hand_right_f24_end": [
+      "index_tip": [
         0.3,
         0.2
       ],
-      "hand_right_f33": [
+      "middle_intermediate": [
         0.5,
         1.0
       ],
-      "hand_right_f34_end": [
+      "middle_tip": [
         0.3,
         0.2
       ],
-      "hand_right_f43": [
+      "ring_intermediate": [
         0.5,
         1.0
       ],
-      "hand_right_f44_end": [
+      "ring_tip": [
         0.3,
         0.2
       ],
-      "hand_right_f53": [
+      "pinky_intermediate": [
         0.5,
         1.0
       ],
-      "hand_right_f54_end": [
+      "pinky_tip": [
         0.3,
         0.2
       ]
@@ -143,55 +153,5 @@
     "force_mag": 1.0,
     "close_steps": 100,
     "check_steps": 50
-  },
-  "output": {
-    "max_cap": 100,
-    "max_time_sec": 180.0,
-    "flush_every": 25,
-    "h5_name": "grasp.h5",
-    "npy_name": "grasp.npy",
-    "fail_h5_name": "grasp_fail.h5",
-    "fail_npy_name": "grasp_fail.npy",
-    "fail_keep_ratio": 1.2,
-    "min_valid_count": 5
-  },
-  "warp_render": {
-    "gpu_lst": [
-      0
-    ],
-    "thread_per_gpu": 1,
-    "output_subdir": "pc_warp",
-    "max_point_num": 4096,
-    "save_pc": true,
-    "save_rgb": false,
-    "save_depth": false,
-    "skip_existing": true,
-    "depth_max": 5.0,
-    "tile_width": 640,
-    "tile_height": 480,
-    "n_cols": 5,
-    "n_rows": 5,
-    "z_near": 0.1,
-    "z_far": 10.0,
-    "intrinsics": {
-      "preset": "kinect",
-      "fx": 608.6939697265625,
-      "fy": 608.6422119140625,
-      "cx": 320.0,
-      "cy": 240.0
-    },
-    "camera": {
-      "type": "spherical",
-      "radius": 0.6,
-      "pos_noise": 0.3,
-      "lookat": [
-        0.0,
-        0.0,
-        0.0
-      ],
-      "lookat_noise": 0.1,
-      "up": null,
-      "up_noise": 0.2
-    }
   }
 }

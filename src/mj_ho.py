@@ -56,6 +56,34 @@ def _default_hand_profiles() -> Dict[str, Dict]:
             "thumb_relax_indices": [17, 18, 19],
             "thumb_relax_divisor": 1.2,
         },
+        "inspire_hand_right": {
+            "ctrl_qpos_slices": [
+                (7, 9),
+                (11, 12),
+                (13, 14),
+                (15, 16),
+                (17, 18),
+            ],
+            "solimp": [0.4, 0.99, 0.0001],
+            "solref": [0.003, 1.0],
+            "side_swing_indices": [0],
+            "thumb_relax_indices": [0, 1, 2, 3],
+            "thumb_relax_divisor": 1.0,
+        },
+        "inspire_hand_left": {
+            "ctrl_qpos_slices": [
+                (7, 9),
+                (11, 12),
+                (13, 14),
+                (15, 16),
+                (17, 18),
+            ],
+            "solimp": [0.4, 0.99, 0.0001],
+            "solref": [0.003, 1.0],
+            "side_swing_indices": [0],
+            "thumb_relax_indices": [0, 1, 2, 3],
+            "thumb_relax_divisor": 1.0,
+        },
     }
 
 

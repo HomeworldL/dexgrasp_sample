@@ -15,8 +15,14 @@ from src.dataset_objects import DatasetObjects
 from utils.utils_file import (
     DEFAULT_RUN_CONFIG_PATH,
     build_logs_dir,
-    dataset_tag_from_config,
+    data_verbose_from_config,
+    generated_dataset_root_from_config,
+    graspdata_tag_from_config,
     load_config,
+    objdata_tag_from_config,
+    raw_dataset_name_from_config,
+    raw_dataset_root_from_config,
+    run_scales_from_config,
     safe_filename,
 )
 from utils.utils_sample import global_pc_exists, grasp_outputs_exist
@@ -34,7 +40,7 @@ def parse_args():
         "--config",
         type=str,
         default=DEFAULT_RUN_CONFIG_PATH,
-        help="运行配置 JSON（默认 configs/run_YCB_liberhand.json）",
+        help="运行配置 JSON（默认 configs/run_YCB_liberhand_right.json）",
     )
     p.add_argument("--force", action="store_true", help="即使已存在配置指定的抓取输出也强制重跑")
     p.add_argument("-v", "--verbose", action="store_true", help="仅透传详细日志给子进程 run_mjw.py")
@@ -126,24 +132,26 @@ def main():
     print("Discovering dataset object-scale entries...")
 
     cfg = load_config(args.config)
-    dataset_tag = dataset_tag_from_config(args.config)
-    logs_dir = build_logs_dir(args.script, dataset_tag)
+    objdata_tag = objdata_tag_from_config(cfg, args.config)
+    graspdata_tag = graspdata_tag_from_config(cfg, args.config)
+    logs_dir = build_logs_dir(args.script, graspdata_tag)
     logs_dir.mkdir(parents=True, exist_ok=True)
     ds = DatasetObjects(
-        cfg["dataset"]["root"],
-        dataset_names=list(cfg["dataset"].get("include", [])),
-        scales=list(cfg["dataset"].get("scales", [])),
-        dataset_tag=dataset_tag,
-        dataset_output_root=cfg.get("output", {}).get("dataset_root", "datasets"),
-        verbose=bool(cfg["dataset"].get("verbose", False)),
+        raw_dataset_root_from_config(cfg),
+        raw_dataset_name=raw_dataset_name_from_config(cfg),
+        scales=run_scales_from_config(cfg),
+        objdata_tag=objdata_tag,
+        graspdata_tag=graspdata_tag,
+        generated_dataset_root=generated_dataset_root_from_config(cfg),
+        verbose=data_verbose_from_config(cfg),
     )
     entries = sorted(ds.get_entries(), key=lambda it: int(it["global_id"]))
     if not entries:
         print("没有发现任何 object-scale 条目，退出。")
         return
 
-    h5_name = str(cfg["output"]["h5_name"])
-    npy_name = str(cfg["output"]["npy_name"])
+    h5_name = str(cfg["data"]["h5_name"])
+    npy_name = str(cfg["data"]["npy_name"])
     render_subdir = str(cfg["warp_render"]["output_subdir"])
     if not args.force:
         total_entries = len(entries)

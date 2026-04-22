@@ -3,21 +3,91 @@ import os
 from pathlib import Path
 from typing import Dict, List, Optional
 
-
-DEFAULT_RUN_CONFIG_PATH = "configs/run_YCB_liberhand.json"
+DEFAULT_RUN_CONFIG_PATH = "configs/run_YCB_liberhand_right.json"
+DEFAULT_ASSET_CONFIG_PATH = "configs/assets_YCB.json"
 
 
 def dataset_tag_from_config(config_path: str) -> str:
-    """Map config stem to dataset output tag.
-
-    Convention:
-    - run_YCB_liberhand -> graspdata_YCB_liberhand
-    - non-run_ stems are kept as-is
-    """
     stem = Path(config_path).stem
     if stem.startswith("run_"):
         return f"graspdata_{stem[len('run_'):]}"
     return stem
+
+
+def objdata_tag_from_config(cfg: Dict, config_path: Optional[str] = None) -> str:
+    tag = cfg.get("data", {}).get("objdata_tag")
+    if isinstance(tag, str) and tag.strip():
+        return tag.strip()
+    if config_path:
+        stem = Path(config_path).stem
+        if stem.startswith("assets_"):
+            suffix = stem[len("assets_") :]
+            if suffix:
+                return f"objdata_{suffix}"
+        if stem.startswith("run_"):
+            parts = stem[len("run_") :].split("_")
+            if parts and parts[0]:
+                return f"objdata_{parts[0]}"
+    raise KeyError("Missing required config field: data.objdata_tag")
+
+
+def graspdata_tag_from_config(cfg: Dict, config_path: Optional[str] = None) -> str:
+    tag = cfg.get("data", {}).get("graspdata_tag")
+    if isinstance(tag, str) and tag.strip():
+        return tag.strip()
+    if config_path:
+        return dataset_tag_from_config(config_path)
+    raise KeyError("Missing required config field: data.graspdata_tag")
+
+
+def raw_dataset_name_from_config(cfg: Dict) -> str:
+    name = _require(cfg, "data.raw_dataset_name")
+    if not isinstance(name, str) or not name.strip():
+        raise ValueError("Config field data.raw_dataset_name must be a non-empty string.")
+    return name.strip()
+
+
+def raw_dataset_root_from_config(cfg: Dict) -> str:
+    root = _require(cfg, "data.raw_dataset_root")
+    if not isinstance(root, str) or not root.strip():
+        raise ValueError("Config field data.raw_dataset_root must be a non-empty string.")
+    return root.strip()
+
+
+def generated_dataset_root_from_config(cfg: Dict) -> str:
+    root = _require(cfg, "data.generated_dataset_root")
+    if not isinstance(root, str) or not root.strip():
+        raise ValueError("Config field data.generated_dataset_root must be a non-empty string.")
+    return root.strip()
+
+
+def data_verbose_from_config(cfg: Dict) -> bool:
+    verbose = _require(cfg, "data.verbose")
+    if not isinstance(verbose, bool):
+        raise ValueError("Config field data.verbose must be a boolean.")
+    return verbose
+
+
+def asset_scales_from_config(cfg: Dict) -> List[float]:
+    scales = _require(cfg, "data.asset_scales")
+    if not isinstance(scales, list) or not scales:
+        raise ValueError("Config field data.asset_scales must be a non-empty list.")
+    parsed = [float(scale) for scale in scales]
+    for scale in parsed:
+        if scale <= 0.0:
+            raise ValueError("All data.asset_scales values must be > 0.")
+    return parsed
+
+
+def run_scales_from_config(cfg: Dict) -> List[float]:
+    scales = _require(cfg, "data.scales")
+    if not isinstance(scales, list) or not scales:
+        raise ValueError("Config field data.scales must be a non-empty list.")
+    parsed = [float(scale) for scale in scales]
+    for scale in parsed:
+        if scale <= 0.0:
+            raise ValueError("All data.scales values must be > 0.")
+    return parsed
 
 
 def ensure_dir_for_file(filepath: str):
@@ -27,52 +97,25 @@ def ensure_dir_for_file(filepath: str):
 
 
 def safe_filename(name: str) -> str:
-    """Sanitize a name for log/output filenames.
-
-    English: Used by multi-run entrypoints to convert object-scale keys or script
-    names into filesystem-safe path fragments.
-    中文：供并行运行脚本使用，把脚本名或 object-scale key 转成适合日志路径的安全文件名。
-    """
     return "".join(c if c.isalnum() or c in "-_.()" else "_" for c in name)
 
 
 def build_logs_dir(script: str, dataset_tag: str) -> Path:
-    """Build logs/<script>/<dataset_tag> directory path.
-
-    English: Shared by CPU/GPU multi-run scripts so their child-process logs are
-    grouped by entry script and dataset tag.
-    中文：供 CPU/GPU 两个 multi 脚本共用，把子进程日志统一归档到
-    logs/<script>/<dataset_tag>/ 目录下。
-    """
     script_name = Path(script).stem or "run"
     return Path("logs") / safe_filename(script_name) / safe_filename(dataset_tag)
 
 
 def relpath_str(path: Path, start: Path) -> str:
-    """Return POSIX-style relative path string for dataset manifests.
-
-    English: Used when exporting dataset split json files so saved paths are
-    relative to the dataset root and platform-independent.
-    中文：用于导出数据集 split 清单，把路径写成相对 dataset 根目录的
-    POSIX 字符串，避免平台分隔符差异。
-    """
-    return path.resolve().relative_to(start.resolve()).as_posix()
+    return Path(os.path.relpath(path.resolve(), start.resolve())).as_posix()
 
 
 def list_existing_files(folder: Path, prefix: str) -> List[Path]:
-    """List existing npy files with a given prefix in sorted order.
-
-    English: Used by run_multi.py when validating rendered warp assets such as
-    partial point clouds and camera extrinsics.
-    中文：用于 run_multi.py 检查 warp 渲染产物，按前缀收集并排序已有的
-    npy 文件，例如 partial_pc 和 cam_ex。
-    """
     return sorted(p for p in folder.glob(f"{prefix}*.npy") if p.is_file())
 
 
 def resolve_split_manifest_path(cfg: Dict, config_path: str, split: str) -> Path:
-    dataset_root = Path(cfg.get("output", {}).get("dataset_root", "datasets")).resolve()
-    dataset_tag = dataset_tag_from_config(config_path)
+    dataset_root = Path(generated_dataset_root_from_config(cfg)).resolve()
+    dataset_tag = graspdata_tag_from_config(cfg, config_path)
     return dataset_root / dataset_tag / f"{split}.json"
 
 
@@ -105,31 +148,33 @@ def _validate_target_body_params(cfg: Dict) -> None:
             ) from exc
 
 
-def _validate_config(cfg: Dict, source_path: str) -> None:
+def _validate_common_config(cfg: Dict, source_path: str) -> None:
     if not isinstance(cfg, dict):
         raise ValueError(f"Config root must be a JSON object: {source_path}")
-
     _require(cfg, "seed")
+    raw_dataset_name_from_config(cfg)
+    raw_dataset_root_from_config(cfg)
+    generated_dataset_root_from_config(cfg)
+    data_verbose_from_config(cfg)
 
-    include = _require(cfg, "dataset.include")
-    if not isinstance(include, list) or not include:
-        raise ValueError("Config field dataset.include must be a non-empty list.")
 
-    root = _require(cfg, "dataset.root")
-    if not isinstance(root, str) or not root.strip():
-        raise ValueError("Config field dataset.root must be a non-empty string.")
+def _validate_asset_config(cfg: Dict, source_path: str) -> None:
+    _validate_common_config(cfg, source_path)
+    tag = _require(cfg, "data.objdata_tag")
+    if not isinstance(tag, str) or not tag.strip():
+        raise ValueError("Config field data.objdata_tag must be a non-empty string.")
+    asset_scales_from_config(cfg)
+    _require(cfg, "sampling.n_points")
+    _require(cfg, "warp_render")
 
-    verbose = _require(cfg, "dataset.verbose")
-    if not isinstance(verbose, bool):
-        raise ValueError("Config field dataset.verbose must be a boolean.")
 
-    scales = _require(cfg, "dataset.scales")
-    if not isinstance(scales, list) or not scales:
-        raise ValueError("Config field dataset.scales must be a non-empty list.")
-    for s in scales:
-        if float(s) <= 0:
-            raise ValueError("All dataset.scales values must be > 0.")
-
+def _validate_run_config(cfg: Dict, source_path: str) -> None:
+    _validate_common_config(cfg, source_path)
+    for tag_field in ["objdata_tag", "graspdata_tag"]:
+        tag = _require(cfg, f"data.{tag_field}")
+        if not isinstance(tag, str) or not tag.strip():
+            raise ValueError(f"Config field data.{tag_field} must be a non-empty string.")
+    run_scales_from_config(cfg)
     for k in ["n_points", "downsample_for_sim", "Nd", "rot_n", "d_min", "d_max"]:
         _require(cfg, f"sampling.{k}")
 
@@ -160,24 +205,46 @@ def _validate_config(cfg: Dict, source_path: str) -> None:
     if contact_min_count <= 0:
         raise ValueError("sim_grasp.contact_min_count must be > 0.")
 
-    for k in ["max_cap", "max_time_sec", "h5_name", "npy_name"]:
-        _require(cfg, f"output.{k}")
+    for k in [
+        "max_cap",
+        "max_time_sec",
+        "h5_name",
+        "npy_name",
+        "fail_h5_name",
+        "fail_npy_name",
+        "flush_every",
+        "fail_keep_ratio",
+        "min_valid_count",
+    ]:
+        _require(cfg, f"data.{k}")
 
-    max_time_sec = float(_require(cfg, "output.max_time_sec"))
+    max_time_sec = float(_require(cfg, "data.max_time_sec"))
     if max_time_sec <= 0.0:
-        raise ValueError("output.max_time_sec must be > 0.")
+        raise ValueError("data.max_time_sec must be > 0.")
 
 
-def load_config(path: Optional[str]) -> Dict:
+def _load_json_config(path: Optional[str]) -> tuple[str, Dict]:
     if not path:
-        raise ValueError("Config path is required. Example: -c configs/run_YCB_liberhand.json")
-
+        raise ValueError("Config path is required. Example: -c configs/run_YCB_liberhand_right.json")
     abs_path = os.path.abspath(path)
     if not os.path.exists(abs_path):
         raise FileNotFoundError(f"Config file not found: {path} -> {abs_path}")
-
     with open(abs_path, "r", encoding="utf-8") as f:
         cfg = json.load(f)
+    return abs_path, cfg
 
-    _validate_config(cfg, abs_path)
+
+def load_asset_config(path: Optional[str]) -> Dict:
+    abs_path, cfg = _load_json_config(path)
+    _validate_asset_config(cfg, abs_path)
     return cfg
+
+
+def load_run_config(path: Optional[str]) -> Dict:
+    abs_path, cfg = _load_json_config(path)
+    _validate_run_config(cfg, abs_path)
+    return cfg
+
+
+def load_config(path: Optional[str]) -> Dict:
+    return load_run_config(path)

@@ -1,15 +1,16 @@
 """DatasetObjects: manifest-driven object-scale index.
 
 Design notes
-- No dataset-root resolver. `dataset_root` must be explicitly passed from config.
+- No dataset-root resolver. `raw_dataset_root` must be explicitly passed from config.
 - Build object list from `manifest.process_meshes.json` only (`process_status=success`).
-- Eager prebuild scaled assets at construction.
+- Scaled object assets live under an object asset tag, separate from grasp outputs.
 - Output info granularity is object-scale (one info per scale).
 """
 
 from __future__ import annotations
 
 import json
+import shutil
 import time
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Union
@@ -18,21 +19,20 @@ import numpy as np
 import trimesh
 from tqdm import tqdm
 
-from src.scale_dataset_builder import DEFAULT_FIXED_SCALES, ScaleDatasetBuilder
+from src.scale_dataset_builder import ScaleDatasetBuilder
 from utils.utils_pointcloud import preview_pointcloud_with_normals, sample_surface_o3d
 
-DEFAULT_DATASETS = ["YCB"]
-
-
 class DatasetObjects:
-    """Manifest-driven merged dataset index.
+    """Manifest-driven single-dataset object-scale index.
 
     Args:
-        dataset_root: Required dataset root path, e.g. ``assets/objects/processed``.
-        dataset_names: Dataset include list. Defaults to ``DEFAULT_DATASETS``.
-        scales: Fixed scales to prebuild.
-        dataset_tag: Output tag, usually config stem.
-        dataset_output_root: Root folder for generated scaled assets.
+        raw_dataset_root: Required raw dataset root path, e.g. ``assets/objects/processed``.
+        raw_dataset_name: Dataset name, e.g. ``YCB``.
+        scales: Explicit scale list from config.
+        objdata_tag: Output tag for object-scale assets, e.g. ``objdata_YCB``.
+        graspdata_tag: Output tag for hand-specific grasp artifacts.
+        generated_dataset_root: Root folder for generated scaled assets.
+        rebuild_existing_assets: Remove and rebuild existing object-scale assets while indexing.
         verbose: Print all skip/build messages when True.
 
     Info format (one row per object-scale):
@@ -40,6 +40,7 @@ class DatasetObjects:
             "global_id": int,
             "object_scale_key": str,
             "object_name": str,
+            "asset_dir_abs": str,
             "output_dir_abs": str,
             "coacd_abs": str,
             "convex_parts_abs": List[str],
@@ -50,33 +51,43 @@ class DatasetObjects:
 
     def __init__(
         self,
-        dataset_root: str,
-        dataset_names: Optional[List[str]] = None,
-        scales: Optional[List[float]] = None,
-        dataset_tag: str = "graspdata_YCB_liberhand",
-        dataset_output_root: str = "datasets",
+        raw_dataset_root: str,
+        raw_dataset_name: str,
+        scales: List[float],
+        objdata_tag: str,
+        object_names: Optional[List[str]] = None,
+        graspdata_tag: Optional[str] = None,
+        generated_dataset_root: str = "datasets",
+        rebuild_existing_assets: bool = False,
         verbose: bool = False,
     ):
-        if not dataset_root:
-            raise ValueError("dataset_root must be provided by config and cannot be empty.")
+        if not raw_dataset_root:
+            raise ValueError("raw_dataset_root must be provided by config and cannot be empty.")
 
-        self.root = Path(dataset_root).resolve()
-        if not self.root.is_dir():
-            raise FileNotFoundError(f"dataset_root does not exist: {self.root}")
+        self.raw_dataset_root = Path(raw_dataset_root).resolve()
+        if not self.raw_dataset_root.is_dir():
+            raise FileNotFoundError(f"raw_dataset_root does not exist: {self.raw_dataset_root}")
 
-        self.dataset_names = list(DEFAULT_DATASETS if dataset_names is None else dataset_names)
-        if not self.dataset_names:
-            raise ValueError("dataset_names cannot be empty.")
+        self.raw_dataset_name = str(raw_dataset_name).strip()
+        if not self.raw_dataset_name:
+            raise ValueError("raw_dataset_name cannot be empty.")
 
-        self.scales = [float(s) for s in (DEFAULT_FIXED_SCALES if scales is None else scales)]
+        self.scales = [float(s) for s in scales]
         if not self.scales:
             raise ValueError("scales cannot be empty.")
+        self.object_names = (
+            {str(name).strip() for name in object_names if str(name).strip()}
+            if object_names is not None
+            else None
+        )
 
-        self.dataset_tag = str(dataset_tag)
-        self.dataset_output_root = str(dataset_output_root)
+        self.objdata_tag = str(objdata_tag)
+        self.graspdata_tag = str(graspdata_tag or objdata_tag)
+        self.generated_dataset_root = str(generated_dataset_root)
+        self.rebuild_existing_assets = bool(rebuild_existing_assets)
         self.verbose = bool(verbose)
 
-        self._builder = ScaleDatasetBuilder(self.dataset_output_root)
+        self._builder = ScaleDatasetBuilder(self.generated_dataset_root)
 
         self.items: List[Dict] = []
         self._key_to_index: Dict[str, int] = {}
@@ -85,7 +96,8 @@ class DatasetObjects:
 
         if not self.items:
             raise RuntimeError(
-                f"No valid object-scale entries under root={self.root} include={self.dataset_names}."
+                f"No valid object-scale entries under root={self.raw_dataset_root} "
+                f"dataset={self.raw_dataset_name}."
             )
 
     def get_entries(self) -> List[Dict]:
@@ -118,75 +130,72 @@ class DatasetObjects:
 
     def _build_from_manifests(self) -> None:
         gid = 0
+        dataset_start = time.perf_counter()
+        dataset_dir = self.raw_dataset_root / self.raw_dataset_name
+        if not dataset_dir.is_dir():
+            raise FileNotFoundError(f"Dataset directory not found: {dataset_dir}")
 
-        for dataset_name in self.dataset_names:
-            dataset_start = time.perf_counter()
-            dataset_dir = self.root / dataset_name
-            if not dataset_dir.is_dir():
-                raise FileNotFoundError(f"Dataset directory not found: {dataset_dir}")
+        manifest_path = dataset_dir / "manifest.process_meshes.json"
+        if not manifest_path.exists():
+            raise FileNotFoundError(f"Manifest not found: {manifest_path}")
 
-            manifest_path = dataset_dir / "manifest.process_meshes.json"
-            if not manifest_path.exists():
-                raise FileNotFoundError(f"Manifest not found: {manifest_path}")
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        objects = manifest.get("objects", [])
+        if not isinstance(objects, list):
+            raise ValueError(f"Invalid manifest objects list: {manifest_path}")
 
-            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-            objects = manifest.get("objects", [])
-            if not isinstance(objects, list):
-                raise ValueError(f"Invalid manifest objects list: {manifest_path}")
+        default_mass = float(manifest.get("summary", {}).get("default_mass_kg", 0.1))
+        expected_entries = len(objects) * len(self.scales)
+        print(
+            f"[DatasetObjects] indexing dataset={self.raw_dataset_name} "
+            f"objects={len(objects)} scales={len(self.scales)} "
+            f"expected_entries<={expected_entries} objdata_tag={self.objdata_tag} "
+            f"graspdata_tag={self.graspdata_tag}"
+        )
 
-            default_mass = float(manifest.get("summary", {}).get("default_mass_kg", 0.1))
-            expected_entries = len(objects) * len(self.scales)
-            print(
-                f"[DatasetObjects] indexing dataset={dataset_name} "
-                f"objects={len(objects)} scales={len(self.scales)} "
-                f"expected_entries<={expected_entries}"
-            )
+        obj_iter = objects
+        if self.verbose:
+            obj_iter = tqdm(objects, desc=f"dataset:{self.raw_dataset_name}", leave=False)
 
-            obj_iter = objects
-            if self.verbose:
-                obj_iter = tqdm(objects, desc=f"dataset:{dataset_name}", leave=False)
+        for obj_idx, obj in enumerate(obj_iter, start=1):
+            if not isinstance(obj, dict):
+                continue
+            if str(obj.get("process_status", "")).lower() != "success":
+                continue
 
-            built_before = gid
-            for obj_idx, obj in enumerate(obj_iter, start=1):
-                if not isinstance(obj, dict):
-                    continue
-                if str(obj.get("process_status", "")).lower() != "success":
-                    continue
+            object_name = str(obj.get("object_id") or obj.get("name") or "").strip()
+            if not object_name:
+                self._log(f"[DatasetObjects] skip unnamed object in {self.raw_dataset_name}")
+                continue
+            if self.object_names is not None and object_name not in self.object_names:
+                continue
 
-                object_name = str(obj.get("object_id") or obj.get("name") or "").strip()
-                if not object_name:
-                    self._log(f"[DatasetObjects] skip unnamed object in {dataset_name}")
-                    continue
+            mesh_path_raw = obj.get("mesh_path")
+            if not isinstance(mesh_path_raw, str) or not mesh_path_raw:
+                self._log(f"[DatasetObjects] skip {object_name}: missing mesh_path")
+                continue
 
-                mesh_path_raw = obj.get("mesh_path")
-                if not isinstance(mesh_path_raw, str) or not mesh_path_raw:
-                    self._log(f"[DatasetObjects] skip {object_name}: missing mesh_path")
-                    continue
+            object_dir = self._to_abs_path(mesh_path_raw).parent
+            coacd_abs = str((object_dir / "coacd.obj").resolve())
 
-                object_dir = self._to_abs_path(mesh_path_raw).parent
-                coacd_abs = str((object_dir / "coacd.obj").resolve())
+            base_info = {
+                "object_name": object_name,
+                "coacd_abs": coacd_abs,
+            }
 
-                # build input to scale builder (path existence is checked during actual loading/export)
-                base_info = {
-                    "object_name": object_name,
-                    "coacd_abs": coacd_abs,
-                }
+            mass_kg = float(obj.get("mass_kg", default_mass))
+            pm = obj.get("principal_moments")
+            if not isinstance(pm, list) or len(pm) != 3:
+                pm = [1e-6, 1e-6, 1e-6]
+            principal_moments = [float(pm[0]), float(pm[1]), float(pm[2])]
 
-                mass_kg = float(obj.get("mass_kg", default_mass))
-                pm = obj.get("principal_moments")
-                if not isinstance(pm, list) or len(pm) != 3:
-                    pm = [1e-6, 1e-6, 1e-6]
-                principal_moments = [float(pm[0]), float(pm[1]), float(pm[2])]
-
-                scale_assets = {}
-                for scale in self.scales:
-                    existing_rec = self._existing_scale_assets(object_name=object_name, scale=float(scale))
-                    if existing_rec is not None:
-                        scale_assets[self._builder.scale_tag(float(scale))] = existing_rec
-                        continue
+            scale_assets = {}
+            for scale in self.scales:
+                if self.rebuild_existing_assets:
+                    self._clean_scale_assets(object_name=object_name, scale=float(scale))
                     try:
                         rec = self._builder.build_scale_assets(
-                            config_stem=self.dataset_tag,
+                            config_stem=self.objdata_tag,
                             object_info=base_info,
                             scale=float(scale),
                             mass_kg=mass_kg,
@@ -194,49 +203,62 @@ class DatasetObjects:
                             overwrite=False,
                         )
                     except Exception as exc:
-                        self._log(
-                            f"[DatasetObjects] skip {object_name} scale={float(scale):.6f}: "
-                            f"{exc}"
-                        )
-                        continue
+                        raise RuntimeError(
+                            f"Failed to rebuild objdata asset for {object_name} "
+                            f"scale={float(scale):.6f} under {self.objdata_tag}: {exc}"
+                        ) from exc
                     scale_assets[self._builder.scale_tag(float(scale))] = rec
+                    continue
 
-                for scale_key, rec in sorted(scale_assets.items()):
-                    output_dir_abs = str(Path(rec["xml_abs"]).resolve().parent)
-                    info = {
-                        "global_id": gid,
-                        "object_scale_key": f"{object_name}__{scale_key}",
-                        "object_name": object_name,
-                        "output_dir_abs": output_dir_abs,
-                        "coacd_abs": rec["coacd_abs"],
-                        "convex_parts_abs": list(rec["convex_parts_abs"]),
-                        "mjcf_abs": rec["xml_abs"],
-                        "scale": float(rec["scale"]),             
-                    }
-                    self.items.append(info)
-                    self._key_to_index[f"{object_name}__{scale_key}"] = gid
-                    gid += 1
+                existing_rec = self._existing_scale_assets(object_name=object_name, scale=float(scale))
+                if existing_rec is not None:
+                    scale_assets[self._builder.scale_tag(float(scale))] = existing_rec
+                    continue
+                raise FileNotFoundError(
+                    f"Missing objdata asset for {object_name} scale={float(scale):.6f} "
+                    f"under {self.objdata_tag}. First-time creation or rebuild must use "
+                    "prepare_object_assets.py --force."
+                )
 
-                if (
-                    not self.verbose
-                    and obj_idx % 200 == 0
-                    and len(objects) >= 500
-                ):
-                    elapsed = time.perf_counter() - dataset_start
-                    print(
-                        f"[DatasetObjects] dataset={dataset_name} progress={obj_idx}/{len(objects)} "
-                        f"indexed={gid - built_before} elapsed={elapsed:.1f}s"
-                    )
+            for scale_key, rec in sorted(scale_assets.items()):
+                asset_dir_abs = Path(rec["xml_abs"]).resolve().parent
+                output_dir_abs = (
+                    self._builder.base_output_dir
+                    / self.graspdata_tag
+                    / object_name
+                    / scale_key
+                ).resolve()
+                info = {
+                    "global_id": gid,
+                    "object_scale_key": f"{object_name}__{scale_key}",
+                    "object_name": object_name,
+                    "asset_dir_abs": str(asset_dir_abs),
+                    "output_dir_abs": str(output_dir_abs),
+                    "coacd_abs": rec["coacd_abs"],
+                    "convex_parts_abs": list(rec["convex_parts_abs"]),
+                    "mjcf_abs": rec["xml_abs"],
+                    "scale": float(rec["scale"]),
+                }
+                self.items.append(info)
+                self._key_to_index[f"{object_name}__{scale_key}"] = gid
+                gid += 1
 
-            elapsed = time.perf_counter() - dataset_start
-            print(
-                f"[DatasetObjects] done dataset={dataset_name} "
-                f"indexed={gid - built_before} elapsed={elapsed:.1f}s"
-            )
+            if not self.verbose and obj_idx % 200 == 0 and len(objects) >= 500:
+                elapsed = time.perf_counter() - dataset_start
+                print(
+                    f"[DatasetObjects] dataset={self.raw_dataset_name} progress={obj_idx}/{len(objects)} "
+                    f"indexed={gid} elapsed={elapsed:.1f}s"
+                )
+
+        elapsed = time.perf_counter() - dataset_start
+        print(
+            f"[DatasetObjects] done dataset={self.raw_dataset_name} "
+            f"indexed={gid} elapsed={elapsed:.1f}s"
+        )
 
     def _existing_scale_assets(self, object_name: str, scale: float) -> Optional[Dict]:
         scale_tag = self._builder.scale_tag(float(scale))
-        scale_dir = self._builder.base_output_dir / self.dataset_tag / object_name / scale_tag
+        scale_dir = self._builder.base_output_dir / self.objdata_tag / object_name / scale_tag
         convex_dir = scale_dir / "convex_parts"
         coacd_path = scale_dir / "coacd.obj"
         xml_path = scale_dir / "object.xml"
@@ -256,6 +278,12 @@ class DatasetObjects:
             "convex_parts_abs": convex_parts_abs,
             "xml_abs": str(xml_path.resolve()),
         }
+
+    def _clean_scale_assets(self, object_name: str, scale: float) -> None:
+        scale_tag = self._builder.scale_tag(float(scale))
+        scale_dir = self._builder.base_output_dir / self.objdata_tag / object_name / scale_tag
+        if scale_dir.exists():
+            shutil.rmtree(scale_dir)
 
     def load_mesh(self, mesh_or_path: Union[str, trimesh.Trimesh]) -> trimesh.Trimesh:
         if isinstance(mesh_or_path, trimesh.Trimesh):

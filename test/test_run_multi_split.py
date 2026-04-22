@@ -13,14 +13,15 @@ def _touch(path: Path) -> None:
 
 def _make_entry(dataset_dir: Path, global_id: int, object_name: str, scale_tag: str, scale: float):
     output_dir = dataset_dir / object_name / scale_tag
-    _touch(output_dir / "coacd.obj")
-    _touch(output_dir / "object.xml")
-    _touch(output_dir / "convex_parts" / "part_000.obj")
+    asset_dir = dataset_dir.parent / "objdata_YCB" / object_name / scale_tag
+    _touch(asset_dir / "coacd.obj")
+    _touch(asset_dir / "object.xml")
+    _touch(asset_dir / "convex_parts" / "part_000.obj")
     _touch(output_dir / "grasp.h5")
     _touch(output_dir / "grasp.npy")
     _touch(output_dir / "grasp_fail.h5")
     _touch(output_dir / "grasp_fail.npy")
-    render_dir = output_dir / "pc_warp"
+    render_dir = asset_dir / "pc_warp"
     _touch(render_dir / "cam_in.npy")
     _touch(render_dir / "cam_ex_00.npy")
     _touch(render_dir / "global_pc.npy")
@@ -30,10 +31,11 @@ def _make_entry(dataset_dir: Path, global_id: int, object_name: str, scale_tag: 
         "global_id": global_id,
         "object_scale_key": f"{object_name}__{scale_tag}",
         "object_name": object_name,
+        "asset_dir_abs": str(asset_dir),
         "output_dir_abs": str(output_dir),
-        "coacd_abs": str(output_dir / "coacd.obj"),
-        "convex_parts_abs": [str(output_dir / "convex_parts" / "part_000.obj")],
-        "mjcf_abs": str(output_dir / "object.xml"),
+        "coacd_abs": str(asset_dir / "coacd.obj"),
+        "convex_parts_abs": [str(asset_dir / "convex_parts" / "part_000.obj")],
+        "mjcf_abs": str(asset_dir / "object.xml"),
         "scale": scale,
     }
 
@@ -68,14 +70,17 @@ def test_build_split_records_and_split_by_object(tmp_path: Path):
     assert skipped == []
     assert len(records) == len(entries)
     assert records[0]["output_path"] == "obj_a/scale080"
+    assert records[0]["asset_path"] == "../objdata_YCB/obj_a/scale080"
     assert records[0]["grasp_h5_path"] == "obj_a/scale080/grasp.h5"
     assert records[0]["grasp_h5_fail_path"] == "obj_a/scale080/grasp_fail.h5"
     assert records[0]["grasp_fail_npy_path"] == "obj_a/scale080/grasp_fail.npy"
-    assert records[0]["partial_pc_path"] == ["obj_a/scale080/pc_warp/partial_pc_00.npy"]
-    assert records[0]["partial_pc_cam_path"] == ["obj_a/scale080/pc_warp/partial_pc_cam_00.npy"]
-    assert records[0]["cam_ex_path"] == ["obj_a/scale080/pc_warp/cam_ex_00.npy"]
-    assert records[0]["cam_in"] == "obj_a/scale080/pc_warp/cam_in.npy"
-    assert records[0]["global_pc_path"] == "obj_a/scale080/pc_warp/global_pc.npy"
+    assert records[0]["partial_pc_path"] == ["../objdata_YCB/obj_a/scale080/pc_warp/partial_pc_00.npy"]
+    assert records[0]["partial_pc_cam_path"] == [
+        "../objdata_YCB/obj_a/scale080/pc_warp/partial_pc_cam_00.npy"
+    ]
+    assert records[0]["cam_ex_path"] == ["../objdata_YCB/obj_a/scale080/pc_warp/cam_ex_00.npy"]
+    assert records[0]["cam_in"] == "../objdata_YCB/obj_a/scale080/pc_warp/cam_in.npy"
+    assert records[0]["global_pc_path"] == "../objdata_YCB/obj_a/scale080/pc_warp/global_pc.npy"
 
     train_records, test_records = split_records_by_object(records, seed=0)
     train_records_repeat, test_records_repeat = split_records_by_object(records, seed=0)
@@ -125,14 +130,15 @@ def test_empty_grasp_h5_is_filtered_after_split(tmp_path: Path):
 def test_build_split_records_respects_configured_grasp_filenames(tmp_path: Path):
     dataset_dir = tmp_path / "datasets" / "graspdata_YCB_liberhand"
     output_dir = dataset_dir / "obj_cfg" / "scale080"
-    _touch(output_dir / "coacd.obj")
-    _touch(output_dir / "object.xml")
-    _touch(output_dir / "convex_parts" / "part_000.obj")
+    asset_dir = dataset_dir.parent / "objdata_YCB" / "obj_cfg" / "scale080"
+    _touch(asset_dir / "coacd.obj")
+    _touch(asset_dir / "object.xml")
+    _touch(asset_dir / "convex_parts" / "part_000.obj")
     _touch(output_dir / "custom_grasp.h5")
     _touch(output_dir / "custom_grasp.npy")
     _touch(output_dir / "custom_fail.h5")
     _touch(output_dir / "custom_fail.npy")
-    render_dir = output_dir / "pc_warp"
+    render_dir = asset_dir / "pc_warp"
     _touch(render_dir / "cam_in.npy")
     _touch(render_dir / "cam_ex_00.npy")
     _touch(render_dir / "global_pc.npy")
@@ -143,10 +149,11 @@ def test_build_split_records_respects_configured_grasp_filenames(tmp_path: Path)
         "global_id": 0,
         "object_scale_key": "obj_cfg__scale080",
         "object_name": "obj_cfg",
+        "asset_dir_abs": str(asset_dir),
         "output_dir_abs": str(output_dir),
-        "coacd_abs": str(output_dir / "coacd.obj"),
-        "convex_parts_abs": [str(output_dir / "convex_parts" / "part_000.obj")],
-        "mjcf_abs": str(output_dir / "object.xml"),
+        "coacd_abs": str(asset_dir / "coacd.obj"),
+        "convex_parts_abs": [str(asset_dir / "convex_parts" / "part_000.obj")],
+        "mjcf_abs": str(asset_dir / "object.xml"),
         "scale": 0.08,
     }
 

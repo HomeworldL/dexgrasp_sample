@@ -1,0 +1,70 @@
+{
+  "seed": 0,
+  "data": {
+    "raw_dataset_name": "YCB",
+    "raw_dataset_root": "assets/objects/processed",
+    "generated_dataset_root": "datasets",
+    "objdata_tag": "objdata_YCB",
+    "asset_scales": [
+      0.05,
+      0.06,
+      0.07,
+      0.08,
+      0.09,
+      0.1,
+      0.11,
+      0.12,
+      0.13,
+      0.14,
+      0.15,
+      0.16,
+      0.17,
+      0.18,
+      0.19,
+      0.2
+    ],
+    "verbose": false
+  },
+  "sampling": {
+    "n_points": 4096
+  },
+  "warp_render": {
+    "gpu_lst": [
+      0
+    ],
+    "thread_per_gpu": 1,
+    "output_subdir": "pc_warp",
+    "max_point_num": 4096,
+    "save_pc": true,
+    "save_rgb": false,
+    "save_depth": false,
+    "skip_existing": true,
+    "depth_max": 5.0,
+    "tile_width": 640,
+    "tile_height": 480,
+    "n_cols": 5,
+    "n_rows": 5,
+    "z_near": 0.1,
+    "z_far": 10.0,
+    "intrinsics": {
+      "preset": "kinect",
+      "fx": 608.6939697265625,
+      "fy": 608.6422119140625,
+      "cx": 320.0,
+      "cy": 240.0
+    },
+    "camera": {
+      "type": "spherical",
+      "radius": 0.6,
+      "pos_noise": 0.3,
+      "lookat": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "lookat_noise": 0.1,
+      "up": null,
+      "up_noise": 0.2
+    }
+  }
+}

@@ -11,7 +11,18 @@ import numpy as np
 import torch
 
 from src.dataset_objects import DatasetObjects
-from utils.utils_file import DEFAULT_RUN_CONFIG_PATH, dataset_tag_from_config, load_config
+from utils.utils_file import (
+    DEFAULT_ASSET_CONFIG_PATH,
+    asset_scales_from_config,
+    data_verbose_from_config,
+    generated_dataset_root_from_config,
+    load_asset_config,
+    objdata_tag_from_config,
+    raw_dataset_name_from_config,
+    raw_dataset_root_from_config,
+)
+from utils.utils_seed import stable_seed
+from utils.utils_sample import parse_object_scale_key
 from utils.utils_warp_render import (
     WarpPointCloudRenderer,
     get_camera_matrix,
@@ -134,10 +145,10 @@ def _render_entry(
     renderer: WarpPointCloudRenderer,
     entry: Dict,
     render_cfg: Dict,
-    rng: np.random.Generator,
+    seed: int,
 ) -> Dict[str, Union[str, float, int]]:
     entry_start = time.perf_counter()
-    out_dir = Path(entry["output_dir_abs"]).resolve() / str(render_cfg["output_subdir"])
+    out_dir = Path(entry["asset_dir_abs"]).resolve() / str(render_cfg["output_subdir"])
     out_dir.mkdir(parents=True, exist_ok=True)
 
     batch = renderer.num_tiles
@@ -167,6 +178,9 @@ def _render_entry(
     mesh_sec = float(time.perf_counter() - mesh_start)
 
     render_start = time.perf_counter()
+    rng = np.random.default_rng(
+        stable_seed(int(seed), str(entry["object_scale_key"]), "warp_render")
+    )
     camera_view = get_camera_matrix(
         render_cfg["camera"],
         sample_num=batch,
@@ -250,7 +264,6 @@ def _batch_worker(
         raise RuntimeError("warp-lang is not available. Install warp-lang first.")
 
     device = _device_alias(device_token)
-    rng = np.random.default_rng(seed + worker_idx)
 
     intr = intrinsics_from_config(
         cfg=render_cfg["intrinsics"],
@@ -277,7 +290,7 @@ def _batch_worker(
             ) from exc
 
         for entry in entries:
-            _render_entry(renderer=renderer, entry=entry, render_cfg=render_cfg, rng=rng)
+            _render_entry(renderer=renderer, entry=entry, render_cfg=render_cfg, seed=seed)
 
 
 def _split_entries(entries: List[Dict], parts: int) -> List[List[Dict]]:
@@ -292,7 +305,7 @@ def _split_entries(entries: List[Dict], parts: int) -> List[List[Dict]]:
 def main() -> None:
     total_start = time.perf_counter()
     parser = argparse.ArgumentParser(description="Render partial point clouds with NVIDIA Warp for each object-scale entry.")
-    parser.add_argument("-c", "--config", type=str, default=DEFAULT_RUN_CONFIG_PATH)
+    parser.add_argument("-c", "--config", type=str, default=DEFAULT_ASSET_CONFIG_PATH)
     parser.add_argument("-i", "--obj-id", type=int, default=None)
     parser.add_argument("-k", "--obj-key", type=str, default=None)
     parser.add_argument("-j", "--max-parallel", type=int, default=None, help="Limit worker process count.")
@@ -301,7 +314,7 @@ def main() -> None:
     parser.add_argument("-v", "--verbose", action="store_true")
     args = parser.parse_args()
 
-    cfg = load_config(args.config)
+    cfg = load_asset_config(args.config)
     render_cfg = _validate_render_config(cfg)
 
     if args.force:
@@ -312,16 +325,25 @@ def main() -> None:
         render_cfg = dict(render_cfg)
         render_cfg["gpu_lst"] = [_parse_device_token(x) for x in args.gpu_lst.split(",") if x.strip()]
 
-    config_stem = dataset_tag_from_config(args.config)
+    objdata_tag = objdata_tag_from_config(cfg, args.config)
+    selected_object_names = None
+    selected_scales = asset_scales_from_config(cfg)
+    if args.obj_key:
+        object_name, parsed_scale = parse_object_scale_key(args.obj_key)
+        selected_object_names = [object_name]
+        if parsed_scale is not None:
+            selected_scales = [parsed_scale]
+
     ds_start = time.perf_counter()
     with redirect_stdout(io.StringIO()):
         ds = DatasetObjects(
-            dataset_root=cfg["dataset"]["root"],
-            dataset_names=list(cfg["dataset"].get("include", [])),
-            scales=list(cfg["dataset"].get("scales", [])),
-            dataset_tag=config_stem,
-            dataset_output_root=cfg.get("output", {}).get("dataset_root", "datasets"),
-            verbose=bool(cfg["dataset"].get("verbose", False)),
+            raw_dataset_root=raw_dataset_root_from_config(cfg),
+            raw_dataset_name=raw_dataset_name_from_config(cfg),
+            scales=selected_scales,
+            object_names=selected_object_names,
+            objdata_tag=objdata_tag,
+            generated_dataset_root=generated_dataset_root_from_config(cfg),
+            verbose=data_verbose_from_config(cfg),
         )
     ds_sec = float(time.perf_counter() - ds_start)
 

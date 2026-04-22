@@ -6,7 +6,17 @@ import numpy as np
 
 from src.dataset_objects import DatasetObjects
 from src.mj_ho import MjHO, RobotKinematics
-from utils.utils_file import DEFAULT_RUN_CONFIG_PATH, dataset_tag_from_config, load_config
+from utils.utils_file import (
+    DEFAULT_RUN_CONFIG_PATH,
+    data_verbose_from_config,
+    generated_dataset_root_from_config,
+    graspdata_tag_from_config,
+    load_config,
+    objdata_tag_from_config,
+    raw_dataset_name_from_config,
+    raw_dataset_root_from_config,
+    run_scales_from_config,
+)
 from utils.utils_vis import visualize_with_viser
 
 
@@ -25,12 +35,13 @@ def main():
 
     cfg = load_config(args.config)
     ds = DatasetObjects(
-        dataset_root=cfg["dataset"]["root"],
-        dataset_names=list(cfg["dataset"].get("include", [])),
-        scales=list(cfg["dataset"].get("scales", [])),
-        dataset_tag=dataset_tag_from_config(args.config),
-        dataset_output_root=cfg.get("output", {}).get("dataset_root", "datasets"),
-        verbose=bool(cfg["dataset"].get("verbose", False)),
+        raw_dataset_root=raw_dataset_root_from_config(cfg),
+        raw_dataset_name=raw_dataset_name_from_config(cfg),
+        scales=run_scales_from_config(cfg),
+        objdata_tag=objdata_tag_from_config(cfg, args.config),
+        graspdata_tag=graspdata_tag_from_config(cfg, args.config),
+        generated_dataset_root=generated_dataset_root_from_config(cfg),
+        verbose=data_verbose_from_config(cfg),
     )
 
     if args.obj_key:

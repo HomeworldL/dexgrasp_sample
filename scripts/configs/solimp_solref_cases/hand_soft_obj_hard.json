@@ -1,0 +1,197 @@
+{
+  "seed": 0,
+  "data": {
+    "raw_dataset_name": "YCB",
+    "raw_dataset_root": "assets/objects/processed",
+    "generated_dataset_root": "datasets",
+    "objdata_tag": "objdata_YCB",
+    "graspdata_tag": "graspdata_YCB_liberhand_right",
+    "scales": [
+      0.08,
+      0.1,
+      0.12,
+      0.14,
+      0.16
+    ],
+    "verbose": false,
+    "max_cap": 30,
+    "max_time_sec": 120.0,
+    "flush_every": 25,
+    "h5_name": "grasp.h5",
+    "npy_name": "grasp.npy",
+    "fail_h5_name": "grasp_fail.h5",
+    "fail_npy_name": "grasp_fail.npy",
+    "fail_keep_ratio": 1.2,
+    "min_valid_count": 5
+  },
+  "hand": {
+    "xml_path": "./assets/hands/liberhand/liberhand_right.xml",
+    "root_stabilization": {
+      "root_body_name": "hand_right_palm",
+      "root_scale": 1000000.0
+    },
+    "prepared_joints": [
+      0,
+      0.5,
+      0.4,
+      0.4,
+      0,
+      0.5,
+      0.4,
+      0.4,
+      0,
+      0.3,
+      0.3,
+      0.3,
+      0,
+      0.3,
+      0.3,
+      0.3,
+      1.6,
+      0.0,
+      0.3,
+      0.3
+    ],
+    "approach_joints": [
+      0,
+      0.0,
+      0.0,
+      0.0,
+      0,
+      0.0,
+      0.0,
+      0.0,
+      0,
+      0.0,
+      0.0,
+      0.0,
+      0,
+      0.0,
+      0.0,
+      0.0,
+      1.6,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "shift_local": [
+      0.0,
+      0.0,
+      -0.02
+    ],
+    "transform": {
+      "pos": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "quat_wxyz": [
+        0.92387953,
+        0.0,
+        0.38268343,
+        0.0
+      ]
+    },
+    "profile": {
+      "ctrl_joint_indices": [
+        0,
+        1,
+        2,
+        4,
+        5,
+        6,
+        8,
+        9,
+        12,
+        13,
+        16,
+        17,
+        18
+      ],
+      "side_swing_indices": [
+        0,
+        4,
+        8,
+        12,
+        16
+      ],
+      "thumb_relax_indices": [
+        17,
+        18,
+        19
+      ],
+      "thumb_relax_divisor": 1.2,
+      "friction_coef": [
+        0.3,
+        0.01
+      ],
+      "solimp": [
+        0.2,
+        0.95,
+        0.001,
+        0.5,
+        2.0
+      ],
+      "solref": [
+        0.02,
+        1.0
+      ]
+    },
+    "anchor_params": {
+      "hand_right_f13": 0.5,
+      "hand_right_f14_end": 0.3,
+      "hand_right_f23": 0.5,
+      "hand_right_f24_end": 0.3,
+      "hand_right_f33": 0.5,
+      "hand_right_f34_end": 0.3,
+      "hand_right_f43": 0.5,
+      "hand_right_f44_end": 0.3,
+      "hand_right_f53": 0.5,
+      "hand_right_f54_end": 0.3
+    }
+  },
+  "sampling": {
+    "n_points": 2048,
+    "downsample_for_sim": 512,
+    "Nd": 1,
+    "rot_n": 8,
+    "d_min": 0.02,
+    "d_max": 0.06,
+    "max_points": null,
+    "pc_subdir": "pc_warp"
+  },
+  "sim_grasp": {
+    "Mp": 20,
+    "steps": 40,
+    "speed_gain": 1.5,
+    "max_tip_speed": 0.05,
+    "contact_min_count": 4,
+    "target_point_method": 2
+  },
+  "extforce": {
+    "duration": 0.5,
+    "trans_thresh": 0.05,
+    "angle_thresh": 10.0,
+    "grip_delta": 0.05,
+    "force_mag": 1.0,
+    "close_steps": 100,
+    "check_steps": 50
+  },
+  "profile_object": {
+    "friction_coef": [
+      0.3,
+      0.01
+    ],
+    "solimp": [
+      0.95,
+      0.99,
+      0.0001,
+      0.5,
+      2.0
+    ],
+    "solref": [
+      0.001,
+      1.0
+    ]
+  }
+}

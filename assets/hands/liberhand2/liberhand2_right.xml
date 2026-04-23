@@ -26,8 +26,8 @@
     <light pos="0 0 5" dir="0 0 -1" directional="true"/>
 
     <body name="hand_right_palm">
-      <!-- <inertial pos="0.0070966 -0.0031475 0.053109" quat="0.469302 0.882909 -0.0117236 -0.00950504" mass="0.11625" diaginertia="9.33985e-05 6.34817e-05 4.23767e-05"/> -->
-      <inertial pos="0.0070966 -0.0031475 0.053109" quat="0.469302 0.882909 -0.0117236 -0.00950504" mass="11625000" diaginertia="9339.85 6348.17 4237.67"/>
+      <inertial pos="0.0070966 -0.0031475 0.053109" quat="0.469302 0.882909 -0.0117236 -0.00950504" mass="0.11625" diaginertia="9.33985e-05 6.34817e-05 4.23767e-05"/>
+      <!-- <inertial pos="0.0070966 -0.0031475 0.053109" quat="0.469302 0.882909 -0.0117236 -0.00950504" mass="11625000" diaginertia="9339.85 6348.17 4237.67"/> -->
       <joint name="world_to_hand_right_palm_fixed" type="free"/>
       <geom type="mesh" rgba="0.2 0.2 0.2 1" mesh="palm"/>
       <body name="hand_right_grasp" pos="0.03 0 0.065" quat="0.0  0.38268343 0.0  0.92387953">

@@ -53,6 +53,7 @@ class MjHO:
         anchor_params: Optional[Dict] = None,
         hand_profile: Optional[Dict] = None,
         object_profile: Optional[Dict] = None,
+        root_stabilization: Optional[Dict] = None,
         object_fixed: bool = True,
         visualize: bool = False,
     ):
@@ -73,6 +74,9 @@ class MjHO:
             raise ValueError("object_profile must be provided explicitly.")
         self.hand_profile = dict(hand_profile)
         self.object_profile = dict(object_profile)
+        self.root_stabilization = (
+            dict(root_stabilization) if root_stabilization is not None else None
+        )
         self.object_fixed = object_fixed
 
         # load hand spec as base
@@ -84,6 +88,7 @@ class MjHO:
         # compile into model/data
         self.model = self.spec.compile()
         self.data = mujoco.MjData(self.model)
+        self._apply_root_stabilization()
 
         # Set margin and gap to detect contact
         # self._set_margin(0.001)
@@ -164,6 +169,32 @@ class MjHO:
         self.viewer = None
         if visualize:
             self.open_viewer()
+
+    def _apply_root_stabilization(self) -> None:
+        if self.root_stabilization is None:
+            return
+        body_name = self.root_stabilization.get("root_body_name")
+        try:
+            root_scale = float(self.root_stabilization.get("root_scale"))
+        except Exception as exc:
+            raise ValueError("root_stabilization.root_scale must be numeric.") from exc
+        if not isinstance(body_name, str) or not body_name.strip():
+            raise ValueError("root_stabilization.root_body_name must be a non-empty string.")
+        if (not np.isfinite(root_scale)) or root_scale <= 0.0:
+            raise ValueError("root_stabilization.root_scale must be finite and > 0.")
+
+        body_id = mujoco.mj_name2id(
+            self.model,
+            mujoco.mjtObj.mjOBJ_BODY,
+            body_name,
+        )
+        if int(body_id) < 0:
+            raise ValueError(f"Body '{body_name}' not found for root stabilization.")
+
+        self.model.body_mass[body_id] *= root_scale
+        self.model.body_inertia[body_id] *= root_scale
+        mujoco.mj_setConst(self.model, self.data)
+        mujoco.mj_forward(self.model, self.data)
 
     # -----------------------
     # spec construction

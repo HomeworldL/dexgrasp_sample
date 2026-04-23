@@ -122,6 +122,35 @@ def anchor_params_from_config(cfg: Dict) -> Dict[str, float]:
     return deepcopy(normalized)
 
 
+def hand_root_stabilization_from_config(cfg: Dict) -> Optional[Dict[str, float | str]]:
+    hand_cfg = _require(cfg, "hand")
+    root_cfg = hand_cfg.get("root_stabilization")
+    if root_cfg is None:
+        return None
+    if not isinstance(root_cfg, dict):
+        raise ValueError("Config field hand.root_stabilization must be an object.")
+
+    body_name = root_cfg.get("root_body_name")
+    if not isinstance(body_name, str) or not body_name.strip():
+        raise ValueError(
+            "Config field hand.root_stabilization.root_body_name must be a non-empty string."
+        )
+    try:
+        root_scale = float(root_cfg.get("root_scale"))
+    except Exception as exc:
+        raise ValueError(
+            "Config field hand.root_stabilization.root_scale must be numeric."
+        ) from exc
+    if root_scale <= 0.0:
+        raise ValueError(
+            "Config field hand.root_stabilization.root_scale must be > 0."
+        )
+    return {
+        "root_body_name": body_name.strip(),
+        "root_scale": float(root_scale),
+    }
+
+
 def ensure_dir_for_file(filepath: str):
     d = os.path.dirname(os.path.abspath(filepath))
     if d and not os.path.exists(d):
@@ -291,6 +320,7 @@ def _validate_run_config(cfg: Dict, source_path: str) -> None:
     _require(cfg, "hand.prepared_joints")
     _require(cfg, "hand.approach_joints")
     _require(cfg, "hand.shift_local")
+    hand_root_stabilization_from_config(cfg)
     _validate_hand_profile(cfg)
     _validate_object_profile(cfg)
     _validate_anchor_params(cfg)

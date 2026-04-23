@@ -26,6 +26,10 @@
   },
   "hand": {
     "xml_path": "./assets/hands/liberhand2/liberhand2_right.xml",
+    "root_stabilization": {
+      "root_body_name": "hand_right_palm",
+      "root_scale": 1000000.0
+    },
     "prepared_joints": [
       0,
       0.5,

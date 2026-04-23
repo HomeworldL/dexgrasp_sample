@@ -13,6 +13,7 @@ from src.sample import downsample_fps
 from utils.utils_file import (
     DEFAULT_RUN_CONFIG_PATH,
     hand_profile_from_config,
+    hand_root_stabilization_from_config,
     load_config,
     object_profile_from_config,
     anchor_params_from_config,
@@ -103,6 +104,7 @@ def run_sampling(
     anchor_params = anchor_params_from_config(cfg)
     hand_profile = hand_profile_from_config(cfg)
     object_profile = object_profile_from_config(cfg)
+    root_stabilization = hand_root_stabilization_from_config(cfg)
 
     mjho = MjHO(
         obj_info,
@@ -110,6 +112,7 @@ def run_sampling(
         anchor_params=anchor_params,
         hand_profile=hand_profile,
         object_profile=object_profile,
+        root_stabilization=root_stabilization,
     )
     sampling_cfg = cfg["sampling"]
     pts_for_sim, norms_for_sim, _ = downsample_fps(
@@ -126,6 +129,7 @@ def run_sampling(
         anchor_params=anchor_params,
         hand_profile=hand_profile,
         object_profile=object_profile,
+        root_stabilization=root_stabilization,
         object_fixed=False,
     )
 

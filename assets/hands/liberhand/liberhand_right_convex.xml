@@ -38,8 +38,8 @@
     <light pos="0 0 5" dir="0 0 -1" directional="true"/>
     
     <body name="hand_right_palm">
-      <!-- <inertial pos="0 0 0" quat="0.994283 0.0215173 0.0263891 0.101206" mass="0.91778" diaginertia="0.0018754 0.0015702 0.000644013"/> -->
-      <inertial pos="0 0 0" quat="0.994283 0.0215173 0.0263891 0.101206" mass="917780" diaginertia="1875.4 1570.2 644.013"/>
+      <inertial pos="0 0 0" quat="0.994283 0.0215173 0.0263891 0.101206" mass="0.91778" diaginertia="0.0018754 0.0015702 0.000644013"/>
+      <!-- <inertial pos="0 0 0" quat="0.994283 0.0215173 0.0263891 0.101206" mass="917780" diaginertia="1875.4 1570.2 644.013"/> -->
       <joint name="world_to_hand" type="free"/>
       <geom type="mesh" rgba="0.2 0.2 0.2 1" mesh="palm"/>
       <body name="hand_right_grasp" pos="0 0 -0.025" quat="0.0  0.38268343 0.0  0.92387953">

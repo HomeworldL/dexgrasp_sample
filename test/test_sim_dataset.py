@@ -22,6 +22,7 @@ class _FakeMjHO:
         anchor_params,
         hand_profile,
         object_profile,
+        root_stabilization=None,
         object_fixed=False,
         visualize=False,
     ):
@@ -30,6 +31,7 @@ class _FakeMjHO:
         self.anchor_params = anchor_params
         self.hand_profile = hand_profile
         self.object_profile = object_profile
+        self.root_stabilization = root_stabilization
         self.object_fixed = object_fixed
         self.visualize = visualize
         self.current_qpos = None

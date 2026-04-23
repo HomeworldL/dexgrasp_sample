@@ -14,6 +14,7 @@ from src.mj_ho import MjHO
 from utils.utils_file import (
     DEFAULT_RUN_CONFIG_PATH,
     hand_profile_from_config,
+    hand_root_stabilization_from_config,
     load_config,
     object_profile_from_config,
     resolve_split_manifest_path,
@@ -80,6 +81,7 @@ def evaluate_dataset_manifest(
     anchor_params = anchor_params_from_config(cfg)
     hand_profile = hand_profile_from_config(cfg)
     object_profile = object_profile_from_config(cfg)
+    root_stabilization = hand_root_stabilization_from_config(cfg)
 
     summary_items: List[Dict] = []
     skipped_items: List[Dict] = []
@@ -111,6 +113,7 @@ def evaluate_dataset_manifest(
                 anchor_params=anchor_params,
                 hand_profile=hand_profile,
                 object_profile=object_profile,
+                root_stabilization=root_stabilization,
                 object_fixed=True,
                 visualize=visualize,
             )
@@ -120,6 +123,7 @@ def evaluate_dataset_manifest(
                 anchor_params=anchor_params,
                 hand_profile=hand_profile,
                 object_profile=object_profile,
+                root_stabilization=root_stabilization,
                 object_fixed=False,
                 visualize=visualize,
             )

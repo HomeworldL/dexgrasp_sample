@@ -1,3 +1,9 @@
+"""Inspect one scaled object asset and its convex decomposition.
+
+It displays coacd mesh, merged convex parts, and sampled surface points in
+viser, then opens a MuJoCo scene with the same object for sanity checks.
+"""
+
 import argparse
 import os
 import time

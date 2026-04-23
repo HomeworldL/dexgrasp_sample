@@ -1,3 +1,9 @@
+"""Replay stored grasp states with MuJoCo extforce validation.
+
+It loads qpos_prepared and qpos_squeeze for one object-scale directory, then
+runs sim_under_extforce with viewer rendering for interactive inspection.
+"""
+
 import argparse
 import logging
 import time

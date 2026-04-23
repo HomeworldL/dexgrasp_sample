@@ -1,3 +1,9 @@
+"""Inspect sampled grasp states for one object-scale entry.
+
+This script loads grasp arrays from grasp.h5/grasp.npy, overlays hand poses on
+the object mesh in viser, and optionally plots all frame poses in Plotly.
+"""
+
 import argparse
 import time
 from pathlib import Path

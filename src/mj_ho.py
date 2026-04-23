@@ -903,43 +903,51 @@ class RobotKinematics:
 
         for i in range(self.model.ngeom):
             geom = self.model.geom(i)
-            mesh_id = geom.dataid[0] if hasattr(geom, "dataid") else -1
-            if mesh_id == -1:
-                # no mesh for this geom -> skip
-                continue
+            mesh_id = self._scalar_int(getattr(geom, "dataid", -1))
+            geom_type = self._scalar_int(getattr(geom, "type", -1))
+            has_convex_graph = False
 
-            mjm = self.model.mesh(mesh_id)
+            if mesh_id >= 0:
+                mjm = self.model.mesh(mesh_id)
 
-            # robustly extract indices (support scalar or 1-element arrays)
-            try:
-                vertadr = (
-                    int(mjm.vertadr[0])
-                    if hasattr(mjm.vertadr, "__len__")
-                    else int(mjm.vertadr)
-                )
-                vertnum = (
-                    int(mjm.vertnum[0])
-                    if hasattr(mjm.vertnum, "__len__")
-                    else int(mjm.vertnum)
-                )
-                faceadr = (
-                    int(mjm.faceadr[0])
-                    if hasattr(mjm.faceadr, "__len__")
-                    else int(mjm.faceadr)
-                )
-                facenum = (
-                    int(mjm.facenum[0])
-                    if hasattr(mjm.facenum, "__len__")
-                    else int(mjm.facenum)
-                )
-            except Exception:
-                # can't parse mesh buffers -> skip
-                continue
+                # robustly extract indices (support scalar or 1-element arrays)
+                try:
+                    vertadr = self._scalar_int(mjm.vertadr)
+                    vertnum = self._scalar_int(mjm.vertnum)
+                    faceadr = self._scalar_int(mjm.faceadr)
+                    facenum = self._scalar_int(mjm.facenum)
+                except Exception:
+                    # can't parse mesh buffers -> skip
+                    continue
 
-            verts = np.array(self.model.mesh_vert[vertadr : vertadr + vertnum])
-            faces = np.array(self.model.mesh_face[faceadr : faceadr + facenum]).astype(
-                int
-            )
+                verts = np.asarray(self.model.mesh_vert[vertadr : vertadr + vertnum])
+                faces = np.asarray(self.model.mesh_face[faceadr : faceadr + facenum]).astype(
+                    int
+                )
+                mesh_name = mjm.name if hasattr(mjm, "name") else f"mesh_{mesh_id}"
+
+                # collision mesh: check convex-graph hints on the mesh descriptor
+                graph_attr = None
+                if hasattr(mjm, "graphadr"):
+                    graph_attr = mjm.graphadr
+                elif hasattr(mjm, "mesh_graphadr"):
+                    graph_attr = mjm.mesh_graphadr
+                elif hasattr(mjm, "graph_adr"):
+                    graph_attr = mjm.graph_adr
+                try:
+                    if graph_attr is not None and self._scalar_int(graph_attr) != -1:
+                        has_convex_graph = True
+                except Exception:
+                    has_convex_graph = False
+            else:
+                primitive = self._build_primitive_local_mesh(
+                    geom_type=geom_type,
+                    geom_size=np.asarray(getattr(geom, "size", []), dtype=float),
+                )
+                if primitive is None:
+                    continue
+                verts, faces = primitive
+                mesh_name = f"geom_{i}_primitive_{geom_type}"
 
             rgba = None
             try:
@@ -949,18 +957,18 @@ class RobotKinematics:
                     rgba = np.array(rgba_attr).flatten()[:4]
                 else:
                     # 退回到 material rgba（如果 geom 指定了 matid）
-                    matid = geom.matid[0] if hasattr(geom, "matid") else -1
+                    matid = self._scalar_int(getattr(geom, "matid", -1))
                     if matid is not None and matid >= 0 and hasattr(self.model, "mat_rgba"):
                         rgba = np.array(self.model.mat_rgba[matid]).flatten()[:4]
             except Exception:
                 rgba = None
 
+            body_id = self._scalar_int(getattr(geom, "bodyid", -1))
             body_name = (
-                self.model.body(geom.bodyid[0]).name
-                if geom.bodyid[0] >= 0
-                else f"body_{geom.bodyid[0]}"
+                self.model.body(body_id).name
+                if body_id >= 0
+                else f"body_{body_id}"
             )
-            mesh_name = mjm.name if hasattr(mjm, "name") else f"mesh_{mesh_id}"
 
             key_base = f"{body_name}_{mesh_name}"
             entry_orig = {
@@ -973,34 +981,10 @@ class RobotKinematics:
             }
 
             # classify: contype==0 -> visual ; else -> collision
-            if int(geom.contype[0]) == 0:
+            if self._scalar_int(getattr(geom, "contype", 0)) == 0:
                 # visual geometry
                 self.visual_meshes[f"{key_base}_{i}"] = entry_orig
             else:
-                # collision geometry: check for convex-graph info on the mesh descriptor
-                # Try several attribute names that may exist on mjm
-                graph_attr = None
-                if hasattr(mjm, "graphadr"):
-                    graph_attr = mjm.graphadr
-                elif hasattr(mjm, "mesh_graphadr"):
-                    graph_attr = mjm.mesh_graphadr
-                elif hasattr(mjm, "graph_adr"):
-                    graph_attr = mjm.graph_adr
-
-                has_convex_graph = False
-                try:
-                    if graph_attr is not None:
-                        # if it's array-like, check first element
-                        first = (
-                            graph_attr[0]
-                            if hasattr(graph_attr, "__len__")
-                            else graph_attr
-                        )
-                        if int(first) != -1:
-                            has_convex_graph = True
-                except Exception:
-                    has_convex_graph = False
-
                 if has_convex_graph:
                     # collision should store convex hull; visual should keep original
                     # compute convex hull using trimesh (simple and robust)
@@ -1029,6 +1013,65 @@ class RobotKinematics:
                 else:
                     # no convex-graph info -> use original as collision
                     self.collision_meshes[f"{key_base}_{i}"] = entry_orig
+
+    @staticmethod
+    def _scalar_int(value) -> int:
+        if hasattr(value, "__len__"):
+            return int(value[0])
+        return int(value)
+
+    def _build_primitive_local_mesh(
+        self,
+        geom_type: int,
+        geom_size: np.ndarray,
+    ) -> Optional[Tuple[np.ndarray, np.ndarray]]:
+        size = np.asarray(geom_size, dtype=float).reshape(-1)
+        if size.size <= 0:
+            return None
+
+        g = mujoco.mjtGeom
+        tm = None
+        if geom_type == int(g.mjGEOM_SPHERE):
+            radius = float(size[0])
+            if radius <= 0.0:
+                return None
+            tm = trimesh.creation.icosphere(subdivisions=2, radius=radius)
+        elif geom_type == int(g.mjGEOM_CAPSULE):
+            if size.size < 2:
+                return None
+            radius = float(size[0])
+            half_length = float(size[1])
+            if radius <= 0.0 or half_length <= 0.0:
+                return None
+            tm = trimesh.creation.capsule(radius=radius, height=2.0 * half_length)
+        elif geom_type == int(g.mjGEOM_CYLINDER):
+            if size.size < 2:
+                return None
+            radius = float(size[0])
+            half_length = float(size[1])
+            if radius <= 0.0 or half_length <= 0.0:
+                return None
+            tm = trimesh.creation.cylinder(radius=radius, height=2.0 * half_length)
+        elif geom_type == int(g.mjGEOM_BOX):
+            if size.size < 3:
+                return None
+            half_extents = size[:3].astype(float)
+            if np.any(half_extents <= 0.0):
+                return None
+            tm = trimesh.creation.box(extents=2.0 * half_extents)
+        elif geom_type == int(g.mjGEOM_ELLIPSOID):
+            if size.size < 3:
+                return None
+            radii = size[:3].astype(float)
+            if np.any(radii <= 0.0):
+                return None
+            tm = trimesh.creation.icosphere(subdivisions=2, radius=1.0)
+            tm.apply_scale(radii)
+        else:
+            # Skip plane/hfield/unknown primitives for now.
+            return None
+
+        return np.asarray(tm.vertices), np.asarray(tm.faces, dtype=int)
 
     def forward_kinematics(self, qpos: np.ndarray):
         """Set qpos and run mujoco kinematics (mj_kinematics)."""

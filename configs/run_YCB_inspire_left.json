@@ -60,27 +60,17 @@
       -0.02
     ],
     "transform": {
-      "base_rot_grasp_to_palm": [
-        [
-          0,
-          0,
-          1
-        ],
-        [
-          0,
-          -1,
-          0
-        ],
-        [
-          1,
-          0,
-          0
-        ]
+      "pos": [
+        0.0,
+        0.0,
+        0.0
       ],
-      "extra_euler": {
-        "axis": "y",
-        "degrees": 45.0
-      }
+      "quat_wxyz": [
+        0.9659258,
+        0.0,
+        0.2588190,
+        0.0
+      ]
     },
     "profile": {
       "ctrl_joint_indices": [

@@ -5,7 +5,6 @@ from typing import Dict, Optional
 
 import numpy as np
 import torch
-from scipy.spatial.transform import Rotation as R
 
 from src.dataset_objects import DatasetObjects
 from src.mjw_ho import MjWarpHO
@@ -24,15 +23,8 @@ from utils.utils_file import (
     run_scales_from_config,
     anchor_params_from_config,
 )
+from utils.utils_sample import build_pose_candidates
 from utils.utils_seed import set_seed
-
-
-def compose_rot_grasp_to_palm(cfg: Dict) -> np.ndarray:
-    transform_cfg = cfg["hand"]["transform"]
-    base = np.asarray(transform_cfg["base_rot_grasp_to_palm"], dtype=float)
-    extra = transform_cfg["extra_euler"]
-    extra_rot = R.from_euler(extra["axis"], float(extra["degrees"]), degrees=True).as_matrix()
-    return (base @ extra_rot).T
 
 
 def sample_frames_from_points(cfg: Dict, pts: np.ndarray, norms: np.ndarray) -> np.ndarray:
@@ -52,15 +44,6 @@ def sample_frames_from_points(cfg: Dict, pts: np.ndarray, norms: np.ndarray) -> 
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
     return transforms_np
-
-
-def build_pose_candidates(cfg: Dict, transforms_np: np.ndarray) -> np.ndarray:
-    rot_grasp_to_palm = compose_rot_grasp_to_palm(cfg)
-    rotation_matrices = transforms_np[:, :3, :3] @ rot_grasp_to_palm
-    positions = transforms_np[:, :3, 3]
-    quaternions = R.from_matrix(rotation_matrices).as_quat()
-    quaternions = np.roll(quaternions, shift=1, axis=1)
-    return np.concatenate([positions, quaternions], axis=1).astype(np.float32)
 
 
 def make_qpos_triplets(cfg: Dict, pose: np.ndarray):

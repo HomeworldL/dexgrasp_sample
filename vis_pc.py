@@ -1,3 +1,9 @@
+"""Visualize saved global and partial point clouds for one object-scale.
+
+It loads Warp-rendered point clouds from the configured subdir, colors selected
+views, and can optionally display saved camera frames in world coordinates.
+"""
+
 import argparse
 from pathlib import Path
 from typing import Dict, List, Optional

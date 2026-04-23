@@ -1,3 +1,9 @@
+"""Compare all configured scales of one object in a single scene.
+
+This script gathers every object-scale entry for the target object, places
+meshes with non-overlapping offsets, and serves them in viser for inspection.
+"""
+
 import argparse
 from typing import Dict, List, Tuple
 

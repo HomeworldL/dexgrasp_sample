@@ -80,3 +80,26 @@ def test_robot_kinematics_mesh_extract():
     q = np.zeros(rk.model.nq, dtype=float)
     posed = rk.get_posed_meshes(q, kind="collision")
     assert posed is None or len(posed.vertices) >= 0
+
+
+def test_robot_kinematics_includes_primitive_collision_geom(tmp_path: Path):
+    xml_path = tmp_path / "primitive_collision.xml"
+    xml_path.write_text(
+        """
+<mujoco model="primitive_collision">
+  <worldbody>
+    <body name="base">
+      <geom type="box" size="0.01 0.02 0.03" contype="1" conaffinity="1"/>
+    </body>
+  </worldbody>
+</mujoco>
+""".strip(),
+        encoding="utf-8",
+    )
+
+    rk = RobotKinematics(str(xml_path))
+    q = np.zeros(rk.model.nq, dtype=float)
+    posed = rk.get_posed_meshes(q, kind="collision")
+    assert posed is not None
+    assert posed.vertices.shape[0] > 0
+    assert posed.faces.shape[0] > 0

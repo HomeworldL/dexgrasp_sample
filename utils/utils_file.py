@@ -257,15 +257,29 @@ def _validate_run_config(cfg: Dict, source_path: str) -> None:
         _require(cfg, f"sampling.{k}")
 
     transform_cfg = _require(cfg, "hand.transform")
-    if "base_rot_grasp_to_palm" not in transform_cfg:
-        raise KeyError("Missing required config field: hand.transform.base_rot_grasp_to_palm")
-    extra_euler = transform_cfg.get("extra_euler")
-    if not isinstance(extra_euler, dict):
-        raise KeyError("Missing required config field: hand.transform.extra_euler")
-    if "axis" not in extra_euler:
-        raise KeyError("Missing required config field: hand.transform.extra_euler.axis")
-    if "degrees" not in extra_euler:
-        raise KeyError("Missing required config field: hand.transform.extra_euler.degrees")
+    if "pos" not in transform_cfg:
+        raise KeyError("Missing required config field: hand.transform.pos")
+    if "quat_wxyz" not in transform_cfg:
+        raise KeyError("Missing required config field: hand.transform.quat_wxyz")
+    pos = transform_cfg["pos"]
+    quat_wxyz = transform_cfg["quat_wxyz"]
+    if not isinstance(pos, list) or len(pos) != 3:
+        raise ValueError("Config field hand.transform.pos must be a list with exactly 3 values.")
+    if not isinstance(quat_wxyz, list) or len(quat_wxyz) != 4:
+        raise ValueError("Config field hand.transform.quat_wxyz must be a list with exactly 4 values.")
+    for idx, value in enumerate(pos):
+        try:
+            float(value)
+        except Exception as exc:
+            raise ValueError(f"hand.transform.pos[{idx}] must be numeric.") from exc
+    for idx, value in enumerate(quat_wxyz):
+        try:
+            float(value)
+        except Exception as exc:
+            raise ValueError(f"hand.transform.quat_wxyz[{idx}] must be numeric.") from exc
+    quat_sq_norm = sum(float(v) * float(v) for v in quat_wxyz)
+    if quat_sq_norm <= 1e-24:
+        raise ValueError("Config field hand.transform.quat_wxyz must be non-zero.")
 
     xml_path = _require(cfg, "hand.xml_path")
     if not isinstance(xml_path, str) or not xml_path:

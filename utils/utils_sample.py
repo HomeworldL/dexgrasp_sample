@@ -134,12 +134,35 @@ def write_fail_npy_from_h5(h5_path: Path, npy_path: Path) -> None:
     np.save(npy_path, payload, allow_pickle=True)
 
 
-def compose_rot_grasp_to_palm(cfg: Dict) -> np.ndarray:
+def compose_palm_to_grasp(cfg: Dict) -> Tuple[np.ndarray, np.ndarray]:
+    """Return palm->grasp rigid transform from config as (rotation, translation).
+
+    Config `hand.transform` is defined as `T_palm_grasp`:
+    p_palm = R_palm_grasp @ p_grasp + t_palm_grasp.
+    """
     transform_cfg = cfg["hand"]["transform"]
-    base = np.asarray(transform_cfg["base_rot_grasp_to_palm"], dtype=float)
-    extra = transform_cfg["extra_euler"]
-    extra_rot = R.from_euler(extra["axis"], float(extra["degrees"]), degrees=True).as_matrix()
-    return (base @ extra_rot).T
+    pos = np.asarray(transform_cfg["pos"], dtype=np.float64)
+    quat_wxyz = np.asarray(transform_cfg["quat_wxyz"], dtype=np.float64)
+    if pos.shape != (3,):
+        raise ValueError(f"hand.transform.pos must have shape (3,), got {pos.shape}.")
+    if quat_wxyz.shape != (4,):
+        raise ValueError(
+            f"hand.transform.quat_wxyz must have shape (4,), got {quat_wxyz.shape}."
+        )
+    quat_norm = np.linalg.norm(quat_wxyz)
+    if not np.isfinite(quat_norm) or quat_norm <= 1e-12:
+        raise ValueError("hand.transform.quat_wxyz must be a finite non-zero quaternion.")
+    quat_xyzw = (quat_wxyz / quat_norm)[[1, 2, 3, 0]]
+    rot = R.from_quat(quat_xyzw).as_matrix().astype(ARRAY_DTYPE, copy=False)
+    return rot, pos.astype(ARRAY_DTYPE, copy=False)
+
+
+def compose_grasp_to_palm(cfg: Dict) -> Tuple[np.ndarray, np.ndarray]:
+    """Return grasp->palm rigid transform as (rotation, translation)."""
+    rot_palm_to_grasp, pos_palm_to_grasp = compose_palm_to_grasp(cfg)
+    rot_grasp_to_palm = rot_palm_to_grasp.T
+    pos_grasp_to_palm = -rot_grasp_to_palm @ pos_palm_to_grasp
+    return rot_grasp_to_palm, pos_grasp_to_palm.astype(ARRAY_DTYPE, copy=False)
 
 
 def sample_frames_from_points(cfg: Dict, pts: np.ndarray, norms: np.ndarray) -> np.ndarray:
@@ -162,9 +185,13 @@ def sample_frames_from_points(cfg: Dict, pts: np.ndarray, norms: np.ndarray) -> 
 
 
 def build_pose_candidates(cfg: Dict, transforms_np: np.ndarray) -> np.ndarray:
-    rot_grasp_to_palm = compose_rot_grasp_to_palm(cfg)
-    rotation_matrices = np.asarray(transforms_np[:, :3, :3], dtype=ARRAY_DTYPE) @ rot_grasp_to_palm
-    positions = np.asarray(transforms_np[:, :3, 3], dtype=ARRAY_DTYPE)
+    # sampled transforms are T_world_grasp; config provides T_palm_grasp.
+    # convert to T_world_palm = T_world_grasp @ inv(T_palm_grasp).
+    rot_grasp_to_palm, pos_grasp_to_palm = compose_grasp_to_palm(cfg)
+    rot_grasp = np.asarray(transforms_np[:, :3, :3], dtype=ARRAY_DTYPE)
+    t_grasp = np.asarray(transforms_np[:, :3, 3], dtype=ARRAY_DTYPE)
+    rotation_matrices = rot_grasp @ rot_grasp_to_palm
+    positions = t_grasp + np.einsum("nij,j->ni", rot_grasp, pos_grasp_to_palm)
     quaternions = R.from_matrix(rotation_matrices).as_quat()
     quaternions = np.roll(quaternions, shift=1, axis=1)
     return np.concatenate([positions, quaternions], axis=1).astype(ARRAY_DTYPE)

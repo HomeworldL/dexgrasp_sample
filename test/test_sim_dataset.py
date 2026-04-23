@@ -166,8 +166,8 @@ def test_simulate_dataset_manifest_counts_successes(tmp_path: Path, monkeypatch)
                     "anchor_params": {"finger": 1.0},
                     "profile": TEST_HAND_PROFILE,
                     "transform": {
-                        "base_rot_grasp_to_palm": [[1, 0, 0], [0, 1, 0], [0, 0, 1]],
-                        "extra_euler": {"axis": "x", "degrees": 0.0},
+                        "pos": [0.0, 0.0, 0.0],
+                        "quat_wxyz": [1.0, 0.0, 0.0, 0.0],
                     },
                 },
                 "sampling": {"n_points": 1, "downsample_for_sim": 1, "Nd": 1, "rot_n": 1, "d_min": 0.01, "d_max": 0.02, "pc_subdir": "pc_warp"},
@@ -267,8 +267,8 @@ def test_simulate_dataset_manifest_allows_explicit_float64_cast(tmp_path: Path, 
                     "anchor_params": {"finger": 1.0},
                     "profile": TEST_HAND_PROFILE,
                     "transform": {
-                        "base_rot_grasp_to_palm": [[1, 0, 0], [0, 1, 0], [0, 0, 1]],
-                        "extra_euler": {"axis": "x", "degrees": 0.0},
+                        "pos": [0.0, 0.0, 0.0],
+                        "quat_wxyz": [1.0, 0.0, 0.0, 0.0],
                     },
                 },
                 "sampling": {"n_points": 1, "downsample_for_sim": 1, "Nd": 1, "rot_n": 1, "d_min": 0.01, "d_max": 0.02, "pc_subdir": "pc_warp"},
@@ -359,8 +359,8 @@ def test_simulate_dataset_manifest_requires_qpos_squeeze(tmp_path: Path, monkeyp
                     "anchor_params": {"finger": 1.0},
                     "profile": TEST_HAND_PROFILE,
                     "transform": {
-                        "base_rot_grasp_to_palm": [[1, 0, 0], [0, 1, 0], [0, 0, 1]],
-                        "extra_euler": {"axis": "x", "degrees": 0.0},
+                        "pos": [0.0, 0.0, 0.0],
+                        "quat_wxyz": [1.0, 0.0, 0.0, 0.0],
                     },
                 },
                 "sampling": {

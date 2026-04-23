@@ -5,7 +5,7 @@
     "raw_dataset_root": "assets/objects/processed",
     "generated_dataset_root": "datasets",
     "objdata_tag": "objdata_YCB",
-    "graspdata_tag": "graspdata_YCB_liberhand2_right",
+    "graspdata_tag": "graspdata_YCB_liberhand_right",
     "scales": [
       0.08,
       0.1,
@@ -14,8 +14,8 @@
       0.16
     ],
     "verbose": false,
-    "max_cap": 100,
-    "max_time_sec": 180.0,
+    "max_cap": 30,
+    "max_time_sec": 120.0,
     "flush_every": 25,
     "h5_name": "grasp.h5",
     "npy_name": "grasp.npy",
@@ -25,7 +25,7 @@
     "min_valid_count": 5
   },
   "hand": {
-    "xml_path": "./assets/hands/liberhand2/liberhand2_right.xml",
+    "xml_path": "./assets/hands/liberhand/liberhand_right.xml",
     "root_stabilization": {
       "root_body_name": "hand_right_palm",
       "root_scale": 1000000.0
@@ -40,15 +40,15 @@
       0.4,
       0.4,
       0,
-      0.5,
-      0.4,
-      0.4,
+      0.3,
+      0.3,
+      0.3,
       0,
-      0.5,
-      0.4,
-      0.4,
-      1.5,
-      0.5,
+      0.3,
+      0.3,
+      0.3,
+      1.6,
+      0.0,
       0.3,
       0.3
     ],
@@ -69,7 +69,7 @@
       0.0,
       0.0,
       0.0,
-      1.5,
+      1.6,
       0.0,
       0.0,
       0.0
@@ -102,10 +102,8 @@
         6,
         8,
         9,
-        10,
         12,
         13,
-        14,
         16,
         17,
         18
@@ -153,7 +151,7 @@
     }
   },
   "sampling": {
-    "n_points": 4096,
+    "n_points": 2048,
     "downsample_for_sim": 512,
     "Nd": 1,
     "rot_n": 8,

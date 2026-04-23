@@ -75,52 +75,6 @@
       0.0,
       -0.02
     ],
-    "target_body_params": {
-      "hand_right_f13": [
-        0.5,
-        1.0
-      ],
-      "hand_right_f14_end": [
-        0.3,
-        0.2
-      ],
-      "hand_right_f23": [
-        0.5,
-        1.0
-      ],
-      "hand_right_f24_end": [
-        0.3,
-        0.2
-      ],
-      "hand_right_f33": [
-        0.5,
-        1.0
-      ],
-      "hand_right_f34_end": [
-        0.3,
-        0.2
-      ],
-      "hand_right_f43": [
-        0.5,
-        1.0
-      ],
-      "hand_right_f44_end": [
-        0.3,
-        0.2
-      ],
-      "hand_right_f53": [
-        0.5,
-        1.0
-      ],
-      "hand_right_f54_end": [
-        0.3,
-        0.2
-      ]
-    },
-    "friction_coef": [
-      0.3,
-      0.01
-    ],
     "transform": {
       "base_rot_grasp_to_palm": [
         [
@@ -143,6 +97,70 @@
         "axis": "y",
         "degrees": 45.0
       }
+    },
+    "profile": {
+      "ctrl_qpos_slices": [
+        [
+          7,
+          10
+        ],
+        [
+          11,
+          14
+        ],
+        [
+          15,
+          17
+        ],
+        [
+          19,
+          21
+        ],
+        [
+          23,
+          26
+        ]
+      ],
+      "side_swing_indices": [
+        0,
+        4,
+        8,
+        12,
+        16
+      ],
+      "thumb_relax_indices": [
+        17,
+        18,
+        19
+      ],
+      "thumb_relax_divisor": 1.2,
+      "friction_coef": [
+        0.3,
+        0.01
+      ],
+      "solimp": [
+        0.4,
+        0.99,
+        0.0001,
+        0.5,
+        2.0
+      ],
+      "solref": [
+        0.003,
+        1.0
+      ]
+    },
+    "anchor_params": {
+      "hand_right_f13": 0.5,
+      "hand_right_f14_end": 0.3,
+      "hand_right_f23": 0.5,
+      "hand_right_f24_end": 0.3,
+      "hand_right_f33": 0.5,
+      "hand_right_f34_end": 0.3,
+      "hand_right_f43": 0.5,
+      "hand_right_f44_end": 0.3,
+      "hand_right_f53": 0.5,
+      "hand_right_f54_end": 0.3
     }
   },
   "sampling": {
@@ -152,14 +170,16 @@
     "rot_n": 8,
     "d_min": 0.02,
     "d_max": 0.06,
-    "max_points": null
+    "max_points": null,
+    "pc_subdir": "pc_warp"
   },
   "sim_grasp": {
     "Mp": 20,
     "steps": 40,
     "speed_gain": 1.5,
     "max_tip_speed": 0.05,
-    "contact_min_count": 4
+    "contact_min_count": 4,
+    "target_point_method": 1
   },
   "extforce": {
     "duration": 0.5,
@@ -170,43 +190,21 @@
     "close_steps": 100,
     "check_steps": 50
   },
-  "warp_render": {
-    "gpu_lst": [
-      0
+  "profile_object": {
+    "friction_coef": [
+      0.3,
+      0.01
     ],
-    "thread_per_gpu": 1,
-    "output_subdir": "pc_warp",
-    "max_point_num": 4096,
-    "save_pc": true,
-    "save_rgb": false,
-    "save_depth": false,
-    "skip_existing": true,
-    "depth_max": 5.0,
-    "tile_width": 640,
-    "tile_height": 480,
-    "n_cols": 5,
-    "n_rows": 5,
-    "z_near": 0.1,
-    "z_far": 10.0,
-    "intrinsics": {
-      "preset": "kinect",
-      "fx": 608.6939697265625,
-      "fy": 608.6422119140625,
-      "cx": 320.0,
-      "cy": 240.0
-    },
-    "camera": {
-      "type": "spherical",
-      "radius": 0.6,
-      "pos_noise": 0.3,
-      "lookat": [
-        0.0,
-        0.0,
-        0.0
-      ],
-      "lookat_noise": 0.1,
-      "up": null,
-      "up_noise": 0.2
-    }
+    "solimp": [
+      0.4,
+      0.99,
+      0.0001,
+      0.5,
+      2.0
+    ],
+    "solref": [
+      0.003,
+      1.0
+    ]
   }
 }

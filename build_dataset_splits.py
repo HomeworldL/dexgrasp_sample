@@ -237,7 +237,7 @@ def main() -> None:
     write_split_jsons(
         entries=ds.get_entries(),
         dataset_dir=dataset_dir,
-        render_subdir=str(cfg.get("warp_render", {}).get("output_subdir", "pc_warp")),
+        render_subdir=str(cfg["sampling"]["pc_subdir"]),
         split_seed=int(cfg["seed"]),
         grasp_h5_name=str(cfg["data"]["h5_name"]),
         grasp_npy_name=str(cfg["data"]["npy_name"]),

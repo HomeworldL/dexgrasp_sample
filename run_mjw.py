@@ -12,7 +12,13 @@ from tqdm import tqdm
 
 from src.mjw_ho import MjWarpHO
 from src.sample import downsample_fps
-from utils.utils_file import DEFAULT_RUN_CONFIG_PATH, load_config
+from utils.utils_file import (
+    DEFAULT_RUN_CONFIG_PATH,
+    hand_profile_from_config,
+    load_config,
+    object_profile_from_config,
+    anchor_params_from_config,
+)
 from utils.utils_pointcloud import sample_surface_o3d
 from utils.utils_sample import (
     build_pose_candidates,
@@ -31,7 +37,9 @@ from utils.utils_seed import set_seed
 def build_valid_backend(
     obj_info: Dict,
     hand_xml_path: str,
-    target_body_params: Optional[Dict],
+    anchor_params: Optional[Dict],
+    hand_profile: Dict,
+    object_profile: Dict,
     device: str,
     nworld: int,
     nconmax: int,
@@ -44,7 +52,9 @@ def build_valid_backend(
     backend = MjWarpHO(
         obj_info=obj_info,
         hand_xml_path=hand_xml_path,
-        target_body_params=target_body_params,
+        anchor_params=anchor_params,
+        hand_profile=hand_profile,
+        object_profile=object_profile,
         object_fixed=False,
         nworld=int(nworld),
         device=str(device),
@@ -68,7 +78,9 @@ def shrink_tail_pool(
     world_angle_delta: np.ndarray,
     obj_info: Dict,
     hand_xml_path: str,
-    target_body_params: Optional[Dict],
+    anchor_params: Optional[Dict],
+    hand_profile: Dict,
+    object_profile: Dict,
     device: str,
     nconmax: int,
     naconmax: int,
@@ -81,7 +93,9 @@ def shrink_tail_pool(
     next_backend = build_valid_backend(
         obj_info=obj_info,
         hand_xml_path=hand_xml_path,
-        target_body_params=target_body_params,
+        anchor_params=anchor_params,
+        hand_profile=hand_profile,
+        object_profile=object_profile,
         device=device,
         nworld=new_pool_size,
         nconmax=nconmax,
@@ -136,7 +150,9 @@ def run_sampling(
     object_name, parsed_scale = parse_object_scale_key(object_scale_key)
     scale = parsed_scale
     obj_info = {"name": object_name, "xml_abs": object_mjcf_path}
-    target_body_params = cfg["hand"].get("target_body_params")
+    anchor_params = anchor_params_from_config(cfg)
+    hand_profile = hand_profile_from_config(cfg)
+    object_profile = object_profile_from_config(cfg)
 
     sampling_cfg = cfg["sampling"]
     pts_for_sim, norms_for_sim, _ = downsample_fps(
@@ -176,13 +192,16 @@ def run_sampling(
     extforce_cfg = dict(cfg.get("extforce", {}))
     sim_grasp_cfg.pop("visualize", None)
     sim_grasp_cfg.pop("contact_min_count", None)
+    sim_grasp_cfg.pop("target_point_method", None)
     extforce_cfg.pop("visualize", None)
 
     ts_backend = time.perf_counter()
     mjw_grasp = MjWarpHO(
         obj_info=obj_info,
         hand_xml_path=hand_xml_path,
-        target_body_params=target_body_params,
+        anchor_params=anchor_params,
+        hand_profile=hand_profile,
+        object_profile=object_profile,
         object_fixed=True,
         nworld=batch_size,
         device=str(device),
@@ -325,7 +344,9 @@ def run_sampling(
             mjw_valid = build_valid_backend(
                 obj_info=obj_info,
                 hand_xml_path=hand_xml_path,
-                target_body_params=target_body_params,
+                anchor_params=anchor_params,
+                hand_profile=hand_profile,
+                object_profile=object_profile,
                 device=str(device),
                 nworld=batch_size,
                 nconmax=int(nconmax),
@@ -337,7 +358,7 @@ def run_sampling(
             )
             backend_init_time += time.perf_counter() - ts_backend
 
-            side_swing = set(mjw_valid.hand_profile.get("side_swing_indices", [0, 4, 8, 12, 16]))
+            side_swing = set(mjw_valid.hand_profile["side_swing_indices"])
             grip_delta = float(extforce_cfg["grip_delta"])
             grip_qpos_all = qpos_grasp_contact_ok.copy()
             for idx in range(7, mjw_valid.nq_hand):
@@ -445,7 +466,9 @@ def run_sampling(
                         world_angle_delta=world_angle_delta,
                         obj_info=obj_info,
                         hand_xml_path=hand_xml_path,
-                        target_body_params=target_body_params,
+                        anchor_params=anchor_params,
+                        hand_profile=hand_profile,
+                        object_profile=object_profile,
                         device=device,
                         nconmax=nconmax,
                         naconmax=naconmax,
@@ -612,7 +635,7 @@ def main() -> None:
 
     h5_name = str(cfg["data"]["h5_name"])
     npy_name = str(cfg["data"]["npy_name"])
-    render_subdir = str(cfg["warp_render"]["output_subdir"])
+    render_subdir = str(cfg["sampling"]["pc_subdir"])
     has_grasp_outputs = grasp_outputs_exist(args.output_dir, h5_name=h5_name, npy_name=npy_name)
     has_global_pc = global_pc_exists(args.output_dir, render_subdir)
     if (not args.force) and has_grasp_outputs and has_global_pc:

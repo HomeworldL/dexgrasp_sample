@@ -8,7 +8,13 @@ import h5py
 import numpy as np
 
 from src.mj_ho import MjHO
-from utils.utils_file import DEFAULT_RUN_CONFIG_PATH, load_config
+from utils.utils_file import (
+    DEFAULT_RUN_CONFIG_PATH,
+    hand_profile_from_config,
+    load_config,
+    object_profile_from_config,
+    anchor_params_from_config,
+)
 from utils.utils_seed import set_seed
 
 
@@ -93,8 +99,9 @@ def visualize_extforce_grasps(
     mjho_valid = MjHO(
         {"name": object_name, "xml_abs": str(object_mjcf_path)},
         cfg["hand"]["xml_path"],
-        target_body_params=cfg["hand"]["target_body_params"],
-        friction_coef=cfg["hand"]["friction_coef"],
+        anchor_params=anchor_params_from_config(cfg),
+        hand_profile=hand_profile_from_config(cfg),
+        object_profile=object_profile_from_config(cfg),
         object_fixed=False,
         visualize=True,
     )

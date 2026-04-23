@@ -15,6 +15,21 @@ from src.sample import *
 
 torch.random.manual_seed(0)
 
+LIBERHAND_PROFILE = {
+    "ctrl_qpos_slices": [(7, 10), (11, 14), (15, 17), (19, 21), (23, 26)],
+    "friction_coef": [0.3, 0.01],
+    "solimp": [0.4, 0.99, 0.0001, 0.5, 2.0],
+    "solref": [0.003, 1.0],
+    "side_swing_indices": [0, 4, 8, 12, 16],
+    "thumb_relax_indices": [17, 18, 19],
+    "thumb_relax_divisor": 1.2,
+}
+OBJECT_PROFILE = {
+    "friction_coef": [0.3, 0.01],
+    "solimp": [0.4, 0.99, 0.0001, 0.5, 2.0],
+    "solref": [0.003, 1.0],
+}
+
 if __name__ == "__main__":
     ds = DatasetObjects("assets/ycb_datasets")
 
@@ -67,12 +82,18 @@ if __name__ == "__main__":
     xml_path = os.path.join(
         os.path.dirname(__file__), "./assets/hands/liberhand/liberhand_right.xml"
     )
-    target_body_params = {}
+    anchor_params = {}
     for finger in range(1, 6):
         for digit, value in [("3", (0.5, 1.0)), ("4_end", (0.3, 0.2))]:
             key = f"hand_right_f{finger}{digit}"
-            target_body_params[key] = value
-    mjho = MjHO(obj_info, xml_path, target_body_params=target_body_params)
+            anchor_params[key] = value[0]
+    mjho = MjHO(
+        obj_info,
+        xml_path,
+        anchor_params=anchor_params,
+        hand_profile=LIBERHAND_PROFILE,
+        object_profile=OBJECT_PROFILE,
+    )
 
     pcs_for_sim, norms_for_sim, sel_idx = downsample_fps(
         pcs_sample_poisson, norms_sample_poisson, 1024, seed=0
@@ -173,7 +194,12 @@ if __name__ == "__main__":
     grasp_stats_valid_list = []
 
     mjho_valid = MjHO(
-        obj_info, xml_path, target_body_params=target_body_params, object_fixed=False
+        obj_info,
+        xml_path,
+        anchor_params=anchor_params,
+        hand_profile=LIBERHAND_PROFILE,
+        object_profile=OBJECT_PROFILE,
+        object_fixed=False,
     )
     # mjho_valid.open_viewer()
     for i in tqdm(range(len(qpos_grasp_list)), desc="validation"):

@@ -60,7 +60,7 @@ def main() -> None:
         "--pc-subdir",
         type=str,
         default=None,
-        help="Override pointcloud subdir; default from config warp_render.output_subdir.",
+        help="Override pointcloud subdir; default from config sampling.pc_subdir.",
     )
     parser.add_argument(
         "--view-ids",
@@ -105,7 +105,7 @@ def main() -> None:
     else:
         raise ValueError("vis_pc requires either --obj-id or --obj-key.")
 
-    subdir = args.pc_subdir or cfg.get("warp_render", {}).get("output_subdir", "pc_warp")
+    subdir = args.pc_subdir or cfg["sampling"]["pc_subdir"]
     pc_dir = Path(info["asset_dir_abs"]).resolve() / subdir
     if not pc_dir.exists():
         raise FileNotFoundError(f"Pointcloud directory not found: {pc_dir}")

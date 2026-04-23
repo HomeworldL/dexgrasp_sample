@@ -1,5 +1,6 @@
 import json
 import os
+from copy import deepcopy
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -90,6 +91,37 @@ def run_scales_from_config(cfg: Dict) -> List[float]:
     return parsed
 
 
+def hand_profile_from_config(cfg: Dict) -> Dict:
+    profile = _require(cfg, "hand.profile")
+    if not isinstance(profile, dict) or not profile:
+        raise ValueError("Config field hand.profile must be a non-empty object.")
+    return deepcopy(profile)
+
+
+def object_profile_from_config(cfg: Dict) -> Dict:
+    profile = _require(cfg, "profile_object")
+    if not isinstance(profile, dict) or not profile:
+        raise ValueError("Config field profile_object must be a non-empty object.")
+    return deepcopy(profile)
+
+
+def anchor_params_from_config(cfg: Dict) -> Dict[str, float]:
+    params = _require(cfg, "hand.anchor_params")
+    if not isinstance(params, dict) or not params:
+        raise ValueError("Config field hand.anchor_params must be a non-empty object.")
+    normalized: Dict[str, float] = {}
+    for body_name, value in params.items():
+        if not isinstance(body_name, str) or not body_name.strip():
+            raise ValueError("Each key in hand.anchor_params must be a non-empty body name string.")
+        try:
+            normalized[body_name] = float(value)
+        except Exception as exc:
+            raise ValueError(
+                f"hand.anchor_params['{body_name}'] must be numeric."
+            ) from exc
+    return deepcopy(normalized)
+
+
 def ensure_dir_for_file(filepath: str):
     d = os.path.dirname(os.path.abspath(filepath))
     if d and not os.path.exists(d):
@@ -128,24 +160,68 @@ def _require(cfg: Dict, path: str):
     return cur
 
 
-def _validate_target_body_params(cfg: Dict) -> None:
-    tbp = _require(cfg, "hand.target_body_params")
-    if not isinstance(tbp, dict) or not tbp:
-        raise ValueError("Config field hand.target_body_params must be a non-empty object.")
-    for body_name, weights in tbp.items():
-        if not isinstance(body_name, str) or not body_name:
-            raise ValueError("Each key in hand.target_body_params must be a non-empty body name string.")
-        if not isinstance(weights, (list, tuple)) or len(weights) != 2:
-            raise ValueError(
-                f"hand.target_body_params['{body_name}'] must be [contact_weight, distance_weight]."
-            )
+def _validate_anchor_params(cfg: Dict) -> None:
+    _ = anchor_params_from_config(cfg)
+
+
+def _validate_contact_profile(profile: Dict, path: str, require_control: bool) -> None:
+    if not isinstance(profile, dict) or not profile:
+        raise ValueError(f"Config field {path} must be a non-empty object.")
+
+    if require_control:
+        ctrl_qpos_slices = profile.get("ctrl_qpos_slices")
+        if not isinstance(ctrl_qpos_slices, list) or not ctrl_qpos_slices:
+            raise ValueError(f"{path}.ctrl_qpos_slices must be a non-empty list.")
+        for idx, item in enumerate(ctrl_qpos_slices):
+            if not isinstance(item, (list, tuple)) or len(item) != 2:
+                raise ValueError(f"{path}.ctrl_qpos_slices[{idx}] must be [start, end].")
+            start = int(item[0])
+            end = int(item[1])
+            if start < 0 or end <= start:
+                raise ValueError(
+                    f"{path}.ctrl_qpos_slices[{idx}] must satisfy 0 <= start < end."
+                )
+
+        for field in ["side_swing_indices", "thumb_relax_indices"]:
+            values = profile.get(field)
+            if not isinstance(values, list):
+                raise ValueError(f"{path}.{field} must be a list.")
+            for idx, value in enumerate(values):
+                try:
+                    int(value)
+                except Exception as exc:
+                    raise ValueError(f"{path}.{field}[{idx}] must be an integer.") from exc
+
+        thumb_relax_divisor = float(profile.get("thumb_relax_divisor"))
+        if thumb_relax_divisor <= 0.0:
+            raise ValueError(f"{path}.thumb_relax_divisor must be > 0.")
+
+    friction_coef = profile.get("friction_coef")
+    if not isinstance(friction_coef, list) or len(friction_coef) not in {1, 2, 3}:
+        raise ValueError(f"{path}.friction_coef must be a list with length 1, 2, or 3.")
+    for idx, value in enumerate(friction_coef):
         try:
-            float(weights[0])
-            float(weights[1])
+            float(value)
         except Exception as exc:
-            raise ValueError(
-                f"hand.target_body_params['{body_name}'] values must be numeric."
-            ) from exc
+            raise ValueError(f"{path}.friction_coef[{idx}] must be numeric.") from exc
+
+    for field, expected_len in [("solimp", 5), ("solref", 2)]:
+        values = profile.get(field)
+        if not isinstance(values, list) or len(values) != expected_len:
+            raise ValueError(f"{path}.{field} must be a list with exactly {expected_len} values.")
+        for idx, value in enumerate(values):
+            try:
+                float(value)
+            except Exception as exc:
+                raise ValueError(f"{path}.{field}[{idx}] must be numeric.") from exc
+
+
+def _validate_hand_profile(cfg: Dict) -> None:
+    _validate_contact_profile(_require(cfg, "hand.profile"), "hand.profile", require_control=True)
+
+
+def _validate_object_profile(cfg: Dict) -> None:
+    _validate_contact_profile(_require(cfg, "profile_object"), "profile_object", require_control=False)
 
 
 def _validate_common_config(cfg: Dict, source_path: str) -> None:
@@ -175,7 +251,7 @@ def _validate_run_config(cfg: Dict, source_path: str) -> None:
         if not isinstance(tag, str) or not tag.strip():
             raise ValueError(f"Config field data.{tag_field} must be a non-empty string.")
     run_scales_from_config(cfg)
-    for k in ["n_points", "downsample_for_sim", "Nd", "rot_n", "d_min", "d_max"]:
+    for k in ["n_points", "downsample_for_sim", "Nd", "rot_n", "d_min", "d_max", "pc_subdir"]:
         _require(cfg, f"sampling.{k}")
 
     transform_cfg = _require(cfg, "hand.transform")
@@ -199,11 +275,16 @@ def _validate_run_config(cfg: Dict, source_path: str) -> None:
     _require(cfg, "hand.prepared_joints")
     _require(cfg, "hand.approach_joints")
     _require(cfg, "hand.shift_local")
-    _validate_target_body_params(cfg)
+    _validate_hand_profile(cfg)
+    _validate_object_profile(cfg)
+    _validate_anchor_params(cfg)
 
     contact_min_count = int(_require(cfg, "sim_grasp.contact_min_count"))
     if contact_min_count <= 0:
         raise ValueError("sim_grasp.contact_min_count must be > 0.")
+    target_point_method = int(_require(cfg, "sim_grasp.target_point_method"))
+    if target_point_method not in {1, 2, 3}:
+        raise ValueError("sim_grasp.target_point_method must be one of [1, 2, 3].")
 
     for k in [
         "max_cap",

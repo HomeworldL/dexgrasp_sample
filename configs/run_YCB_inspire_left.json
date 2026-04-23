@@ -59,52 +59,6 @@
       0.0,
       -0.02
     ],
-    "target_body_params": {
-      "thumb_distal": [
-        0.5,
-        1.0
-      ],
-      "thumb_tip": [
-        0.3,
-        0.2
-      ],
-      "index_intermediate": [
-        0.5,
-        1.0
-      ],
-      "index_tip": [
-        0.3,
-        0.2
-      ],
-      "middle_intermediate": [
-        0.5,
-        1.0
-      ],
-      "middle_tip": [
-        0.3,
-        0.2
-      ],
-      "ring_intermediate": [
-        0.5,
-        1.0
-      ],
-      "ring_tip": [
-        0.3,
-        0.2
-      ],
-      "pinky_intermediate": [
-        0.5,
-        1.0
-      ],
-      "pinky_tip": [
-        0.3,
-        0.2
-      ]
-    },
-    "friction_coef": [
-      0.3,
-      0.01
-    ],
     "transform": {
       "base_rot_grasp_to_palm": [
         [
@@ -127,6 +81,67 @@
         "axis": "y",
         "degrees": 45.0
       }
+    },
+    "profile": {
+      "ctrl_qpos_slices": [
+        [
+          7,
+          9
+        ],
+        [
+          11,
+          12
+        ],
+        [
+          13,
+          14
+        ],
+        [
+          15,
+          16
+        ],
+        [
+          17,
+          18
+        ]
+      ],
+      "side_swing_indices": [
+        0
+      ],
+      "thumb_relax_indices": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "thumb_relax_divisor": 1.0,
+      "friction_coef": [
+        0.3,
+        0.01
+      ],
+      "solimp": [
+        0.4,
+        0.99,
+        0.0001,
+        0.5,
+        2.0
+      ],
+      "solref": [
+        0.003,
+        1.0
+      ]
+    },
+    "anchor_params": {
+      "thumb_distal": 0.5,
+      "thumb_tip": 0.3,
+      "index_intermediate": 0.5,
+      "index_tip": 0.3,
+      "middle_intermediate": 0.5,
+      "middle_tip": 0.3,
+      "ring_intermediate": 0.5,
+      "ring_tip": 0.3,
+      "pinky_intermediate": 0.5,
+      "pinky_tip": 0.3
     }
   },
   "sampling": {
@@ -136,14 +151,16 @@
     "rot_n": 8,
     "d_min": 0.02,
     "d_max": 0.06,
-    "max_points": null
+    "max_points": null,
+    "pc_subdir": "pc_warp"
   },
   "sim_grasp": {
     "Mp": 20,
     "steps": 40,
     "speed_gain": 1.5,
     "max_tip_speed": 0.05,
-    "contact_min_count": 4
+    "contact_min_count": 4,
+    "target_point_method": 2
   },
   "extforce": {
     "duration": 0.5,
@@ -153,5 +170,22 @@
     "force_mag": 1.0,
     "close_steps": 100,
     "check_steps": 50
+  },
+  "profile_object": {
+    "friction_coef": [
+      0.3,
+      0.01
+    ],
+    "solimp": [
+      0.4,
+      0.99,
+      0.0001,
+      0.5,
+      2.0
+    ],
+    "solref": [
+      0.003,
+      1.0
+    ]
   }
 }

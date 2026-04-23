@@ -24,69 +24,6 @@ except Exception:
     mj_viewer = None
 
 
-def _default_hand_profiles() -> Dict[str, Dict]:
-    # qpos slices are indexed on hand qpos (including the 7D root pose).
-    # ctrl is formed by concatenating these slices in order.
-    return {
-        "liberhand_right": {
-            "ctrl_qpos_slices": [
-                (7, 10),
-                (11, 14),
-                (15, 17),
-                (19, 21),
-                (23, 26),
-            ],
-            "solimp": [0.4, 0.99, 0.0001],
-            "solref": [0.003, 1.0],
-            "side_swing_indices": [0, 4, 8, 12, 16],
-            "thumb_relax_indices": [17, 18, 19],
-            "thumb_relax_divisor": 1.2,
-        },
-        "liberhand2_right": {
-            "ctrl_qpos_slices": [
-                (7, 10),
-                (11, 14),
-                (15, 18),
-                (19, 22),
-                (23, 26),
-            ],
-            "solimp": [0.4, 0.99, 0.0001],
-            "solref": [0.003, 1.0],
-            "side_swing_indices": [0, 4, 8, 12, 16],
-            "thumb_relax_indices": [17, 18, 19],
-            "thumb_relax_divisor": 1.2,
-        },
-        "inspire_hand_right": {
-            "ctrl_qpos_slices": [
-                (7, 9),
-                (11, 12),
-                (13, 14),
-                (15, 16),
-                (17, 18),
-            ],
-            "solimp": [0.4, 0.99, 0.0001],
-            "solref": [0.003, 1.0],
-            "side_swing_indices": [0],
-            "thumb_relax_indices": [0, 1, 2, 3],
-            "thumb_relax_divisor": 1.0,
-        },
-        "inspire_hand_left": {
-            "ctrl_qpos_slices": [
-                (7, 9),
-                (11, 12),
-                (13, 14),
-                (15, 16),
-                (17, 18),
-            ],
-            "solimp": [0.4, 0.99, 0.0001],
-            "solref": [0.003, 1.0],
-            "side_swing_indices": [0],
-            "thumb_relax_indices": [0, 1, 2, 3],
-            "thumb_relax_divisor": 1.0,
-        },
-    }
-
-
 def _normalize_friction_coef(
     friction_coef: float | Sequence[float],
 ) -> Tuple[np.ndarray, int]:
@@ -113,9 +50,9 @@ class MjHO:
         self,
         obj_info: Dict,
         hand_xml_path: str,
-        target_body_params: Optional[Dict] = None,
+        anchor_params: Optional[Dict] = None,
         hand_profile: Optional[Dict] = None,
-        friction_coef: Sequence[float] = (0.3, 0.01),
+        object_profile: Optional[Dict] = None,
         object_fixed: bool = True,
         visualize: bool = False,
     ):
@@ -123,16 +60,19 @@ class MjHO:
         Args:
             obj_info: dict returned by DatasetObjects entry query methods
             hand_xml_path: path to hand MJCF (used as base)
-            friction_coef: scalar or sequence (len 1, 2 or 3) for friction
             object_fixed: if True, weld object to world (no DOFs)
         """
         self.obj_info = obj_info
         self.hand_xml_path = os.path.abspath(hand_xml_path)
         self.hand_name = os.path.basename(self.hand_xml_path).split(".")[0]
-        profiles = _default_hand_profiles()
-        self.hand_profile = dict(profiles.get(self.hand_name, {}))
-        if hand_profile:
-            self.hand_profile.update(hand_profile)
+        if not hand_profile:
+            raise ValueError(
+                f"hand_profile must be provided explicitly for hand '{self.hand_name}'."
+            )
+        if not object_profile:
+            raise ValueError("object_profile must be provided explicitly.")
+        self.hand_profile = dict(hand_profile)
+        self.object_profile = dict(object_profile)
         self.object_fixed = object_fixed
 
         # load hand spec as base
@@ -140,12 +80,6 @@ class MjHO:
 
         # add object assets/geoms
         self._add_object(self.obj_info, fixed=self.object_fixed)
-
-        # apply contact friction settings to geoms
-        self._set_friction(friction_coef)
-
-        # set solimp and solref
-        self._set_sol()
 
         # compile into model/data
         self.model = self.spec.compile()
@@ -162,17 +96,15 @@ class MjHO:
         # hand qpos length = total nq minus 7 if object exists
         self.nq_hand = self.nq - 7 if not self.object_fixed else self.nq
         self.side_swing_indices = np.asarray(
-            self.hand_profile.get("side_swing_indices", [0, 4, 8, 12, 16]),
+            self.hand_profile["side_swing_indices"],
             dtype=int,
         )
         self.side_swing_index_set = set(self.side_swing_indices.tolist())
         self.thumb_relax_indices = np.asarray(
-            self.hand_profile.get("thumb_relax_indices", [17, 18, 19]),
+            self.hand_profile["thumb_relax_indices"],
             dtype=int,
         )
-        self.thumb_relax_divisor = float(
-            self.hand_profile.get("thumb_relax_divisor", 1.2)
-        )
+        self.thumb_relax_divisor = float(self.hand_profile["thumb_relax_divisor"])
         self.object_body_id = int(self.model.nbody - 1)
         self.hand_body_upper_id = int(self.model.nbody - 2)
         self.world_body_id = 0
@@ -181,11 +113,7 @@ class MjHO:
             for gi in range(self.model.ngeom)
             if f"{self.obj_name}_collision" in self.model.geom(gi).name
         ]
-        ctrl_slices = self.hand_profile.get("ctrl_qpos_slices")
-        if not ctrl_slices:
-            raise NotImplementedError(
-                f"No hand_profile ctrl mapping for hand '{self.hand_name}'."
-            )
+        ctrl_slices = self.hand_profile["ctrl_qpos_slices"]
         ctrl_qpos_indices: List[int] = []
         for q0, q1 in ctrl_slices:
             ctrl_qpos_indices.extend(range(int(q0), int(q1)))
@@ -196,36 +124,29 @@ class MjHO:
                 f"for hand '{self.hand_name}'."
             )
 
-        # build mapping: fingertip body names -> body ids
+        # build mapping: body names -> body ids
         self.body_name_to_id = {}
         for bi in range(self.model.nbody):
             bname = self.model.body(bi).name
             if bname is not None:
                 self.body_name_to_id[str(bname)] = bi
 
-        self.target_bodies = None
-        self.target_body_weights = None
-        if target_body_params is not None:
-
-            self.fingertip_bodies = list(target_body_params.keys())
-            self.target_body_weights = np.array(list(target_body_params.values()))[:, 0]
-            self.target_body_dis_weights = np.array(list(target_body_params.values()))[
-                :, 1
-            ]
-            self.tip_body_ids = []
-            for bname in self.fingertip_bodies:
+        self.anchor_body_names: Optional[List[str]] = None
+        self.anchor_body_ids: List[int] = []
+        self.anchor_weights = np.zeros((0,), dtype=float)
+        self.n_anchors = 0
+        if anchor_params is not None:
+            self.anchor_body_names = list(anchor_params.keys())
+            self.anchor_weights = np.asarray(
+                [float(value) for value in anchor_params.values()],
+                dtype=float,
+            )
+            for bname in self.anchor_body_names:
                 if bname not in self.body_name_to_id:
                     raise ValueError(f"Body name '{bname}' not found in model bodies")
-                self.tip_body_ids.append(self.body_name_to_id[bname])
-            self.n_tips = len(self.tip_body_ids)
+                self.anchor_body_ids.append(self.body_name_to_id[bname])
+            self.n_anchors = len(self.anchor_body_ids)
 
-            # print(f"fingertip_bodies: {self.fingertip_bodies}")
-            # print(f"target_body_weights: {self.target_body_weights}")
-            # print(f"target_body_dis_weights: {self.target_body_dis_weights}")
-            # print(f"tip_body_ids: {self.tip_body_ids}")
-            # print(f"n_tips: {self.n_tips}")
-        # exit()
-        # reset to sensible default
         self.reset()
 
         self.viewer = None
@@ -235,26 +156,29 @@ class MjHO:
     # -----------------------
     # spec construction
     # -----------------------
+    def _apply_geom_profile(self, geom, profile: Dict) -> None:
+        """Apply config-defined contact parameters to one geom."""
+        friction, condim = _normalize_friction_coef(profile["friction_coef"])
+        geom.friction[: friction.shape[0]] = friction
+        geom.condim = condim
+        geom.solimp[:5] = np.asarray(profile["solimp"], dtype=float)
+        geom.solref[:2] = np.asarray(profile["solref"], dtype=float)
+
     def _add_hand(self, hand_xml_path: str) -> mujoco.MjSpec:
-        """Load hand MJCF and return its MjSpec to be used as base spec."""
+        """Load hand MJCF and apply the hand contact profile."""
         hand_spec = mujoco.MjSpec.from_file(hand_xml_path)
         # adjust meshdir so relative mesh paths resolve relative to hand xml
         hand_spec.meshdir = os.path.dirname(hand_xml_path)
-
-        # for g in hand_spec.geoms:
-        #     # This solimp and solref comes from the Shadow Hand xml
-        #     # They can generate larger force with smaller penetration
-        #     # The body will be more "rigid" and less "soft"
-        #     # g.solimp[:3] = [0.5, 0.99, 0.0001]
-        #     # g.solref[:2] = [0.005, 1]
-        #     g.solimp[:3] = [0.4, 0.99, 0.0001]
-        #     g.solref[:2] = [0.003, 1]
-
+        hand_spec.option.cone = mujoco.mjtCone.mjCONE_ELLIPTIC
+        hand_spec.option.noslip_iterations = 2
+        hand_spec.option.impratio = 10
+        for geom in hand_spec.geoms:
+            self._apply_geom_profile(geom, self.hand_profile)
         return hand_spec
 
     def _add_object(self, obj_info: Dict, fixed: bool = True):
         """
-        Minimal: merge object's MjSpec assets (meshes) and worldbody into self.spec.
+        Merge object MJCF assets/worldbody and apply the object contact profile.
 
         - obj_info['xml_abs'] should point to the object's pre-scaled MJCF/XML.
         - Only mesh assets and worldbody are merged (no texture/material copying).
@@ -291,6 +215,9 @@ class MjHO:
                     texture_file = os.path.abspath(texture_file)
                 text.file = texture_file
 
+        for geom in obj_spec.geoms:
+            self._apply_geom_profile(geom, self.object_profile)
+
         attach_frame = self.spec.worldbody.add_frame()
         self.spec.attach(obj_spec, frame=attach_frame, prefix="")
 
@@ -305,16 +232,6 @@ class MjHO:
                     self.spec.delete(j)
                     break
 
-    def _set_friction(self, friction_coef):
-        self.spec.option.cone = mujoco.mjtCone.mjCONE_ELLIPTIC
-        self.spec.option.noslip_iterations = 2
-        self.spec.option.impratio = 10
-        friction, condim = _normalize_friction_coef(friction_coef)
-        for g in self.spec.geoms:
-            g.friction[: friction.shape[0]] = friction
-            g.condim = condim
-        return
-
     def _set_margin(self, obj_margin):
         for i in range(self.model.ngeom):
             if f"{self.obj_name}_collision" in self.model.geom(i).name:
@@ -324,13 +241,6 @@ class MjHO:
         for i in range(self.model.ngeom):
             if f"{self.obj_name}_collision" in self.model.geom(i).name:
                 self.model.geom_gap[i] = obj_gap
-
-    def _set_sol(self):
-        solimp = self.hand_profile.get("solimp", [0.4, 0.99, 0.0001])
-        solref = self.hand_profile.get("solref", [0.003, 1.0])
-        for g in self.spec.geoms:
-            g.solimp[:3] = solimp[:3]
-            g.solref[:2] = solref[:2]
 
     def _set_obj_pts_norms(self, obj_pts, obj_norms):
         obj_pts = np.asarray(obj_pts, dtype=float)
@@ -534,16 +444,23 @@ class MjHO:
         steps: int = 40,
         speed_gain: float = 1.5,
         max_tip_speed: float = 0.05,
+        target_point_method: int = 2,
         visualize: bool = False,
         record_history: bool = False,
     ):
         # --- sanity checks ---
-        if self.fingertip_bodies is None:
-            raise ValueError("fingertip_bodies must be specified in constructor")
+        if self.anchor_body_names is None:
+            raise ValueError("hand.anchor_params must be specified in constructor")
+        method_id = int(target_point_method)
+        if method_id not in {1, 2, 3}:
+            raise ValueError(
+                f"sim_grasp.target_point_method must be one of [1, 2, 3], got {target_point_method}."
+            )
 
         history = (
             {
                 "qpos": [],
+                "anchor_positions": [],
                 "tip_positions": [],
                 "pts_top_Mp": [],
                 "pts_target": [],
@@ -557,119 +474,91 @@ class MjHO:
             # read current qpos and tip positions (no modification)
             hand_qpos = self.get_hand_qpos(copy=True)
 
-            tip_positions = np.vstack(
-                [np.array(self.data.xpos[bid]).copy() for bid in self.tip_body_ids]
-            )  # (n_tips,3)
+            anchor_positions = np.vstack(
+                [np.array(self.data.xpos[bid]).copy() for bid in self.anchor_body_ids]
+            )  # (n_anchors,3)
 
             # containers for flattening per step
-            all_top_Mp_pts = []  # will collect shape (n_tips*Mp,3)
-            step_targets = []  # (n_tips,3)
+            all_top_Mp_pts = []  # will collect shape (n_anchors*Mp,3)
+            step_targets = []  # (n_anchors,3)
 
-            # per-target-body loop
-            for ti, bid in enumerate(self.tip_body_ids):
-                tip_pos = tip_positions[ti]
-
-                # method 1
-                # Mp = 1
-                # d_near, idx_near = self.obj_tree.query(tip_pos, k=Mp)
-                # idx_near = np.asarray(idx_near, dtype=int)
-                # d_near = np.asarray(d_near, dtype=float)
-                # pts_top_Mp = self.obj_pts[idx_near].copy()  # (Mp,3)
-                # pts_target = np.mean(pts_top_Mp, axis=0)
-
-                # method 2
-                # get body z-axis in world frame
+            # per-anchor-body loop
+            for ti, bid in enumerate(self.anchor_body_ids):
+                anchor_pos = anchor_positions[ti]
                 xmat = np.array(self.data.xmat[bid]).reshape(3, 3)
                 z_body = xmat[:, 2].copy()
-                z_norm = np.linalg.norm(z_body) + 1e-12
-                z_body = z_body / z_norm  # unit vector
+                z_body = z_body / (np.linalg.norm(z_body) + 1e-12)
 
-                # compute vector from plane reference point (body_pos) to all object points
-                r_all = self.obj_pts - tip_pos[None, :]  # (N,3)
-
-                # signed distance to plane = r_all · y_body
-                signed = r_all.dot(z_body)  # (N,)
-                abs_signed = np.abs(signed)  # (N,)
-
-                # pick Mp points with smallest absolute signed distance (closest to plane)
-                if Mp == 1:
-                    top_idx_by_plane = np.array([int(np.argmin(abs_signed))])
+                if method_id == 1:
+                    _, idx_near = self.obj_tree.query(anchor_pos, k=Mp)
+                    idx_near = np.atleast_1d(np.asarray(idx_near, dtype=int))
+                    pts_top_Mp = self.obj_pts[idx_near].reshape(-1, 3).copy()
+                    pts_target = np.mean(pts_top_Mp, axis=0)
+                elif method_id == 2:
+                    # Original plane-first target selection: choose object points nearest to
+                    # the anchor body's local z-plane, then pick the Euclidean-nearest one.
+                    r_all = self.obj_pts - anchor_pos[None, :]
+                    abs_signed = np.abs(r_all.dot(z_body))
+                    if Mp == 1:
+                        top_idx_by_plane = np.array([int(np.argmin(abs_signed))])
+                    else:
+                        top_idx_by_plane = np.argpartition(abs_signed, Mp - 1)[:Mp]
+                        top_idx_by_plane = top_idx_by_plane[
+                            np.argsort(abs_signed[top_idx_by_plane])
+                        ]
+                    pts_top_Mp = self.obj_pts[top_idx_by_plane]
+                    dists = np.linalg.norm(pts_top_Mp - anchor_pos[None, :], axis=1)
+                    chosen_local = int(np.argmin(dists))
+                    pts_target = pts_top_Mp[chosen_local].copy()
                 else:
-                    # argpartition for efficiency
-                    top_idx_by_plane = np.argpartition(abs_signed, Mp - 1)[:Mp]
-                    # sort those Mp by abs_signed for determinism (ascending)
-                    top_idx_by_plane = top_idx_by_plane[
-                        np.argsort(abs_signed[top_idx_by_plane])
-                    ]
-
-                pts_top_Mp = self.obj_pts[top_idx_by_plane]  # (Mp,3)
-
-                # among these Mp candidates, pick the one closest to the body_pos (Euclidean)
-                dists = np.linalg.norm(pts_top_Mp - tip_pos[None, :], axis=1)  # (Mp,)
-                chosen_local = int(np.argmin(dists))
-                pts_target = pts_top_Mp[chosen_local].copy()  # (3,)
-
-                # method3
-                # d_near, idx_near = self.obj_tree.query(tip_pos, k=Mp)
-                # idx_near = np.asarray(idx_near, dtype=int)
-                # d_near = np.asarray(d_near, dtype=float)
-                # pts_top_Mp = self.obj_pts[idx_near].copy()  # (Mp,3)
-
-                # xmat = np.array(self.data.xmat[bid]).reshape(3, 3)
-                # z_body = xmat[:, 2].copy()
-                # z_norm = np.linalg.norm(z_body) + 1e-12
-                # z_body = z_body / z_norm  # unit vector
-
-                # # vector from plane point (tip_pos) to candidate points
-                # r = pts_top_Mp - tip_pos[None, :]  # (Mp,3)
-                # # signed distance to plane: d_signed = r · y_body
-                # d_signed = r.dot(z_body)  # (Mp,)
-                # abs_plane_dist = np.abs(d_signed)  # (Mp,)
-
-                # # choose index among the Mp candidates with minimal absolute plane distance
-                # idx_local = int(np.argmin(abs_plane_dist))
-                # pts_target = pts_top_Mp[idx_local].copy()  # (3,)
+                    # Euclidean-first variant: choose nearest object points, then pick
+                    # the candidate closest to the anchor body's local z-plane.
+                    _, idx_near = self.obj_tree.query(anchor_pos, k=Mp)
+                    idx_near = np.atleast_1d(np.asarray(idx_near, dtype=int))
+                    pts_top_Mp = self.obj_pts[idx_near].reshape(-1, 3).copy()
+                    abs_plane_dist = np.abs((pts_top_Mp - anchor_pos[None, :]).dot(z_body))
+                    idx_local = int(np.argmin(abs_plane_dist))
+                    pts_target = pts_top_Mp[idx_local].copy()
 
                 # # Collect for flatten history
                 step_targets.append(pts_target)
                 all_top_Mp_pts.append(pts_top_Mp)
 
             # flatten and combine per-step arrays
-            all_top_Mp_pts = np.vstack(all_top_Mp_pts)  # (n_tips*Mp, 3)
-            step_targets = np.vstack(step_targets)  # (n_tips, 3)
+            all_top_Mp_pts = np.vstack(all_top_Mp_pts)  # (n_anchors*Mp, 3)
+            step_targets = np.vstack(step_targets)  # (n_anchors, 3)
 
             # store history (flattened as requested)
             if record_history:
                 history["qpos"].append(hand_qpos.copy())  # (nq_hand,)
-                history["tip_positions"].append(tip_positions.copy())  # (n_tips,3)
-                history["pts_top_Mp"].append(all_top_Mp_pts.copy())  # (n_tips*Mp, 3)
-                history["pts_target"].append(step_targets.copy())  # (n_tips, 3)
+                history["anchor_positions"].append(anchor_positions.copy())  # (n_anchors,3)
+                history["tip_positions"].append(anchor_positions.copy())  # backward compatibility
+                history["pts_top_Mp"].append(all_top_Mp_pts.copy())  # (n_anchors*Mp, 3)
+                history["pts_target"].append(step_targets.copy())  # (n_anchors, 3)
 
             # print(f"step_i: {step_i}")
             # print(f"hand_qpos: {hand_qpos}")
             # print(f"tip_positions: {tip_positions}")
 
-            # construct desired tip velocities (world frame)
-            v_tips = speed_gain * (step_targets - tip_positions)  # (n_tips, 3)
-            # clip per-tip speed
-            norms = np.linalg.norm(v_tips, axis=1)
-            for ti in range(self.n_tips):
+            # construct desired anchor velocities (world frame)
+            v_anchors = speed_gain * (step_targets - anchor_positions)  # (n_anchors, 3)
+            # clip per-anchor speed
+            norms = np.linalg.norm(v_anchors, axis=1)
+            for ti in range(self.n_anchors):
                 if norms[ti] > max_tip_speed:
-                    v_tips[ti] = (v_tips[ti] / norms[ti]) * max_tip_speed
+                    v_anchors[ti] = (v_anchors[ti] / norms[ti]) * max_tip_speed
 
-            # print(f"v_tips: {v_tips}")
-            # print(f"v_tips.shape: {v_tips.shape}")
+            # print(f"v_anchors: {v_anchors}")
+            # print(f"v_anchors.shape: {v_anchors.shape}")
 
-            # For each tip: compute jacp (3 x nv) using mj_jacBody, then extract hand columns and solve
+            # For each anchor body: compute jacp (3 x nv), then extract hand columns and solve.
             total_dq_hand = np.zeros(
                 (self.nq_hand - 7), dtype=float
             )  # accumulate contributions
             # prepare jac arrays (width model.nv)
             jacp = np.zeros((3, self.model.nv), dtype=float)
             jacr = np.zeros((3, self.model.nv), dtype=float)
-            for ti, bid in enumerate(self.tip_body_ids):
-                # call mj_jacBody -> fills jacp/jacr for current state in self.data
-                # signature: mujoco.mj_jacBody(model, data, jacp, jacr, body_id)
+            for ti, bid in enumerate(self.anchor_body_ids):
                 mujoco.mj_jacBody(self.model, self.data, jacp, jacr, int(bid))
                 # print(f"jacp: {jacp}")
                 # print(f"jacp.shape: {jacp.shape}")
@@ -679,14 +568,14 @@ class MjHO:
                 # print(f"J_hand: {J_hand}")
                 # print(f"J_hand.shape: {J_hand.shape}")
 
-                # solve least squares J_hand @ dq = v_tip
-                v_des = v_tips[ti]
+                # solve least squares J_hand @ dq = v_anchor
+                v_des = v_anchors[ti]
                 # If Jacobian is rank-deficient or rectangular, use lstsq
                 # dq_sol, *_ = np.linalg.lstsq(J_hand, v_des, rcond=None)
                 # dq_sol = np.asarray(dq_sol).reshape(-1)
-                dq_sol = self.target_body_weights[ti] * np.linalg.pinv(J_hand) @ v_des
+                dq_sol = self.anchor_weights[ti] * np.linalg.pinv(J_hand) @ v_des
 
-                # print(self.target_body_weights[ti])
+                # print(self.anchor_weights[ti])
 
                 # accumulate (simple sum — you may weight by finger importance)
                 total_dq_hand += dq_sol

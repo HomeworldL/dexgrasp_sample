@@ -8,7 +8,13 @@ import numpy as np
 
 from src.mj_ho import MjHO
 from src.sample import downsample_fps
-from utils.utils_file import DEFAULT_RUN_CONFIG_PATH, load_config
+from utils.utils_file import (
+    DEFAULT_RUN_CONFIG_PATH,
+    hand_profile_from_config,
+    load_config,
+    object_profile_from_config,
+    anchor_params_from_config,
+)
 from utils.utils_pointcloud import sample_surface_o3d
 from utils.utils_sample import (
     as_array,
@@ -38,14 +44,16 @@ def run_demo_grasp(
 ) -> int:
     object_name, _ = parse_object_scale_key(object_scale_key)
     obj_info = {"name": object_name, "xml_abs": object_mjcf_path}
-    target_body_params = cfg["hand"]["target_body_params"]
-    friction_coef = cfg["hand"]["friction_coef"]
+    anchor_params = anchor_params_from_config(cfg)
+    hand_profile = hand_profile_from_config(cfg)
+    object_profile = object_profile_from_config(cfg)
 
     mjho = MjHO(
         obj_info,
         hand_xml_path,
-        target_body_params=target_body_params,
-        friction_coef=friction_coef,
+        anchor_params=anchor_params,
+        hand_profile=hand_profile,
+        object_profile=object_profile,
         visualize=True,
     )
     sampling_cfg = cfg["sampling"]

@@ -11,7 +11,14 @@ import h5py
 import numpy as np
 
 from src.mj_ho import MjHO
-from utils.utils_file import DEFAULT_RUN_CONFIG_PATH, load_config, resolve_split_manifest_path
+from utils.utils_file import (
+    DEFAULT_RUN_CONFIG_PATH,
+    hand_profile_from_config,
+    load_config,
+    object_profile_from_config,
+    resolve_split_manifest_path,
+    anchor_params_from_config,
+)
 from utils.utils_seed import set_seed
 
 
@@ -70,6 +77,9 @@ def evaluate_dataset_manifest(
     extforce_cfg.pop("visualize", None)
     extforce_sim_cfg.pop("visualize", None)
     extforce_sim_cfg.pop("grip_delta", None)
+    anchor_params = anchor_params_from_config(cfg)
+    hand_profile = hand_profile_from_config(cfg)
+    object_profile = object_profile_from_config(cfg)
 
     summary_items: List[Dict] = []
     skipped_items: List[Dict] = []
@@ -98,16 +108,18 @@ def evaluate_dataset_manifest(
             mjho_collision = MjHO(
                 {"name": object_name, "xml_abs": str(mjcf_path.resolve())},
                 cfg["hand"]["xml_path"],
-                target_body_params=cfg["hand"]["target_body_params"],
-                friction_coef=cfg["hand"]["friction_coef"],
+                anchor_params=anchor_params,
+                hand_profile=hand_profile,
+                object_profile=object_profile,
                 object_fixed=True,
                 visualize=visualize,
             )
             mjho_valid = MjHO(
                 {"name": object_name, "xml_abs": str(mjcf_path.resolve())},
                 cfg["hand"]["xml_path"],
-                target_body_params=cfg["hand"]["target_body_params"],
-                friction_coef=cfg["hand"]["friction_coef"],
+                anchor_params=anchor_params,
+                hand_profile=hand_profile,
+                object_profile=object_profile,
                 object_fixed=False,
                 visualize=visualize,
             )

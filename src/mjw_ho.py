@@ -28,33 +28,6 @@ except Exception as exc:  # pragma: no cover - depends on runtime install.
     ) from exc
 
 
-def _default_hand_profiles() -> Dict[str, Dict]:
-    return {
-        "liberhand_right": {
-            "ctrl_qpos_slices": [
-                (7, 10),
-                (11, 14),
-                (15, 17),
-                (19, 21),
-                (23, 26),
-            ],
-            "solimp": [0.4, 0.99, 0.0001],
-            "solref": [0.003, 1.0],
-        },
-        "liberhand2_right": {
-            "ctrl_qpos_slices": [
-                (7, 10),
-                (11, 14),
-                (15, 18),
-                (19, 22),
-                (23, 26),
-            ],
-            "solimp": [0.4, 0.99, 0.0001],
-            "solref": [0.003, 1.0],
-        },
-    }
-
-
 @dataclass
 class ContactBatchResult:
     has_contact: np.ndarray
@@ -83,9 +56,9 @@ class MjWarpHO:
         self,
         obj_info: Dict,
         hand_xml_path: str,
-        target_body_params: Optional[Dict] = None,
+        anchor_params: Optional[Dict] = None,
         hand_profile: Optional[Dict] = None,
-        friction_coef: Sequence[float] = (0.2, 0.2),
+        object_profile: Optional[Dict] = None,
         object_fixed: bool = True,
         nworld: int = 1,
         device: str = "cuda:0",
@@ -107,19 +80,19 @@ class MjWarpHO:
         self.object_fixed = bool(object_fixed)
         self.nworld = int(nworld)
         self.device = str(device)
-        self.target_body_params = dict(target_body_params or {})
+        self.anchor_params = dict(anchor_params or {})
         self.ccd_iterations = int(ccd_iterations)
-
-        profiles = _default_hand_profiles()
-        self.hand_profile = dict(profiles.get(self.hand_name, {}))
-        if hand_profile:
-            self.hand_profile.update(hand_profile)
-        self.friction_coef = tuple(float(v) for v in friction_coef)
+        if not hand_profile:
+            raise ValueError(
+                f"hand_profile must be provided explicitly for hand '{self.hand_name}'."
+            )
+        if not object_profile:
+            raise ValueError("object_profile must be provided explicitly.")
+        self.hand_profile = dict(hand_profile)
+        self.object_profile = dict(object_profile)
 
         self.spec = self._add_hand(self.hand_xml_path)
         self._add_object(self.obj_info, fixed=self.object_fixed)
-        self._set_friction(self.friction_coef)
-        self._set_sol()
         self._set_ccd_iterations()
 
         self.mj_model = self.spec.compile()
@@ -171,19 +144,20 @@ class MjWarpHO:
         self._host_xfrc = self._default_xfrc.copy()
         self._reset_mask_host = np.zeros((self.nworld,), dtype=bool)
 
-        self.tip_body_ids = []
-        self.target_body_weights = np.zeros((0,), dtype=np.float32)
-        if self.target_body_params:
-            fingertip_bodies = list(self.target_body_params.keys())
-            for body_name in fingertip_bodies:
+        self.anchor_body_ids = []
+        self.anchor_weights = np.zeros((0,), dtype=np.float32)
+        if self.anchor_params:
+            anchor_body_names = list(self.anchor_params.keys())
+            for body_name in anchor_body_names:
                 if body_name not in self.body_name_to_id:
                     raise ValueError(f"Body name '{body_name}' not found in MJWarp model.")
-                self.tip_body_ids.append(int(self.body_name_to_id[body_name]))
-            self.target_body_weights = np.asarray(
-                [self.target_body_params[name][0] for name in fingertip_bodies], dtype=np.float32
+                self.anchor_body_ids.append(int(self.body_name_to_id[body_name]))
+            self.anchor_weights = np.asarray(
+                [float(self.anchor_params[name]) for name in anchor_body_names],
+                dtype=np.float32,
             )
-        self.tip_body_ids = np.asarray(self.tip_body_ids, dtype=np.int32)
-        self.n_tips = int(self.tip_body_ids.shape[0])
+        self.anchor_body_ids = np.asarray(self.anchor_body_ids, dtype=np.int32)
+        self.n_anchors = int(self.anchor_body_ids.shape[0])
 
         self.obj_pts = None
         self.obj_norms = None
@@ -204,7 +178,22 @@ class MjWarpHO:
     def _add_hand(self, hand_xml_path: str) -> mujoco.MjSpec:
         hand_spec = mujoco.MjSpec.from_file(hand_xml_path)
         hand_spec.meshdir = os.path.dirname(hand_xml_path)
+        hand_spec.option.cone = mujoco.mjtCone.mjCONE_ELLIPTIC
+        hand_spec.option.impratio = 10
+        for geom in hand_spec.geoms:
+            self._apply_geom_profile(geom, self.hand_profile)
         return hand_spec
+
+    def _apply_geom_profile(self, geom, profile: Dict) -> None:
+        friction = np.asarray(profile["friction_coef"], dtype=float).reshape(-1)
+        if friction.size not in {1, 2, 3}:
+            raise ValueError(f"friction_coef must have length 1, 2, or 3, got {friction.size}.")
+        if friction.size == 1:
+            friction = np.asarray([float(friction[0]), float(friction[0])], dtype=float)
+        geom.friction[: friction.shape[0]] = friction
+        geom.condim = 6 if friction.shape[0] == 3 else 4
+        geom.solimp[:5] = np.asarray(profile["solimp"], dtype=float)
+        geom.solref[:2] = np.asarray(profile["solref"], dtype=float)
 
     def _add_object(self, obj_info: Dict, fixed: bool = True) -> None:
         obj_name = str(obj_info.get("name") or "")
@@ -225,6 +214,9 @@ class MjWarpHO:
             if texture_file and not os.path.isabs(texture_file):
                 texture.file = os.path.abspath(os.path.join(obj_dir, texture_file))
 
+        for geom in obj_spec.geoms:
+            self._apply_geom_profile(geom, self.object_profile)
+
         attach_frame = self.spec.worldbody.add_frame()
         self.spec.attach(obj_spec, frame=attach_frame, prefix="")
 
@@ -234,20 +226,6 @@ class MjWarpHO:
                 if joint.name == obj_joint_name:
                     self.spec.delete(joint)
                     break
-
-    def _set_friction(self, friction_coef: Sequence[float]) -> None:
-        self.spec.option.cone = mujoco.mjtCone.mjCONE_ELLIPTIC
-        self.spec.option.impratio = 10
-        for geom in self.spec.geoms:
-            geom.friction[:2] = friction_coef[:2]
-            geom.condim = 4
-
-    def _set_sol(self) -> None:
-        solimp = self.hand_profile.get("solimp", [0.4, 0.99, 0.0001])
-        solref = self.hand_profile.get("solref", [0.003, 1.0])
-        for geom in self.spec.geoms:
-            geom.solimp[:3] = solimp[:3]
-            geom.solref[:2] = solref[:2]
 
     def _set_ccd_iterations(self) -> None:
         if self.ccd_iterations <= 0:
@@ -328,7 +306,7 @@ class MjWarpHO:
         if self.nu == 0:
             return np.zeros((hand_qpos_batch.shape[0], 0), dtype=np.float32)
 
-        slices = self.hand_profile.get("ctrl_qpos_slices")
+        slices = self.hand_profile["ctrl_qpos_slices"]
         if not slices:
             raise NotImplementedError(
                 f"No ctrl mapping defined for hand '{self.hand_name}' in MjWarpHO."
@@ -418,12 +396,19 @@ class MjWarpHO:
             return pose
         return np.asarray(self.data.qpos.numpy()[:valid_count, -7:], dtype=np.float32)
 
-    def get_tip_positions_batch(self, valid_count: Optional[int] = None) -> np.ndarray:
+    def get_anchor_positions_batch(self, valid_count: Optional[int] = None) -> np.ndarray:
         if valid_count is None:
             valid_count = self.nworld
-        if self.n_tips <= 0:
-            raise RuntimeError("tip_body_ids are unavailable; target_body_params must be configured.")
-        return np.asarray(self.data.xpos.numpy()[:valid_count][:, self.tip_body_ids], dtype=np.float32)
+        if self.n_anchors <= 0:
+            raise RuntimeError("anchor_body_ids are unavailable; hand.anchor_params must be configured.")
+        return np.asarray(
+            self.data.xpos.numpy()[:valid_count][:, self.anchor_body_ids],
+            dtype=np.float32,
+        )
+
+    def get_tip_positions_batch(self, valid_count: Optional[int] = None) -> np.ndarray:
+        # Backward-compatible alias.
+        return self.get_anchor_positions_batch(valid_count=valid_count)
 
     def set_object_force_batch(
         self,
@@ -709,13 +694,13 @@ class MjWarpHO:
         if self.nq_hand <= 7:
             return delta
         delta[7:] = float(joint_step)
-        side_swing = self.hand_profile.get("side_swing_indices", [0, 4, 8, 12, 16])
+        side_swing = self.hand_profile["side_swing_indices"]
         for idx in side_swing:
             joint_idx = 7 + int(idx)
             if 0 <= joint_idx < self.nq_hand:
                 delta[joint_idx] = 0.0
-        thumb_indices = self.hand_profile.get("thumb_relax_indices", [17, 18, 19])
-        thumb_div = max(float(self.hand_profile.get("thumb_relax_divisor", 1.2)), 1e-6)
+        thumb_indices = self.hand_profile["thumb_relax_indices"]
+        thumb_div = max(float(self.hand_profile["thumb_relax_divisor"]), 1e-6)
         for idx in thumb_indices:
             joint_idx = 7 + int(idx)
             if 0 <= joint_idx < self.nq_hand:
@@ -787,7 +772,7 @@ class MjWarpHO:
 
         qpos_grasp_batch = np.asarray(qpos_grasp_batch, dtype=np.float32)
         grip_qpos = qpos_grasp_batch[:valid_count].copy()
-        side_swing = set(self.hand_profile.get("side_swing_indices", [0, 4, 8, 12, 16]))
+        side_swing = set(self.hand_profile["side_swing_indices"])
         for idx in range(7, self.nq_hand):
             joint_local_idx = idx - 7
             if joint_local_idx not in side_swing:

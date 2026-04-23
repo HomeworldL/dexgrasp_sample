@@ -11,11 +11,14 @@ from utils.utils_file import (
     data_verbose_from_config,
     generated_dataset_root_from_config,
     graspdata_tag_from_config,
+    hand_profile_from_config,
     load_config,
+    object_profile_from_config,
     objdata_tag_from_config,
     raw_dataset_name_from_config,
     raw_dataset_root_from_config,
     run_scales_from_config,
+    anchor_params_from_config,
 )
 from utils.utils_vis import visualize_with_viser
 
@@ -54,12 +57,12 @@ def main():
     print(f"[vis_ho] id={info['global_id']} name={obj_name} scale={info['scale']}")
 
     hand_xml = os.path.abspath(cfg["hand"]["xml_path"])
-    target_body_params = cfg["hand"]["target_body_params"]
     env = MjHO(
         {"name": obj_name, "xml_abs": info["mjcf_abs"]},
         hand_xml,
-        target_body_params=target_body_params,
-        friction_coef=cfg["hand"]["friction_coef"],
+        anchor_params=anchor_params_from_config(cfg),
+        hand_profile=hand_profile_from_config(cfg),
+        object_profile=object_profile_from_config(cfg),
         object_fixed=False,
     )
 

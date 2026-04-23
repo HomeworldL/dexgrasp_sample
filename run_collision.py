@@ -15,11 +15,14 @@ from utils.utils_file import (
     data_verbose_from_config,
     generated_dataset_root_from_config,
     graspdata_tag_from_config,
+    hand_profile_from_config,
     load_config,
+    object_profile_from_config,
     objdata_tag_from_config,
     raw_dataset_name_from_config,
     raw_dataset_root_from_config,
     run_scales_from_config,
+    anchor_params_from_config,
 )
 from utils.utils_seed import set_seed
 
@@ -151,7 +154,9 @@ def main() -> None:
     mjw_ho = MjWarpHO(
         obj_info=obj_info,
         hand_xml_path=hand_xml_path,
-        target_body_params=cfg["hand"].get("target_body_params"),
+        anchor_params=anchor_params_from_config(cfg),
+        hand_profile=hand_profile_from_config(cfg),
+        object_profile=object_profile_from_config(cfg),
         object_fixed=True,
         nworld=int(args.batch_size),
         device=str(args.device),

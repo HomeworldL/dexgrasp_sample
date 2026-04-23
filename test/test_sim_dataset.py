@@ -19,15 +19,17 @@ class _FakeMjHO:
         self,
         obj_info,
         hand_xml_path,
-        target_body_params,
-        friction_coef=None,
+        anchor_params,
+        hand_profile,
+        object_profile,
         object_fixed=False,
         visualize=False,
     ):
         self.obj_info = obj_info
         self.hand_xml_path = hand_xml_path
-        self.target_body_params = target_body_params
-        self.friction_coef = friction_coef
+        self.anchor_params = anchor_params
+        self.hand_profile = hand_profile
+        self.object_profile = object_profile
         self.object_fixed = object_fixed
         self.visualize = visualize
         self.current_qpos = None
@@ -51,6 +53,22 @@ class _FakeMjHO:
 
     def _render_viewer(self):
         return None
+
+
+TEST_HAND_PROFILE = {
+    "ctrl_qpos_slices": [[7, 8]],
+    "friction_coef": [0.3, 0.01],
+    "solimp": [0.4, 0.99, 0.0001, 0.5, 2.0],
+    "solref": [0.003, 1.0],
+    "side_swing_indices": [],
+    "thumb_relax_indices": [],
+    "thumb_relax_divisor": 1.0,
+}
+TEST_OBJECT_PROFILE = {
+    "friction_coef": [0.3, 0.01],
+    "solimp": [0.4, 0.99, 0.0001, 0.5, 2.0],
+    "solref": [0.003, 1.0],
+}
 
 
 def test_simulate_dataset_manifest_counts_successes(tmp_path: Path, monkeypatch):
@@ -145,15 +163,16 @@ def test_simulate_dataset_manifest_counts_successes(tmp_path: Path, monkeypatch)
                     "prepared_joints": [0.0] * 20,
                     "approach_joints": [0.0] * 20,
                     "shift_local": [0.0, 0.0, -0.02],
-                    "target_body_params": {"finger": [1.0, 1.0]},
-                    "friction_coef": [0.3, 0.01],
+                    "anchor_params": {"finger": 1.0},
+                    "profile": TEST_HAND_PROFILE,
                     "transform": {
                         "base_rot_grasp_to_palm": [[1, 0, 0], [0, 1, 0], [0, 0, 1]],
                         "extra_euler": {"axis": "x", "degrees": 0.0},
                     },
                 },
-                "sampling": {"n_points": 1, "downsample_for_sim": 1, "Nd": 1, "rot_n": 1, "d_min": 0.01, "d_max": 0.02},
-                "sim_grasp": {"contact_min_count": 4},
+                "sampling": {"n_points": 1, "downsample_for_sim": 1, "Nd": 1, "rot_n": 1, "d_min": 0.01, "d_max": 0.02, "pc_subdir": "pc_warp"},
+                "profile_object": TEST_OBJECT_PROFILE,
+                "sim_grasp": {"contact_min_count": 4, "target_point_method": 2},
                 "extforce": {"duration": 0.5, "trans_thresh": 0.05, "angle_thresh": 10.0, "grip_delta": 0.05, "force_mag": 1.0, "check_steps": 50},
             }
         ),
@@ -245,15 +264,16 @@ def test_simulate_dataset_manifest_allows_explicit_float64_cast(tmp_path: Path, 
                     "prepared_joints": [0.0] * 20,
                     "approach_joints": [0.0] * 20,
                     "shift_local": [0.0, 0.0, -0.02],
-                    "target_body_params": {"finger": [1.0, 1.0]},
-                    "friction_coef": [0.3, 0.01],
+                    "anchor_params": {"finger": 1.0},
+                    "profile": TEST_HAND_PROFILE,
                     "transform": {
                         "base_rot_grasp_to_palm": [[1, 0, 0], [0, 1, 0], [0, 0, 1]],
                         "extra_euler": {"axis": "x", "degrees": 0.0},
                     },
                 },
-                "sampling": {"n_points": 1, "downsample_for_sim": 1, "Nd": 1, "rot_n": 1, "d_min": 0.01, "d_max": 0.02},
-                "sim_grasp": {"contact_min_count": 4},
+                "sampling": {"n_points": 1, "downsample_for_sim": 1, "Nd": 1, "rot_n": 1, "d_min": 0.01, "d_max": 0.02, "pc_subdir": "pc_warp"},
+                "profile_object": TEST_OBJECT_PROFILE,
+                "sim_grasp": {"contact_min_count": 4, "target_point_method": 2},
                 "extforce": {"duration": 0.5, "trans_thresh": 0.05, "angle_thresh": 10.0, "grip_delta": 0.05, "force_mag": 1.0, "check_steps": 50},
             }
         ),
@@ -336,8 +356,8 @@ def test_simulate_dataset_manifest_requires_qpos_squeeze(tmp_path: Path, monkeyp
                     "prepared_joints": [0.0] * 20,
                     "approach_joints": [0.0] * 20,
                     "shift_local": [0.0, 0.0, -0.02],
-                    "target_body_params": {"finger": [1.0, 1.0]},
-                    "friction_coef": [0.3, 0.01],
+                    "anchor_params": {"finger": 1.0},
+                    "profile": TEST_HAND_PROFILE,
                     "transform": {
                         "base_rot_grasp_to_palm": [[1, 0, 0], [0, 1, 0], [0, 0, 1]],
                         "extra_euler": {"axis": "x", "degrees": 0.0},
@@ -350,8 +370,10 @@ def test_simulate_dataset_manifest_requires_qpos_squeeze(tmp_path: Path, monkeyp
                     "rot_n": 1,
                     "d_min": 0.01,
                     "d_max": 0.02,
+                    "pc_subdir": "pc_warp",
                 },
-                "sim_grasp": {"contact_min_count": 4},
+                "profile_object": TEST_OBJECT_PROFILE,
+                "sim_grasp": {"contact_min_count": 4, "target_point_method": 2},
                 "extforce": {
                     "duration": 0.5,
                     "trans_thresh": 0.05,

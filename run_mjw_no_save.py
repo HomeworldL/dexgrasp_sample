@@ -16,11 +16,14 @@ from utils.utils_file import (
     data_verbose_from_config,
     generated_dataset_root_from_config,
     graspdata_tag_from_config,
+    hand_profile_from_config,
     load_config,
+    object_profile_from_config,
     objdata_tag_from_config,
     raw_dataset_name_from_config,
     raw_dataset_root_from_config,
     run_scales_from_config,
+    anchor_params_from_config,
 )
 from utils.utils_seed import set_seed
 
@@ -104,7 +107,9 @@ def build_valid_backend(
     backend = MjWarpHO(
         obj_info=obj_info,
         hand_xml_path=hand_xml_path,
-        target_body_params=cfg["hand"].get("target_body_params"),
+        anchor_params=anchor_params_from_config(cfg),
+        hand_profile=hand_profile_from_config(cfg),
+        object_profile=object_profile_from_config(cfg),
         object_fixed=False,
         nworld=int(nworld),
         device=str(args.device),
@@ -228,6 +233,7 @@ def main() -> None:
     extforce_cfg = dict(cfg.get("extforce", {}))
     sim_grasp_cfg.pop("visualize", None)
     sim_grasp_cfg.pop("contact_min_count", None)
+    sim_grasp_cfg.pop("target_point_method", None)
     extforce_cfg.pop("visualize", None)
     contact_min_count = int(cfg["sim_grasp"]["contact_min_count"])
     target_valid_cap = int(cfg.get("data", {}).get("max_cap", 100))
@@ -246,7 +252,9 @@ def main() -> None:
     mjw_grasp = MjWarpHO(
         obj_info=obj_info,
         hand_xml_path=hand_xml_path,
-        target_body_params=cfg["hand"].get("target_body_params"),
+        anchor_params=anchor_params_from_config(cfg),
+        hand_profile=hand_profile_from_config(cfg),
+        object_profile=object_profile_from_config(cfg),
         object_fixed=True,
         nworld=batch_size,
         device=str(args.device),
@@ -346,7 +354,7 @@ def main() -> None:
     dropped_after_grasp = 0
 
     if contact_ok_count > 0:
-        side_swing = set(mjw_valid.hand_profile.get("side_swing_indices", [0, 4, 8, 12, 16]))
+        side_swing = set(mjw_valid.hand_profile["side_swing_indices"])
         grip_delta = float(extforce_cfg["grip_delta"])
         grip_qpos_all = qpos_grasp_contact_ok.copy()
         for idx in range(7, mjw_valid.nq_hand):

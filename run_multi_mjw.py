@@ -152,7 +152,7 @@ def main():
 
     h5_name = str(cfg["data"]["h5_name"])
     npy_name = str(cfg["data"]["npy_name"])
-    render_subdir = str(cfg["warp_render"]["output_subdir"])
+    render_subdir = str(cfg["sampling"]["pc_subdir"])
     if not args.force:
         total_entries = len(entries)
         entries = [

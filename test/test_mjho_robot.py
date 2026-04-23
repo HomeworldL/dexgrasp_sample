@@ -10,6 +10,22 @@ from src.mj_ho import MjHO, RobotKinematics
 from src.scale_dataset_builder import ScaleDatasetBuilder
 
 
+LIBERHAND_PROFILE = {
+    "ctrl_qpos_slices": [(7, 10), (11, 14), (15, 17), (19, 21), (23, 26)],
+    "friction_coef": [0.3, 0.01],
+    "solimp": [0.4, 0.99, 0.0001, 0.5, 2.0],
+    "solref": [0.003, 1.0],
+    "side_swing_indices": [0, 4, 8, 12, 16],
+    "thumb_relax_indices": [17, 18, 19],
+    "thumb_relax_divisor": 1.2,
+}
+OBJECT_PROFILE = {
+    "friction_coef": [0.3, 0.01],
+    "solimp": [0.4, 0.99, 0.0001, 0.5, 2.0],
+    "solref": [0.003, 1.0],
+}
+
+
 def _make_cube_mesh(path: Path, scale: float = 1.0):
     import trimesh
 
@@ -42,7 +58,12 @@ def test_mjho_init_and_set_qpos(tmp_path: Path):
         pytest.skip("Hand XML not found")
 
     obj_xml = _build_temp_object_xml(tmp_path)
-    env = MjHO({"name": "obj_a", "xml_abs": obj_xml}, xml_path)
+    env = MjHO(
+        {"name": "obj_a", "xml_abs": obj_xml},
+        xml_path,
+        hand_profile=LIBERHAND_PROFILE,
+        object_profile=OBJECT_PROFILE,
+    )
     q = np.zeros(env.nq_hand, dtype=float)
     q[:7] = np.array([0, 0, 0, 1, 0, 0, 0], dtype=float)
     env.set_hand_qpos(q)

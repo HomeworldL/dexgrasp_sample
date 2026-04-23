@@ -10,7 +10,13 @@ from tqdm import tqdm
 
 from src.mj_ho import MjHO
 from src.sample import downsample_fps
-from utils.utils_file import DEFAULT_RUN_CONFIG_PATH, load_config
+from utils.utils_file import (
+    DEFAULT_RUN_CONFIG_PATH,
+    hand_profile_from_config,
+    load_config,
+    object_profile_from_config,
+    anchor_params_from_config,
+)
 from utils.utils_sample import (
     ARRAY_DTYPE,
     H5_DTYPE,
@@ -94,14 +100,16 @@ def run_sampling(
     object_name, parsed_scale = parse_object_scale_key(object_scale_key)
     scale = parsed_scale
     obj_info = {"name": object_name, "xml_abs": object_mjcf_path}
-    target_body_params = cfg["hand"]["target_body_params"]
-    friction_coef = cfg["hand"]["friction_coef"]
+    anchor_params = anchor_params_from_config(cfg)
+    hand_profile = hand_profile_from_config(cfg)
+    object_profile = object_profile_from_config(cfg)
 
     mjho = MjHO(
         obj_info,
         hand_xml_path,
-        target_body_params=target_body_params,
-        friction_coef=friction_coef,
+        anchor_params=anchor_params,
+        hand_profile=hand_profile,
+        object_profile=object_profile,
     )
     sampling_cfg = cfg["sampling"]
     pts_for_sim, norms_for_sim, _ = downsample_fps(
@@ -115,8 +123,9 @@ def run_sampling(
     mjho_valid = MjHO(
         obj_info,
         hand_xml_path,
-        target_body_params=target_body_params,
-        friction_coef=friction_coef,
+        anchor_params=anchor_params,
+        hand_profile=hand_profile,
+        object_profile=object_profile,
         object_fixed=False,
     )
 
@@ -299,7 +308,7 @@ def main():
         print(f"Using object-scale key: {args.object_scale_key}")
     h5_name = str(cfg["data"]["h5_name"])
     npy_name = str(cfg["data"]["npy_name"])
-    render_subdir = str(cfg.get("warp_render", {}).get("output_subdir", "pc_warp"))
+    pc_subdir = str(cfg["sampling"]["pc_subdir"])
     has_grasp_outputs = grasp_outputs_exist(args.output_dir, h5_name=h5_name, npy_name=npy_name)
     if (not args.force) and has_grasp_outputs:
         if verbose:
@@ -312,9 +321,9 @@ def main():
     hand_xml_path = os.path.abspath(cfg["hand"]["xml_path"])
     hand_name = Path(hand_xml_path).stem
     asset_dir = args.asset_dir or str(Path(args.coacd_path).resolve().parent)
-    pts, norms = load_global_pc_and_normals(asset_dir, render_subdir)
+    pts, norms = load_global_pc_and_normals(asset_dir, pc_subdir)
     if verbose:
-        print(f"[{args.object_scale_key}] loaded global_pc/global_normals from {asset_dir}/{render_subdir}")
+        print(f"[{args.object_scale_key}] loaded global_pc/global_normals from {asset_dir}/{pc_subdir}")
     run_sampling(
         cfg=cfg,
         object_scale_key=args.object_scale_key,

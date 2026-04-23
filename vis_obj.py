@@ -12,7 +12,9 @@ from utils.utils_file import (
     data_verbose_from_config,
     generated_dataset_root_from_config,
     graspdata_tag_from_config,
+    hand_profile_from_config,
     load_config,
+    object_profile_from_config,
     objdata_tag_from_config,
     raw_dataset_name_from_config,
     raw_dataset_root_from_config,
@@ -78,7 +80,8 @@ def main():
     env = MjHO(
         {"name": obj_name, "xml_abs": info["mjcf_abs"], "scale": 1.0},
         hand_xml,
-        friction_coef=cfg["hand"]["friction_coef"],
+        hand_profile=hand_profile_from_config(cfg),
+        object_profile=object_profile_from_config(cfg),
         object_fixed=False,
         visualize=True,
     )

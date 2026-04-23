@@ -106,6 +106,28 @@ class MjWarpHO:
         self.nv = int(self.mj_model.nv)
         self.nu = int(self.mj_model.nu)
         self.nq_hand = self.nq - 7 if not self.object_fixed else self.nq
+        ctrl_joint_indices = np.asarray(
+            self.hand_profile["ctrl_joint_indices"],
+            dtype=np.int32,
+        ).reshape(-1)
+        if ctrl_joint_indices.size <= 0:
+            raise ValueError("hand.profile.ctrl_joint_indices must be non-empty.")
+        if np.any(ctrl_joint_indices < 0):
+            raise ValueError(
+                "hand.profile.ctrl_joint_indices must be non-negative local joint ids."
+            )
+        max_local_joint_idx = self.nq_hand - 8
+        if np.any(ctrl_joint_indices > max_local_joint_idx):
+            raise ValueError(
+                "hand.profile.ctrl_joint_indices contains local ids outside hand joint range. "
+                f"max allowed is {max_local_joint_idx} for hand '{self.hand_name}'."
+            )
+        self.ctrl_qpos_indices = 7 + ctrl_joint_indices
+        if int(self.ctrl_qpos_indices.shape[0]) != self.nu:
+            raise ValueError(
+                f"ctrl index length {self.ctrl_qpos_indices.shape[0]} != model.nu {self.nu} "
+                f"for hand '{self.hand_name}'."
+            )
         self.nbody = int(self.mj_model.nbody)
         self.geom_bodyid = np.asarray(self.mj_model.geom_bodyid, dtype=np.int32)
 
@@ -306,14 +328,9 @@ class MjWarpHO:
         if self.nu == 0:
             return np.zeros((hand_qpos_batch.shape[0], 0), dtype=np.float32)
 
-        slices = self.hand_profile["ctrl_qpos_slices"]
-        if not slices:
-            raise NotImplementedError(
-                f"No ctrl mapping defined for hand '{self.hand_name}' in MjWarpHO."
-            )
-
-        ctrl_parts = [hand_qpos_batch[:, int(q0) : int(q1)] for q0, q1 in slices]
-        ctrl = np.concatenate(ctrl_parts, axis=1).astype(np.float32, copy=False)
+        ctrl = np.take(hand_qpos_batch, self.ctrl_qpos_indices, axis=1).astype(
+            np.float32, copy=False
+        )
         if ctrl.shape[1] != self.nu:
             raise ValueError(f"ctrl width {ctrl.shape[1]} does not match model.nu {self.nu}.")
         return ctrl

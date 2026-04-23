@@ -113,11 +113,23 @@ class MjHO:
             for gi in range(self.model.ngeom)
             if f"{self.obj_name}_collision" in self.model.geom(gi).name
         ]
-        ctrl_slices = self.hand_profile["ctrl_qpos_slices"]
-        ctrl_qpos_indices: List[int] = []
-        for q0, q1 in ctrl_slices:
-            ctrl_qpos_indices.extend(range(int(q0), int(q1)))
-        self.ctrl_qpos_indices = np.asarray(ctrl_qpos_indices, dtype=int)
+        ctrl_joint_indices = np.asarray(
+            self.hand_profile["ctrl_joint_indices"],
+            dtype=int,
+        ).reshape(-1)
+        if ctrl_joint_indices.size <= 0:
+            raise ValueError("hand.profile.ctrl_joint_indices must be non-empty.")
+        if np.any(ctrl_joint_indices < 0):
+            raise ValueError(
+                "hand.profile.ctrl_joint_indices must be non-negative local joint ids."
+            )
+        max_local_joint_idx = self.nq_hand - 8
+        if np.any(ctrl_joint_indices > max_local_joint_idx):
+            raise ValueError(
+                "hand.profile.ctrl_joint_indices contains local ids outside hand joint range. "
+                f"max allowed is {max_local_joint_idx} for hand '{self.hand_name}'."
+            )
+        self.ctrl_qpos_indices = 7 + ctrl_joint_indices
         if self.ctrl_qpos_indices.shape[0] != self.nu:
             raise ValueError(
                 f"ctrl index length {self.ctrl_qpos_indices.shape[0]} != model.nu {self.nu} "

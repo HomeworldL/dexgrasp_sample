@@ -169,18 +169,20 @@ def _validate_contact_profile(profile: Dict, path: str, require_control: bool) -
         raise ValueError(f"Config field {path} must be a non-empty object.")
 
     if require_control:
-        ctrl_qpos_slices = profile.get("ctrl_qpos_slices")
-        if not isinstance(ctrl_qpos_slices, list) or not ctrl_qpos_slices:
-            raise ValueError(f"{path}.ctrl_qpos_slices must be a non-empty list.")
-        for idx, item in enumerate(ctrl_qpos_slices):
-            if not isinstance(item, (list, tuple)) or len(item) != 2:
-                raise ValueError(f"{path}.ctrl_qpos_slices[{idx}] must be [start, end].")
-            start = int(item[0])
-            end = int(item[1])
-            if start < 0 or end <= start:
-                raise ValueError(
-                    f"{path}.ctrl_qpos_slices[{idx}] must satisfy 0 <= start < end."
-                )
+        ctrl_joint_indices = profile.get("ctrl_joint_indices")
+        if not isinstance(ctrl_joint_indices, list) or not ctrl_joint_indices:
+            raise ValueError(f"{path}.ctrl_joint_indices must be a non-empty list.")
+        normalized_ctrl_joint_indices = []
+        for idx, value in enumerate(ctrl_joint_indices):
+            try:
+                joint_idx = int(value)
+            except Exception as exc:
+                raise ValueError(f"{path}.ctrl_joint_indices[{idx}] must be an integer.") from exc
+            if joint_idx < 0:
+                raise ValueError(f"{path}.ctrl_joint_indices[{idx}] must be >= 0.")
+            normalized_ctrl_joint_indices.append(joint_idx)
+        if len(set(normalized_ctrl_joint_indices)) != len(normalized_ctrl_joint_indices):
+            raise ValueError(f"{path}.ctrl_joint_indices must not contain duplicates.")
 
         for field in ["side_swing_indices", "thumb_relax_indices"]:
             values = profile.get(field)

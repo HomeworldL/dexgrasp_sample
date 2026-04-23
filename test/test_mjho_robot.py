@@ -11,7 +11,7 @@ from src.scale_dataset_builder import ScaleDatasetBuilder
 
 
 LIBERHAND_PROFILE = {
-    "ctrl_qpos_slices": [(7, 10), (11, 14), (15, 17), (19, 21), (23, 26)],
+    "ctrl_joint_indices": [0, 1, 2, 4, 5, 6, 8, 9, 12, 13, 16, 17, 18],
     "friction_coef": [0.3, 0.01],
     "solimp": [0.4, 0.99, 0.0001, 0.5, 2.0],
     "solref": [0.003, 1.0],

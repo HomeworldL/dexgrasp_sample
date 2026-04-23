@@ -83,27 +83,13 @@
       }
     },
     "profile": {
-      "ctrl_qpos_slices": [
-        [
-          7,
-          9
-        ],
-        [
-          11,
-          12
-        ],
-        [
-          13,
-          14
-        ],
-        [
-          15,
-          16
-        ],
-        [
-          17,
-          18
-        ]
+      "ctrl_joint_indices": [
+        0,
+        1,
+        4,
+        6,
+        8,
+        10
       ],
       "side_swing_indices": [
         0

@@ -56,7 +56,7 @@ class _FakeMjHO:
 
 
 TEST_HAND_PROFILE = {
-    "ctrl_qpos_slices": [[7, 8]],
+    "ctrl_joint_indices": [0],
     "friction_coef": [0.3, 0.01],
     "solimp": [0.4, 0.99, 0.0001, 0.5, 2.0],
     "solref": [0.003, 1.0],

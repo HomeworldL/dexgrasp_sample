@@ -43,7 +43,7 @@ Current mainline assumptions:
 - dataset splits are grouped by `object_name` to avoid cross-scale leakage
 
 Default dataset/config conventions:
-- default config: `configs/run_YCB_liberhand.json`
+- default config: `configs/run_YCB_liberhand_right.json`
 - default dataset root: `assets/objects/processed`
 - common generated dataset tag rule: `run_<...>.json -> graspdata_<...>`
 
@@ -122,19 +122,23 @@ Example scale list used by mainline liberhand configs:
 
 ### Generated Output Layout
 
-For a dataset tag like `graspdata_YCB_liberhand`, outputs are written under:
+Object assets and grasp outputs are separated:
 
 ```text
-datasets/graspdata_YCB_liberhand/<object>/scaleXXX/
+datasets/objdata_YCB/<object>/scaleXXX/
   coacd.obj
   object.xml
   convex_parts/*.obj
+  pc_warp/
+    global_pc.npy
+    global_normals.npy
+
+datasets/graspdata_YCB_liberhand_right/<object>/scaleXXX/
   grasp.h5
   grasp.npy
   grasp_fail.h5
   grasp_fail.npy
   pc_warp/
-    global_pc.npy
     cam_in.npy
     cam_ex_XX.npy
     partial_pc_XX.npy
@@ -164,11 +168,12 @@ Failure sample note:
   - `prepared_contact`: colliding prepared state
   - `insufficient_contact`: post-close `qpos_grasp`
   - `extforce_failure`: failed `qpos_squeeze`
-- if `valid_count < output.min_valid_count`, both positive and failure grasp files are truncated to zero rows
-- otherwise failure samples are deterministically shuffled with config `seed` and truncated to `floor(output.fail_keep_ratio * valid_count)`
+- if `valid_count < data.min_valid_count`, both positive and failure grasp files are truncated to zero rows
+- otherwise failure samples are deterministically shuffled with config `seed` and truncated to `floor(data.fail_keep_ratio * valid_count)`
 
 Global point cloud note:
-- `pc_warp/global_pc.npy` is written by `run.py` / `run_mjw.py`
+- `run.py` loads `global_pc.npy` / `global_normals.npy` from objdata assets
+- `run_mjw.py` writes `pc_warp/global_pc.npy` under grasp output dir
 - it stores the initial world-frame object points sampled for grasp generation, not a merge of `partial_pc_XX.npy`
 - its current mainline shape is `(sampling.n_points, 3)` with `float32`
 
@@ -198,11 +203,11 @@ Current split rules:
 
 ```bash
 python run.py \
-  -c configs/run_YCB_liberhand.json \
+  -c configs/run_YCB_liberhand_right.json \
   --object-scale-key YCB_002_master_chef_can__scale120 \
-  --coacd-path datasets/graspdata_YCB_liberhand/YCB_002_master_chef_can/scale120/coacd.obj \
-  --mjcf-path datasets/graspdata_YCB_liberhand/YCB_002_master_chef_can/scale120/object.xml \
-  --output-dir datasets/graspdata_YCB_liberhand/YCB_002_master_chef_can/scale120 \
+  --coacd-path datasets/objdata_YCB/YCB_002_master_chef_can/scale120/coacd.obj \
+  --mjcf-path datasets/objdata_YCB/YCB_002_master_chef_can/scale120/object.xml \
+  --output-dir datasets/graspdata_YCB_liberhand_right/YCB_002_master_chef_can/scale120 \
   --force -v
 ```
 
@@ -219,9 +224,9 @@ Online grasp-only visualization without extforce:
 ```bash
 python demo_grasp.py \
   --object-scale-key YCB_002_master_chef_can__scale120 \
-  --coacd-path datasets/graspdata_YCB_liberhand/YCB_002_master_chef_can/scale120/coacd.obj \
-  --mjcf-path datasets/graspdata_YCB_liberhand/YCB_002_master_chef_can/scale120/object.xml \
-  -c configs/run_YCB_liberhand.json -v
+  --coacd-path datasets/objdata_YCB/YCB_002_master_chef_can/scale120/coacd.obj \
+  --mjcf-path datasets/objdata_YCB/YCB_002_master_chef_can/scale120/object.xml \
+  -c configs/run_YCB_liberhand_right.json -v
 ```
 
 Online visualization that stops at the first grasp passing extforce:
@@ -229,17 +234,17 @@ Online visualization that stops at the first grasp passing extforce:
 ```bash
 python demo.py \
   --object-scale-key YCB_002_master_chef_can__scale120 \
-  --coacd-path datasets/graspdata_YCB_liberhand/YCB_002_master_chef_can/scale120/coacd.obj \
-  --mjcf-path datasets/graspdata_YCB_liberhand/YCB_002_master_chef_can/scale120/object.xml \
-  -c configs/run_YCB_liberhand.json -v
+  --coacd-path datasets/objdata_YCB/YCB_002_master_chef_can/scale120/coacd.obj \
+  --mjcf-path datasets/objdata_YCB/YCB_002_master_chef_can/scale120/object.xml \
+  -c configs/run_YCB_liberhand_right.json -v
 ```
 
 Replay all saved grasps for one object-scale under MuJoCo extforce:
 
 ```bash
 python vis_grasp_mujoco.py \
-  --object-scale-dir datasets/graspdata_YCB_liberhand/YCB_002_master_chef_can/scale120 \
-  -c configs/run_YCB_liberhand.json -v
+  --object-scale-dir datasets/graspdata_YCB_liberhand_right/YCB_002_master_chef_can/scale120 \
+  -c configs/run_YCB_liberhand_right.json -v
 ```
 
 ### CPU: Whole Dataset in Parallel
@@ -247,7 +252,7 @@ python vis_grasp_mujoco.py \
 `run_multi.py` only launches parallel grasp sampling.
 
 ```bash
-python run_multi.py -c configs/run_YCB_liberhand.json -j 16 --force
+python run_multi.py -c configs/run_YCB_liberhand_right.json -j 16 --force
 ```
 
 Useful flags:
@@ -266,11 +271,11 @@ logs/run/<dataset_tag>/
 
 ```bash
 python run_mjw.py \
-  -c configs/run_YCB_liberhand.json \
+  -c configs/run_YCB_liberhand_right.json \
   --object-scale-key YCB_002_master_chef_can__scale120 \
-  --coacd-path datasets/graspdata_YCB_liberhand/YCB_002_master_chef_can/scale120/coacd.obj \
-  --mjcf-path datasets/graspdata_YCB_liberhand/YCB_002_master_chef_can/scale120/object.xml \
-  --output-dir datasets/graspdata_YCB_liberhand/YCB_002_master_chef_can/scale120 \
+  --coacd-path datasets/objdata_YCB/YCB_002_master_chef_can/scale120/coacd.obj \
+  --mjcf-path datasets/objdata_YCB/YCB_002_master_chef_can/scale120/object.xml \
+  --output-dir datasets/graspdata_YCB_liberhand_right/YCB_002_master_chef_can/scale120 \
   --batch-size 512 \
   --nconmax 32 \
   --naconmax 16384 \
@@ -283,7 +288,7 @@ python run_mjw.py \
 
 ```bash
 python run_multi_mjw.py \
-  -c configs/run_YCB_liberhand.json \
+  -c configs/run_YCB_liberhand_right.json \
   -j 4 \
   --batch-size 512 \
   --njmax 200 \
@@ -306,14 +311,14 @@ logs/run_mjw/<dataset_tag>/
 Whole dataset:
 
 ```bash
-python run_warp_render.py -c configs/run_YCB_liberhand.json -j 2
+python run_warp_render.py -c configs/run_YCB_liberhand_right.json -j 2
 ```
 
 Single entry:
 
 ```bash
-python run_warp_render.py -c configs/run_YCB_liberhand.json -i 0
-python run_warp_render.py -c configs/run_YCB_liberhand.json -k YCB_002_master_chef_can__scale080
+python run_warp_render.py -c configs/run_YCB_liberhand_right.json -i 0
+python run_warp_render.py -c configs/run_YCB_liberhand_right.json -k YCB_002_master_chef_can__scale080
 ```
 
 ### Dataset Split Manifest Build
@@ -323,7 +328,27 @@ python run_warp_render.py -c configs/run_YCB_liberhand.json -k YCB_002_master_ch
 - `datasets/<dataset_tag>/test.json`
 
 ```bash
-python build_dataset_splits.py -c configs/run_YCB_liberhand.json
+python build_dataset_splits.py -c configs/run_YCB_liberhand_right.json
+```
+
+### Contact Parameter Ablation
+
+`scripts/solimp_solref_experiment.py` runs four `solimp/solref` cases on one object-scale:
+- `hand_soft_obj_hard`
+- `hand_hard_obj_soft`
+- `hand_hard_obj_hard`
+- `hand_soft_obj_soft`
+
+Default outputs:
+- generated case configs: `scripts/configs/solimp_solref_cases/`
+- experiment logs/results: `tmp/solimp_solref_experiment/`
+
+```bash
+python scripts/solimp_solref_experiment.py \
+  --object-scale-key YCB_013_apple__scale080 \
+  --asset-dir datasets/objdata_YCB/YCB_013_apple/scale080 \
+  --work-dir tmp/solimp_solref_experiment_YCB_013_apple_scale080 \
+  --parallel-cases --max-workers 4
 ```
 
 ### Dataset Simulation Check
@@ -339,14 +364,14 @@ Current mainline validation:
 Default validation uses `float32` qpos casting:
 
 ```bash
-python sim_dataset.py -c configs/run_YCB_liberhand.json --split train -v
+python sim_dataset.py -c configs/run_YCB_liberhand_right.json --split train -v
 ```
 
 To compare simulated success rates under `float32` and `float64` casting:
 
 ```bash
-python sim_dataset.py -c configs/run_YCB_liberhand.json --split train --dtype float32 -v
-python sim_dataset.py -c configs/run_YCB_liberhand.json --split train --dtype float64 -v
+python sim_dataset.py -c configs/run_YCB_liberhand_right.json --split train --dtype float32 -v
+python sim_dataset.py -c configs/run_YCB_liberhand_right.json --split train --dtype float64 -v
 ```
 
 ### One-Command Pipeline
@@ -358,14 +383,14 @@ python sim_dataset.py -c configs/run_YCB_liberhand.json --split train --dtype fl
 4. `build_dataset_splits.py`
 
 ```bash
-bash scripts/run_pipeline.sh -c configs/run_YCB_liberhand.json
+bash scripts/run_pipeline.sh -c configs/run_YCB_liberhand_right.json
 ```
 
 Overrides:
 
 ```bash
 bash scripts/run_pipeline.sh \
-  -c configs/run_YCB_liberhand.json \
+  -c configs/run_YCB_liberhand_right.json \
   --cpu-set 0-23 \
   --run-j 24 \
   --render-j 2 \
@@ -378,33 +403,33 @@ bash scripts/run_pipeline.sh \
 Object mesh:
 
 ```bash
-python vis_obj.py -c configs/run_YCB_liberhand.json -i 0
-python vis_obj.py -c configs/run_YCB_liberhand.json -k YCB_002_master_chef_can__scale080
+python vis_obj.py -c configs/run_YCB_liberhand_right.json -i 0
+python vis_obj.py -c configs/run_YCB_liberhand_right.json -k YCB_002_master_chef_can__scale080
 ```
 
 Hand-object state:
 
 ```bash
-python vis_ho.py -c configs/run_YCB_liberhand.json -i 0
+python vis_ho.py -c configs/run_YCB_liberhand_right.json -i 0
 ```
 
 Saved grasp states:
 
 ```bash
-python vis_grasp.py -c configs/run_YCB_liberhand.json -i 0
-python vis_grasp.py -c configs/run_YCB_liberhand.json -i 0 --vis-ids 0,10,-1 --frame-stage qpos_grasp
+python vis_grasp.py -c configs/run_YCB_liberhand_right.json -i 0
+python vis_grasp.py -c configs/run_YCB_liberhand_right.json -i 0 --vis-ids 0,10,-1 --frame-stage qpos_grasp
 ```
 
 Saved partial point clouds:
 
 ```bash
-python vis_pc.py -c configs/run_YCB_liberhand.json -i 0 --show-cam-frames
+python vis_pc.py -c configs/run_YCB_liberhand_right.json -i 0 --show-cam-frames
 ```
 
 Plot grasp pose distributions:
 
 ```bash
-PYTHONPATH=. python tools/visualization/plot_grasp_pose_plotly.py -c configs/run_YCB_liberhand.json -i 0
+PYTHONPATH=. python tools/visualization/plot_grasp_pose_plotly.py -c configs/run_YCB_liberhand_right.json -i 0
 ```
 
 ## Main Files
@@ -426,6 +451,8 @@ PYTHONPATH=. python tools/visualization/plot_grasp_pose_plotly.py -c configs/run
   Replay saved dataset grasps and report extforce success rates under `float32` / `float64`
 - [scripts/run_pipeline.sh](/home/ccs/repositories/dexgrasp_sample/scripts/run_pipeline.sh)
   One-command full pipeline shell script
+- [scripts/solimp_solref_experiment.py](/home/ccs/repositories/dexgrasp_sample/scripts/solimp_solref_experiment.py)
+  Single-object contact parameter ablation with optional parallel case execution
 
 ### Core Modules
 - [src/dataset_objects.py](/home/ccs/repositories/dexgrasp_sample/src/dataset_objects.py)
@@ -466,8 +493,8 @@ PYTHONPATH=. python tools/visualization/plot_grasp_pose_plotly.py -c configs/run
 ## Tuning Notes
 
 ### CPU
-- `output.flush_every = 25` is the current default and avoids flushing HDF5 on every accepted sample.
-- `run.py` uses `output.max_time_sec` as a total wall-clock cap for the whole CPU sampling run.
+- `data.flush_every = 25` is the current default and avoids flushing HDF5 on every accepted sample.
+- `run.py` uses `data.max_time_sec` as a total wall-clock cap for the whole CPU sampling run.
 - `sim_grasp(record_history=False)` is the default hot-path setting; enable history only for visualization/debugging.
 - For cleaner CPU benchmarks:
 
@@ -475,12 +502,12 @@ PYTHONPATH=. python tools/visualization/plot_grasp_pose_plotly.py -c configs/run
 sync
 echo 3 | sudo tee /proc/sys/vm/drop_caches >/dev/null
 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1 \
-taskset -c 0-15 python run_multi.py -c configs/run_YCB_liberhand.json -j 16
+taskset -c 0-15 python run_multi.py -c configs/run_YCB_liberhand_right.json -j 16
 ```
 
 ### MJWarp
-- `output.max_cap = 100` is still the practical target for the current MJWarp path.
-- `output.max_time_sec = 180.0` is the current extforce wall-clock cap in `run_mjw.py`.
+- `data.max_cap = 100` is still the practical target for the current MJWarp path.
+- `data.max_time_sec = 180.0` is the current extforce wall-clock cap in `run_mjw.py`.
 - If the goal is to reach about `100` valid grasps quickly, prefer `batch_size` near the target, typically `128`, `256`, or `512`.
 - Very large `batch_size` values such as `4096` are better suited to large-scale harvesting than to early-stop collection around `100` valid grasps.
 - Current mainline default `sampling.n_points = 2048` is the compromise point for the `max_cap = 100` workflow.

@@ -22,10 +22,11 @@
   - `assets/objects -> /home/ccs/repositories/mesh_process/assets/objects`
 - 主线默认合并数据集列表：
   - `["YCB"]`
-- `DatasetObjects` 在合并后的数据集列表之上暴露全局整数 id 空间；`run.py` 通过全局 id 选择物体。
+- `DatasetObjects` 在合并后的数据集列表之上暴露全局整数 id 空间。
+- `run.py` 通过 `--object-scale-key` 采样单个条目；`run_multi.py` 按 `global_id` 顺序遍历全部条目。
 
 ## 缩放策略
-- 所有数据集统一使用配置中的固定 scale 列表（`dataset.scales`）。
+- 所有数据集统一使用配置中的固定 scale 列表（`data.scales`）。
 - 当前主线中 liberhand 配置的默认列表为：
   - `[0.08, 0.10, 0.12, 0.14, 0.16]`
 - scale 粒度为 object-scale 扁平索引（每个物体的每个 scale 各对应一项）。
@@ -68,8 +69,8 @@
     - `prepared_contact` 保存发生碰撞的 prepared 状态
     - `insufficient_contact` 保存闭合后的 `qpos_grasp`
     - `extforce_failure` 保存失败的 `qpos_squeeze`
-  - 如果 `valid_count < output.min_valid_count`，则正样本和失败样本文件都必须截断为 0 行
-  - 否则失败样本使用配置中的 seed 做 deterministic shuffle，并截断到 `floor(output.fail_keep_ratio * valid_count)`
+  - 如果 `valid_count < data.min_valid_count`，则正样本和失败样本文件都必须截断为 0 行
+  - 否则失败样本使用配置中的 seed 做 deterministic shuffle，并截断到 `floor(data.fail_keep_ratio * valid_count)`
 - `grasp.h5` 完成后，加载同一批数组并转换为 `grasp.npy`（数值必须与 HDF5 完全一致）。
 - `sim_dataset.py` 是基于 `train.json` / `test.json` 的数据集级回放/验证入口。
   - 保留保存的 `qpos_init` 预检查
@@ -80,14 +81,15 @@
   - `datasets/<dataset_tag>/<object>/scaleXXX/<warp_render.output_subdir>/`
   - `dataset_tag` 规则：将配置文件 stem 前缀 `run_` 替换为 `graspdata_`
   - 默认子目录：`pc_warp`
-  - `run.py` / `run_mjw.py` 会在抓取采样前或采样同时，把 `global_pc.npy` 保存到同一 `pc_warp/` 目录下
+  - `run.py` 会从 objdata 资产中读取预构建的 `global_pc.npy` 与 `global_normals.npy`
+  - `run_mjw.py` 会在采样过程中把 `global_pc.npy` 保存到同一 `pc_warp/` 目录下
   - `global_pc.npy` 保存的是采样器最初使用的世界系物体点云，不是多视角 partial point cloud 的拼接
   - 当前主线默认是世界系 `float32`、shape 为 `(sampling.n_points, 3)`
 - 点云单独保存，不得打包进 `grasp.npy`。
 
 ## 采样流水线（GPU版本）
 - 使用MJWarp
-- 对于 `run_mjw.py`，保持 `output.max_cap=100`，并使用 `output.max_time_sec` 限制 extforce 阶段墙钟时间（当前默认：`180s`）。
+- 对于 `run_mjw.py`，保持 `data.max_cap=100`，并使用 `data.max_time_sec` 限制 extforce 阶段墙钟时间（当前默认：`180s`）。
 - 如果目标是尽快为每个 object-scale 收集约 `100` 个有效抓取，优先将 `batch_size` 设在接近 `max_cap` 的范围，通常为 `128`、`256` 或 `512`。
 - 在小容量采集目标下，不要默认使用过大的 `batch_size`，例如 `4096`：单次 MJWarp 步骤会过重，extforce 阶段也会明显变慢。
 - `batch_size=4096` 更适合大规模抓取采集，而不适合快速达到 `max_cap=100`。
@@ -110,11 +112,11 @@
 - 主线采用 config-first：所有 CLI 入口都必须加载 JSON 配置。
 - 不允许在 Python 代码中重新构造默认值（禁止 `build_default_*` 风格）。
 - 脚本默认入口配置为：
-  - `configs/run_YCB_liberhand.json`
+  - `configs/run_YCB_liberhand_right.json`
 - 当前主线配置分组顺序为：
-  - `seed`、`dataset`、`hand`、`sampling`、`sim_grasp`、`extforce`、`output`、`warp_render`
+  - `seed`、`data`、`hand`、`sampling`、`sim_grasp`、`extforce`、`profile_object`
 - 配置集命名：
-  - `<dataset_group>_<hand>.json`，其中 dataset group 属于 `{YCB, DGN}`，hand 属于 `{liberhand, inspire, liberhand2}`。
+  - `run_<dataset_group>_<hand>_<side>.json`，其中 dataset group 属于 `{YCB, DGN}`，hand 属于 `{liberhand, inspire, liberhand2}`，side 通常为 `{left, right}`。
 - 缺失或非法的配置字段必须快速失败，并给出明确错误。
 
 ## 统一数据集格式（摘要）

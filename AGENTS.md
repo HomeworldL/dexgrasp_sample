@@ -22,10 +22,11 @@ Mainline work focuses on offline grasp configuration generation.
   - `assets/objects -> /home/ccs/repositories/mesh_process/assets/objects`
 - Default merged dataset list in mainline:
   - `["YCB"]`
-- `DatasetObjects` exposes a global integer id space over the merged list; `run.py` selects objects by global id.
+- `DatasetObjects` exposes a global integer id space over the merged list.
+- `run.py` samples a single entry by `--object-scale-key`; `run_multi.py` iterates all entries by `global_id` ordering.
 
 ## Scale Policy
-- All datasets use the unified fixed scale list from config (`dataset.scales`).
+- All datasets use the unified fixed scale list from config (`data.scales`).
 - Current mainline default list for liberhand configs:
   - `[0.08, 0.10, 0.12, 0.14, 0.16]`
 - Scale granularity is object-scale flattened indexing (one entry per object per scale).
@@ -68,8 +69,8 @@ Mainline work focuses on offline grasp configuration generation.
     - `prepared_contact` stores the colliding prepared state
     - `insufficient_contact` stores the post-close `qpos_grasp`
     - `extforce_failure` stores the failed `qpos_squeeze`
-  - if `valid_count < output.min_valid_count`, both positive and failure files must be truncated to zero rows
-  - otherwise failure samples are deterministically shuffled with config seed and truncated to `floor(output.fail_keep_ratio * valid_count)`
+  - if `valid_count < data.min_valid_count`, both positive and failure files must be truncated to zero rows
+  - otherwise failure samples are deterministically shuffled with config seed and truncated to `floor(data.fail_keep_ratio * valid_count)`
 - After `grasp.h5` is finalized, load the same arrays and convert them to `grasp.npy` (values must be identical to HDF5).
 - `sim_dataset.py` is the dataset-level replay/validation entrypoint for `train.json` / `test.json`.
   - it keeps the stored `qpos_init` pre-check
@@ -80,14 +81,15 @@ Mainline work focuses on offline grasp configuration generation.
   - `datasets/<dataset_tag>/<object>/scaleXXX/<warp_render.output_subdir>/`
   - `dataset_tag` rule: replace config stem prefix `run_` with `graspdata_`
   - default subdir: `pc_warp`
-  - `run.py` / `run_mjw.py` also save `global_pc.npy` under the same `pc_warp/` directory before or alongside grasp sampling
+  - `run.py` reads prebuilt `global_pc.npy` and `global_normals.npy` from objdata assets
+  - `run_mjw.py` saves `global_pc.npy` under the same `pc_warp/` directory during sampling
   - `global_pc.npy` stores the initial sampled world-frame object points used by the sampler, not a merge of rendered partial views
   - current mainline default is world-frame `float32` with shape `(sampling.n_points, 3)`
 - Point cloud is saved separately and must not be bundled into `grasp.npy`.
 
 ## Sampling Pipeline (GPU Version)
 - Use MJWarp.
-- For `run_mjw.py`, keep `output.max_cap=100` and cap extforce wall-clock time with `output.max_time_sec` (current default: `180s`).
+- For `run_mjw.py`, keep `data.max_cap=100` and cap extforce wall-clock time with `data.max_time_sec` (current default: `180s`).
 - If the goal is to collect about `100` valid grasps per object-scale quickly, prefer `batch_size` near `max_cap`, typically `128`, `256`, or `512`.
 - Do not default to overly large `batch_size` such as `4096` for small-cap collection: one MJWarp step becomes too heavy and the extforce stage slows down noticeably.
 - `batch_size=4096` is more appropriate for large-scale grasp harvesting, not for quickly reaching `max_cap=100`.
@@ -110,11 +112,11 @@ Mainline work focuses on offline grasp configuration generation.
 - Mainline is config-first: all CLI entrypoints must load a JSON config.
 - Do not rebuild defaults inside Python code (`build_default_*` style is disallowed).
 - Default entry config for scripts is:
-  - `configs/run_YCB_liberhand.json`
+  - `configs/run_YCB_liberhand_right.json`
 - Current mainline config grouping order is:
-  - `seed`, `dataset`, `hand`, `sampling`, `sim_grasp`, `extforce`, `output`, `warp_render`
+  - `seed`, `data`, `hand`, `sampling`, `sim_grasp`, `extforce`, `profile_object`
 - Config set naming:
-  - `<dataset_group>_<hand>.json`, where dataset group is in `{YCB, DGN}` and hand is in `{liberhand, inspire, liberhand2}`.
+  - `run_<dataset_group>_<hand>_<side>.json`, where dataset group is in `{YCB, DGN}`, hand is in `{liberhand, inspire, liberhand2}`, and side is typically `{left, right}`.
 - Invalid or missing config fields should fail fast with explicit errors.
 
 ## Unified Dataset Format (Summary)

@@ -43,7 +43,7 @@
 - 数据集切分按 `object_name` 分组，避免不同 scale 间泄漏
 
 默认约定：
-- 默认配置：`configs/run_YCB_liberhand.json`
+- 默认配置：`configs/run_YCB_liberhand_right.json`
 - 默认数据根目录：`assets/objects/processed`
 - 生成数据集 tag 规则：`run_<...>.json -> graspdata_<...>`
 
@@ -122,19 +122,23 @@ assets/objects -> /home/ccs/repositories/mesh_process/assets/objects
 
 ### 输出目录结构
 
-例如 `graspdata_YCB_liberhand` 下的输出大致是：
+当前主线将“物体资产”和“抓取输出”分开存放：
 
 ```text
-datasets/graspdata_YCB_liberhand/<object>/scaleXXX/
+datasets/objdata_YCB/<object>/scaleXXX/
   coacd.obj
   object.xml
   convex_parts/*.obj
+  pc_warp/
+    global_pc.npy
+    global_normals.npy
+
+datasets/graspdata_YCB_liberhand_right/<object>/scaleXXX/
   grasp.h5
   grasp.npy
   grasp_fail.h5
   grasp_fail.npy
   pc_warp/
-    global_pc.npy
     cam_in.npy
     cam_ex_XX.npy
     partial_pc_XX.npy
@@ -164,11 +168,12 @@ datasets/graspdata_YCB_liberhand/<object>/scaleXXX/
   - `prepared_contact`：发生碰撞的 prepared 状态
   - `insufficient_contact`：闭合后的 `qpos_grasp`
   - `extforce_failure`：失败的 `qpos_squeeze`
-- 如果 `valid_count < output.min_valid_count`，则正样本和失败样本文件都会被截断为 0 行
-- 否则失败样本会使用配置中的 `seed` 做 deterministic shuffle，并按 `floor(output.fail_keep_ratio * valid_count)` 截断保留
+- 如果 `valid_count < data.min_valid_count`，则正样本和失败样本文件都会被截断为 0 行
+- 否则失败样本会使用配置中的 `seed` 做 deterministic shuffle，并按 `floor(data.fail_keep_ratio * valid_count)` 截断保留
 
 全局点云补充：
-- `pc_warp/global_pc.npy` 由 `run.py` / `run_mjw.py` 导出
+- `run.py` 会从 objdata 资产里读取 `global_pc.npy` / `global_normals.npy`
+- `run_mjw.py` 会在抓取输出目录下写入 `pc_warp/global_pc.npy`
 - 它保存的是抓取生成最开始采样到的世界系物体点云，不是 `partial_pc_XX.npy` 的拼接结果
 - 当前主线默认 shape 为 `(sampling.n_points, 3)`，dtype 为 `float32`
 
@@ -198,11 +203,11 @@ datasets/graspdata_YCB_liberhand/<object>/scaleXXX/
 
 ```bash
 python run.py \
-  -c configs/run_YCB_liberhand.json \
+  -c configs/run_YCB_liberhand_right.json \
   --object-scale-key YCB_002_master_chef_can__scale120 \
-  --coacd-path datasets/graspdata_YCB_liberhand/YCB_002_master_chef_can/scale120/coacd.obj \
-  --mjcf-path datasets/graspdata_YCB_liberhand/YCB_002_master_chef_can/scale120/object.xml \
-  --output-dir datasets/graspdata_YCB_liberhand/YCB_002_master_chef_can/scale120 \
+  --coacd-path datasets/objdata_YCB/YCB_002_master_chef_can/scale120/coacd.obj \
+  --mjcf-path datasets/objdata_YCB/YCB_002_master_chef_can/scale120/object.xml \
+  --output-dir datasets/graspdata_YCB_liberhand_right/YCB_002_master_chef_can/scale120 \
   --force -v
 ```
 
@@ -219,9 +224,9 @@ python run.py \
 ```bash
 python demo_grasp.py \
   --object-scale-key YCB_002_master_chef_can__scale120 \
-  --coacd-path datasets/graspdata_YCB_liberhand/YCB_002_master_chef_can/scale120/coacd.obj \
-  --mjcf-path datasets/graspdata_YCB_liberhand/YCB_002_master_chef_can/scale120/object.xml \
-  -c configs/run_YCB_liberhand.json -v
+  --coacd-path datasets/objdata_YCB/YCB_002_master_chef_can/scale120/coacd.obj \
+  --mjcf-path datasets/objdata_YCB/YCB_002_master_chef_can/scale120/object.xml \
+  -c configs/run_YCB_liberhand_right.json -v
 ```
 
 在线可视化，找到第一个通过 extforce 的抓取后停止：
@@ -229,17 +234,17 @@ python demo_grasp.py \
 ```bash
 python demo.py \
   --object-scale-key YCB_002_master_chef_can__scale120 \
-  --coacd-path datasets/graspdata_YCB_liberhand/YCB_002_master_chef_can/scale120/coacd.obj \
-  --mjcf-path datasets/graspdata_YCB_liberhand/YCB_002_master_chef_can/scale120/object.xml \
-  -c configs/run_YCB_liberhand.json -v
+  --coacd-path datasets/objdata_YCB/YCB_002_master_chef_can/scale120/coacd.obj \
+  --mjcf-path datasets/objdata_YCB/YCB_002_master_chef_can/scale120/object.xml \
+  -c configs/run_YCB_liberhand_right.json -v
 ```
 
 对单个 object-scale 的所有已保存抓取做 MuJoCo extforce 回放可视化：
 
 ```bash
 python vis_grasp_mujoco.py \
-  --object-scale-dir datasets/graspdata_YCB_liberhand/YCB_002_master_chef_can/scale120 \
-  -c configs/run_YCB_liberhand.json -v
+  --object-scale-dir datasets/graspdata_YCB_liberhand_right/YCB_002_master_chef_can/scale120 \
+  -c configs/run_YCB_liberhand_right.json -v
 ```
 
 ### CPU：整数据集并行
@@ -247,7 +252,7 @@ python vis_grasp_mujoco.py \
 `run_multi.py` 现在只负责并行跑抓取采样。
 
 ```bash
-python run_multi.py -c configs/run_YCB_liberhand.json -j 16 --force
+python run_multi.py -c configs/run_YCB_liberhand_right.json -j 16 --force
 ```
 
 常用参数：
@@ -266,11 +271,11 @@ logs/run/<dataset_tag>/
 
 ```bash
 python run_mjw.py \
-  -c configs/run_YCB_liberhand.json \
+  -c configs/run_YCB_liberhand_right.json \
   --object-scale-key YCB_002_master_chef_can__scale120 \
-  --coacd-path datasets/graspdata_YCB_liberhand/YCB_002_master_chef_can/scale120/coacd.obj \
-  --mjcf-path datasets/graspdata_YCB_liberhand/YCB_002_master_chef_can/scale120/object.xml \
-  --output-dir datasets/graspdata_YCB_liberhand/YCB_002_master_chef_can/scale120 \
+  --coacd-path datasets/objdata_YCB/YCB_002_master_chef_can/scale120/coacd.obj \
+  --mjcf-path datasets/objdata_YCB/YCB_002_master_chef_can/scale120/object.xml \
+  --output-dir datasets/graspdata_YCB_liberhand_right/YCB_002_master_chef_can/scale120 \
   --batch-size 512 \
   --nconmax 32 \
   --naconmax 16384 \
@@ -283,7 +288,7 @@ python run_mjw.py \
 
 ```bash
 python run_multi_mjw.py \
-  -c configs/run_YCB_liberhand.json \
+  -c configs/run_YCB_liberhand_right.json \
   -j 4 \
   --batch-size 512 \
   --njmax 200 \
@@ -306,14 +311,14 @@ logs/run_mjw/<dataset_tag>/
 整数据集：
 
 ```bash
-python run_warp_render.py -c configs/run_YCB_liberhand.json -j 2
+python run_warp_render.py -c configs/run_YCB_liberhand_right.json -j 2
 ```
 
 单条目：
 
 ```bash
-python run_warp_render.py -c configs/run_YCB_liberhand.json -i 0
-python run_warp_render.py -c configs/run_YCB_liberhand.json -k YCB_002_master_chef_can__scale080
+python run_warp_render.py -c configs/run_YCB_liberhand_right.json -i 0
+python run_warp_render.py -c configs/run_YCB_liberhand_right.json -k YCB_002_master_chef_can__scale080
 ```
 
 ### 构建数据集 Split
@@ -323,7 +328,27 @@ python run_warp_render.py -c configs/run_YCB_liberhand.json -k YCB_002_master_ch
 - `datasets/<dataset_tag>/test.json`
 
 ```bash
-python build_dataset_splits.py -c configs/run_YCB_liberhand.json
+python build_dataset_splits.py -c configs/run_YCB_liberhand_right.json
+```
+
+### 接触参数对比实验
+
+`scripts/solimp_solref_experiment.py` 会在单个 object-scale 上跑四组 `solimp/solref` 对比：
+- `hand_soft_obj_hard`
+- `hand_hard_obj_soft`
+- `hand_hard_obj_hard`
+- `hand_soft_obj_soft`
+
+默认输出：
+- 生成的测试配置：`scripts/configs/solimp_solref_cases/`
+- 实验日志与汇总：`tmp/solimp_solref_experiment/`
+
+```bash
+python scripts/solimp_solref_experiment.py \
+  --object-scale-key YCB_013_apple__scale080 \
+  --asset-dir datasets/objdata_YCB/YCB_013_apple/scale080 \
+  --work-dir tmp/solimp_solref_experiment_YCB_013_apple_scale080 \
+  --parallel-cases --max-workers 4
 ```
 
 ### 数据集仿真复验
@@ -339,14 +364,14 @@ python build_dataset_splits.py -c configs/run_YCB_liberhand.json
 默认按 `float32` 读取并转换 qpos：
 
 ```bash
-python sim_dataset.py -c configs/run_YCB_liberhand.json --split train -v
+python sim_dataset.py -c configs/run_YCB_liberhand_right.json --split train -v
 ```
 
 如果要比较 `float32` 和 `float64` 两种精度下的成功率：
 
 ```bash
-python sim_dataset.py -c configs/run_YCB_liberhand.json --split train --dtype float32 -v
-python sim_dataset.py -c configs/run_YCB_liberhand.json --split train --dtype float64 -v
+python sim_dataset.py -c configs/run_YCB_liberhand_right.json --split train --dtype float32 -v
+python sim_dataset.py -c configs/run_YCB_liberhand_right.json --split train --dtype float64 -v
 ```
 
 ### 一键流水线脚本
@@ -358,14 +383,14 @@ python sim_dataset.py -c configs/run_YCB_liberhand.json --split train --dtype fl
 4. `build_dataset_splits.py`
 
 ```bash
-bash scripts/run_pipeline.sh -c configs/run_YCB_liberhand.json
+bash scripts/run_pipeline.sh -c configs/run_YCB_liberhand_right.json
 ```
 
 可选覆盖：
 
 ```bash
 bash scripts/run_pipeline.sh \
-  -c configs/run_YCB_liberhand.json \
+  -c configs/run_YCB_liberhand_right.json \
   --cpu-set 0-23 \
   --run-j 24 \
   --render-j 2 \
@@ -378,33 +403,33 @@ bash scripts/run_pipeline.sh \
 物体网格：
 
 ```bash
-python vis_obj.py -c configs/run_YCB_liberhand.json -i 0
-python vis_obj.py -c configs/run_YCB_liberhand.json -k YCB_002_master_chef_can__scale080
+python vis_obj.py -c configs/run_YCB_liberhand_right.json -i 0
+python vis_obj.py -c configs/run_YCB_liberhand_right.json -k YCB_002_master_chef_can__scale080
 ```
 
 手物体姿态：
 
 ```bash
-python vis_ho.py -c configs/run_YCB_liberhand.json -i 0
+python vis_ho.py -c configs/run_YCB_liberhand_right.json -i 0
 ```
 
 已保存抓取状态：
 
 ```bash
-python vis_grasp.py -c configs/run_YCB_liberhand.json -i 0
-python vis_grasp.py -c configs/run_YCB_liberhand.json -i 0 --vis-ids 0,10,-1 --frame-stage qpos_grasp
+python vis_grasp.py -c configs/run_YCB_liberhand_right.json -i 0
+python vis_grasp.py -c configs/run_YCB_liberhand_right.json -i 0 --vis-ids 0,10,-1 --frame-stage qpos_grasp
 ```
 
 已保存部分点云：
 
 ```bash
-python vis_pc.py -c configs/run_YCB_liberhand.json -i 0 --show-cam-frames
+python vis_pc.py -c configs/run_YCB_liberhand_right.json -i 0 --show-cam-frames
 ```
 
 抓取姿态分布绘图：
 
 ```bash
-PYTHONPATH=. python tools/visualization/plot_grasp_pose_plotly.py -c configs/run_YCB_liberhand.json -i 0
+PYTHONPATH=. python tools/visualization/plot_grasp_pose_plotly.py -c configs/run_YCB_liberhand_right.json -i 0
 ```
 
 ## 主要文件详解
@@ -426,6 +451,8 @@ PYTHONPATH=. python tools/visualization/plot_grasp_pose_plotly.py -c configs/run
   重放已保存数据集 grasp，并统计 `float32` / `float64` 下的 extforce 成功率
 - [scripts/run_pipeline.sh](/home/ccs/repositories/dexgrasp_sample/scripts/run_pipeline.sh)
   一键完整流水线
+- [scripts/solimp_solref_experiment.py](/home/ccs/repositories/dexgrasp_sample/scripts/solimp_solref_experiment.py)
+  单物体接触参数对比实验（支持并行运行四组 case）
 
 ### 核心模块
 - [src/dataset_objects.py](/home/ccs/repositories/dexgrasp_sample/src/dataset_objects.py)
@@ -466,8 +493,8 @@ PYTHONPATH=. python tools/visualization/plot_grasp_pose_plotly.py -c configs/run
 ## Tuning Notes
 
 ### CPU
-- `output.flush_every = 25` 是当前默认值，可以避免每接受一个有效样本就刷一次 HDF5。
-- `run.py` 使用 `output.max_time_sec` 作为整个 CPU 采样流程的总 wall-clock 上限。
+- `data.flush_every = 25` 是当前默认值，可以避免每接受一个有效样本就刷一次 HDF5。
+- `run.py` 使用 `data.max_time_sec` 作为整个 CPU 采样流程的总 wall-clock 上限。
 - `sim_grasp(record_history=False)` 是主路径默认值；只有可视化/调试才建议开启 history。
 - 如果要做更干净的 CPU benchmark：
 
@@ -475,12 +502,12 @@ PYTHONPATH=. python tools/visualization/plot_grasp_pose_plotly.py -c configs/run
 sync
 echo 3 | sudo tee /proc/sys/vm/drop_caches >/dev/null
 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1 \
-taskset -c 0-15 python run_multi.py -c configs/run_YCB_liberhand.json -j 16
+taskset -c 0-15 python run_multi.py -c configs/run_YCB_liberhand_right.json -j 16
 ```
 
 ### MJWarp
-- 当前 MJWarp 路线仍以 `output.max_cap = 100` 作为较实用的采样目标。
-- `run_mjw.py` 使用 `output.max_time_sec = 180.0` 作为 extforce 阶段 wall-clock 上限。
+- 当前 MJWarp 路线仍以 `data.max_cap = 100` 作为较实用的采样目标。
+- `run_mjw.py` 使用 `data.max_time_sec = 180.0` 作为 extforce 阶段 wall-clock 上限。
 - 如果目标是尽快拿到约 `100` 个有效抓取，`batch_size` 建议在 `128`、`256`、`512` 这类量级。
 - `4096` 这种大 batch 更适合大规模抓取收集，不适合围绕 `100` 个有效抓取做快速早停。
 - 当前主线默认 `sampling.n_points = 2048`，是 `max_cap = 100` 工作流下的折中值。

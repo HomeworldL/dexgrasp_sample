@@ -194,7 +194,7 @@
     "Mp": 20,
     "steps": 40,
     "speed_gain": 1.5,
-    "max_tip_speed": 0.05,
+    "max_tip_speed": 0.03,
     "contact_min_count": 4,
     "target_point_method": 2
   },

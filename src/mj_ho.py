@@ -151,13 +151,38 @@ class MjHO:
         self.anchor_body_names: Optional[List[str]] = None
         self.anchor_body_ids: List[int] = []
         self.anchor_weights = np.zeros((0,), dtype=float)
+        self.anchor_plane_axes = np.zeros((0, 3), dtype=float)
         self.n_anchors = 0
         if anchor_params is not None:
             self.anchor_body_names = list(anchor_params.keys())
-            self.anchor_weights = np.asarray(
-                [float(value) for value in anchor_params.values()],
-                dtype=float,
-            )
+            weights: List[float] = []
+            axes: List[np.ndarray] = []
+            axis_table = {
+                "X": np.array([1.0, 0.0, 0.0], dtype=float),
+                "-X": np.array([-1.0, 0.0, 0.0], dtype=float),
+                "Y": np.array([0.0, 1.0, 0.0], dtype=float),
+                "-Y": np.array([0.0, -1.0, 0.0], dtype=float),
+                "Z": np.array([0.0, 0.0, 1.0], dtype=float),
+                "-Z": np.array([0.0, 0.0, -1.0], dtype=float),
+            }
+            for body_name in self.anchor_body_names:
+                value = anchor_params[body_name]
+                # Backward compatibility for legacy configs: numeric == {"weight": value, "axis": "Z"}.
+                if isinstance(value, dict):
+                    weight = float(value["weight"])
+                    axis_key = str(value["axis"]).strip().upper()
+                else:
+                    weight = float(value)
+                    axis_key = "Z"
+                if axis_key not in axis_table:
+                    raise ValueError(
+                        f"hand.anchor_params['{body_name}'].axis must be one of "
+                        f"{sorted(axis_table.keys())}, got '{axis_key}'."
+                    )
+                weights.append(weight)
+                axes.append(axis_table[axis_key].copy())
+            self.anchor_weights = np.asarray(weights, dtype=float)
+            self.anchor_plane_axes = np.asarray(axes, dtype=float)
             for bname in self.anchor_body_names:
                 if bname not in self.body_name_to_id:
                     raise ValueError(f"Body name '{bname}' not found in model bodies")
@@ -529,8 +554,9 @@ class MjHO:
             for ti, bid in enumerate(self.anchor_body_ids):
                 anchor_pos = anchor_positions[ti]
                 xmat = np.array(self.data.xmat[bid]).reshape(3, 3)
-                z_body = xmat[:, 2].copy()
-                z_body = z_body / (np.linalg.norm(z_body) + 1e-12)
+                axis_local = self.anchor_plane_axes[ti]
+                axis_world = xmat @ axis_local
+                axis_world = axis_world / (np.linalg.norm(axis_world) + 1e-12)
 
                 if method_id == 1:
                     _, idx_near = self.obj_tree.query(anchor_pos, k=Mp)
@@ -538,10 +564,10 @@ class MjHO:
                     pts_top_Mp = self.obj_pts[idx_near].reshape(-1, 3).copy()
                     pts_target = np.mean(pts_top_Mp, axis=0)
                 elif method_id == 2:
-                    # Original plane-first target selection: choose object points nearest to
-                    # the anchor body's local z-plane, then pick the Euclidean-nearest one.
+                    # Plane-first target selection: choose object points nearest to
+                    # the anchor's configured local axis plane, then pick the Euclidean-nearest one.
                     r_all = self.obj_pts - anchor_pos[None, :]
-                    abs_signed = np.abs(r_all.dot(z_body))
+                    abs_signed = np.abs(r_all.dot(axis_world))
                     if Mp == 1:
                         top_idx_by_plane = np.array([int(np.argmin(abs_signed))])
                     else:
@@ -555,11 +581,11 @@ class MjHO:
                     pts_target = pts_top_Mp[chosen_local].copy()
                 else:
                     # Euclidean-first variant: choose nearest object points, then pick
-                    # the candidate closest to the anchor body's local z-plane.
+                    # the candidate closest to the anchor's configured local axis plane.
                     _, idx_near = self.obj_tree.query(anchor_pos, k=Mp)
                     idx_near = np.atleast_1d(np.asarray(idx_near, dtype=int))
                     pts_top_Mp = self.obj_pts[idx_near].reshape(-1, 3).copy()
-                    abs_plane_dist = np.abs((pts_top_Mp - anchor_pos[None, :]).dot(z_body))
+                    abs_plane_dist = np.abs((pts_top_Mp - anchor_pos[None, :]).dot(axis_world))
                     idx_local = int(np.argmin(abs_plane_dist))
                     pts_target = pts_top_Mp[idx_local].copy()
 
@@ -646,6 +672,7 @@ class MjHO:
 
             if visualize:
                 self._render_viewer()
+                # time.sleep(0.03)
                 # time.sleep(0.1)
         # if visualize:
         #     while self.viewer.is_alive:

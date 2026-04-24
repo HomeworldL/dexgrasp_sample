@@ -80,6 +80,16 @@ python scripts/solimp_only_sweep.py
 python scripts/solimp_only_sweep.py --skip-run
 ```
 
+指定 object-scale / 输出目录：
+```bash
+OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 taskset -c 0-15 \
+python scripts/solimp_only_sweep.py \
+  --object-scale-key YCB_001_chips_can__scale080 \
+  --asset-dir datasets/objdata_YCB/YCB_001_chips_can/scale080 \
+  --work-dir tmp/solimp_only_sweep_YCB_001_chips_can_scale080 \
+  --max-workers 5
+```
+
 ## 4) 关于嵌入深度统计
 `solref_only_sweep.py` 与 `solimp_only_sweep.py` 当前都会写以下深度指标：
 - `grasp_depth_p95_mm`, `grasp_depth_max_mm`
@@ -95,3 +105,60 @@ python scripts/solimp_only_sweep.py --skip-run
   - `OPENBLAS_NUM_THREADS=1`
   - `taskset -c 0-15`（根据机器实际 CPU 核调整）
 - 并行 case 数建议不要超过可用物理核心数。
+
+## 6) `sim_grasp_param_sweep.py`
+用途：
+- 固定 `liberhand` 和 `YCB_001_chips_can__scale100`。
+- 扫描 `sim_grasp` 的 4 个参数：
+  - `Mp`: `10, 15, 20, 25, 30`
+  - `steps`: `30, 40, 50, 70, 90`
+  - `speed_gain`: `0.9, 1.2, 1.5, 1.8, 2.1`
+  - `max_tip_speed`: `0.03, 0.04, 0.05, 0.06, 0.07`
+- 总共 20 组，按参数分 4 批，每批 5 组并行。
+
+特点：
+- 自动生成 case 配置到 `scripts/configs/sim_grasp_param_cases/`
+- 每个子进程固定使用：
+  - `OMP_NUM_THREADS=1`
+  - `OPENBLAS_NUM_THREADS=1`
+  - `taskset -c 0-15`
+- 输出采样统计到 `tmp/sim_grasp_param_sweep_YCB_001_chips_can_scale100/summary.json|csv`
+
+示例：
+```bash
+python scripts/sim_grasp_param_sweep.py
+```
+
+仅跑部分参数组：
+```bash
+python scripts/sim_grasp_param_sweep.py --run-groups Mp steps
+```
+
+仅重算统计：
+```bash
+python scripts/sim_grasp_param_sweep.py --skip-run
+```
+
+## 7) `liberhand_actuation_sweep.py`
+用途：
+- 对 `liberhand_right.xml` 做 `kp/forcerange/actuatorfrcrange` 的 `2x2x2` 全因子实验。
+- 当前档位：
+  - `kp`: `1, 30`
+  - `forcerange`: `1, 30`（对应 actuator `forcerange=[-x,x]`）
+  - `actuatorfrcrange`: `1, 30`（对应 joint `actuatorfrcrange=[-x,x]`）
+- 总共 8 组，自动生成 case XML 与 case config，然后调用 `run.py`。
+
+输出：
+- case config：`scripts/configs/liberhand_actuation_cases/`
+- case hand XML：`assets/hands/liberhand/liberhand_right_kp*_f*_af*.xml`
+- summary：`tmp/liberhand_actuation_sweep_<object_scale>/summary.json|csv`
+
+示例：
+```bash
+OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 taskset -c 0-15 \
+python scripts/liberhand_actuation_sweep.py \
+  --object-scale-key YCB_001_chips_can__scale080 \
+  --asset-dir datasets/objdata_YCB/YCB_001_chips_can/scale080 \
+  --work-dir tmp/liberhand_actuation_sweep_YCB_001_chips_can_scale080 \
+  --max-workers 4
+```

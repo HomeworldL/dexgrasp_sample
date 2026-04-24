@@ -25,7 +25,7 @@
     "min_valid_count": 5
   },
   "hand": {
-    "xml_path": "./assets/hands/liberhand/liberhand_right.xml",
+    "xml_path": "/home/ccs/repositories/dexgrasp_sample/assets/hands/liberhand/liberhand_right_kp1_f1_af30.xml",
     "root_stabilization": {
       "root_body_name": "hand_right_palm",
       "root_scale": 1000000.0

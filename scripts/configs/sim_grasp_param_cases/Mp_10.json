@@ -191,7 +191,7 @@
     "pc_subdir": "pc_warp"
   },
   "sim_grasp": {
-    "Mp": 20,
+    "Mp": 10,
     "steps": 40,
     "speed_gain": 1.5,
     "max_tip_speed": 0.05,

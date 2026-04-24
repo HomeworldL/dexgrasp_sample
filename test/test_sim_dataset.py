@@ -165,7 +165,7 @@ def test_simulate_dataset_manifest_counts_successes(tmp_path: Path, monkeypatch)
                     "prepared_joints": [0.0] * 20,
                     "approach_joints": [0.0] * 20,
                     "shift_local": [0.0, 0.0, -0.02],
-                    "anchor_params": {"finger": 1.0},
+                    "anchor_params": {"finger": {"weight": 1.0, "axis": "Z"}},
                     "profile": TEST_HAND_PROFILE,
                     "transform": {
                         "pos": [0.0, 0.0, 0.0],
@@ -266,7 +266,7 @@ def test_simulate_dataset_manifest_allows_explicit_float64_cast(tmp_path: Path, 
                     "prepared_joints": [0.0] * 20,
                     "approach_joints": [0.0] * 20,
                     "shift_local": [0.0, 0.0, -0.02],
-                    "anchor_params": {"finger": 1.0},
+                    "anchor_params": {"finger": {"weight": 1.0, "axis": "Z"}},
                     "profile": TEST_HAND_PROFILE,
                     "transform": {
                         "pos": [0.0, 0.0, 0.0],
@@ -358,7 +358,7 @@ def test_simulate_dataset_manifest_requires_qpos_squeeze(tmp_path: Path, monkeyp
                     "prepared_joints": [0.0] * 20,
                     "approach_joints": [0.0] * 20,
                     "shift_local": [0.0, 0.0, -0.02],
-                    "anchor_params": {"finger": 1.0},
+                    "anchor_params": {"finger": {"weight": 1.0, "axis": "Z"}},
                     "profile": TEST_HAND_PROFILE,
                     "transform": {
                         "pos": [0.0, 0.0, 0.0],

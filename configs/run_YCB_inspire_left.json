@@ -26,6 +26,10 @@
   },
   "hand": {
     "xml_path": "./assets/hands/inspire_hand/inspire_hand_left.xml",
+    "root_stabilization": {
+      "root_body_name": "hand_base_link",
+      "root_scale": 1000000.0
+    },
     "prepared_joints": [
       1.2,
       0.0,
@@ -108,16 +112,46 @@
       ]
     },
     "anchor_params": {
-      "thumb_distal": 0.5,
-      "thumb_tip": 0.3,
-      "index_intermediate": 0.5,
-      "index_tip": 0.3,
-      "middle_intermediate": 0.5,
-      "middle_tip": 0.3,
-      "ring_intermediate": 0.5,
-      "ring_tip": 0.3,
-      "pinky_intermediate": 0.5,
-      "pinky_tip": 0.3
+      "thumb_distal": {
+        "weight": 0.5,
+        "axis": "Z"
+      },
+      "thumb_tip": {
+        "weight": 0.3,
+        "axis": "Z"
+      },
+      "index_intermediate": {
+        "weight": 0.5,
+        "axis": "Z"
+      },
+      "index_tip": {
+        "weight": 0.3,
+        "axis": "Z"
+      },
+      "middle_intermediate": {
+        "weight": 0.5,
+        "axis": "Z"
+      },
+      "middle_tip": {
+        "weight": 0.3,
+        "axis": "Z"
+      },
+      "ring_intermediate": {
+        "weight": 0.5,
+        "axis": "Z"
+      },
+      "ring_tip": {
+        "weight": 0.3,
+        "axis": "Z"
+      },
+      "pinky_intermediate": {
+        "weight": 0.5,
+        "axis": "Z"
+      },
+      "pinky_tip": {
+        "weight": 0.3,
+        "axis": "Z"
+      }
     }
   },
   "sampling": {

@@ -13,7 +13,7 @@ from __future__ import annotations
 import os
 import time
 from dataclasses import dataclass
-from typing import Dict, Optional, Sequence, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 from scipy.spatial import cKDTree
 
 import mujoco
@@ -174,8 +174,15 @@ class MjWarpHO:
                 if body_name not in self.body_name_to_id:
                     raise ValueError(f"Body name '{body_name}' not found in MJWarp model.")
                 self.anchor_body_ids.append(int(self.body_name_to_id[body_name]))
+            anchor_weights: List[float] = []
+            for name in anchor_body_names:
+                value = self.anchor_params[name]
+                if isinstance(value, dict):
+                    anchor_weights.append(float(value["weight"]))
+                else:
+                    anchor_weights.append(float(value))
             self.anchor_weights = np.asarray(
-                [float(self.anchor_params[name]) for name in anchor_body_names],
+                anchor_weights,
                 dtype=np.float32,
             )
         self.anchor_body_ids = np.asarray(self.anchor_body_ids, dtype=np.int32)

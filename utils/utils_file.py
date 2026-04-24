@@ -105,20 +105,39 @@ def object_profile_from_config(cfg: Dict) -> Dict:
     return deepcopy(profile)
 
 
-def anchor_params_from_config(cfg: Dict) -> Dict[str, float]:
+def anchor_params_from_config(cfg: Dict) -> Dict[str, Dict[str, float | str]]:
     params = _require(cfg, "hand.anchor_params")
     if not isinstance(params, dict) or not params:
         raise ValueError("Config field hand.anchor_params must be a non-empty object.")
-    normalized: Dict[str, float] = {}
+    normalized: Dict[str, Dict[str, float | str]] = {}
+    valid_axes = {"X", "-X", "Y", "-Y", "Z", "-Z"}
     for body_name, value in params.items():
         if not isinstance(body_name, str) or not body_name.strip():
             raise ValueError("Each key in hand.anchor_params must be a non-empty body name string.")
+        # Backward compatibility: allow numeric value as shorthand for {"weight": value, "axis": "Z"}.
+        if isinstance(value, (int, float)):
+            normalized[body_name] = {"weight": float(value), "axis": "Z"}
+            continue
+        if not isinstance(value, dict):
+            raise ValueError(
+                f"hand.anchor_params['{body_name}'] must be a number or object with weight/axis."
+            )
+        if "weight" not in value:
+            raise KeyError(f"Missing required config field: hand.anchor_params['{body_name}'].weight")
+        if "axis" not in value:
+            raise KeyError(f"Missing required config field: hand.anchor_params['{body_name}'].axis")
         try:
-            normalized[body_name] = float(value)
+            weight = float(value["weight"])
         except Exception as exc:
             raise ValueError(
-                f"hand.anchor_params['{body_name}'] must be numeric."
+                f"hand.anchor_params['{body_name}'].weight must be numeric."
             ) from exc
+        axis = str(value["axis"]).strip().upper()
+        if axis not in valid_axes:
+            raise ValueError(
+                f"hand.anchor_params['{body_name}'].axis must be one of {sorted(valid_axes)}."
+            )
+        normalized[body_name] = {"weight": weight, "axis": axis}
     return deepcopy(normalized)
 
 

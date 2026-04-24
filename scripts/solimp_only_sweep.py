@@ -50,6 +50,30 @@ SUMMARY_RE = re.compile(
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Sweep solimp with fixed solref and summarize sampling stats.")
     p.add_argument(
+        "--object-scale-key",
+        type=str,
+        default=OBJECT_SCALE_KEY,
+        help=f"Object-scale key to evaluate. Default: {OBJECT_SCALE_KEY}",
+    )
+    p.add_argument(
+        "--asset-dir",
+        type=str,
+        default=str(ASSET_DIR),
+        help=f"Asset directory that contains coacd.obj and object.xml. Default: {ASSET_DIR}",
+    )
+    p.add_argument(
+        "--work-dir",
+        type=str,
+        default=str(WORK_DIR),
+        help=f"Work directory for outputs/logs/summary. Default: {WORK_DIR}",
+    )
+    p.add_argument(
+        "--max-workers",
+        type=int,
+        default=5,
+        help="Parallel case workers.",
+    )
+    p.add_argument(
         "--skip-run",
         action="store_true",
         help="Skip run.py execution and only recompute summary/depth from existing outputs.",
@@ -206,9 +230,9 @@ def compute_depth_metrics(cfg_path: Path, output_dir: Path, object_name: str, ob
     }
 
 
-def run_case(case_name: str, cfg_path: Path) -> dict:
-    out_dir = OUT_DIR / case_name
-    log_path = LOG_DIR / f"{case_name}.log"
+def run_case(case_name: str, cfg_path: Path, object_scale_key: str, asset_dir: Path, out_dir_root: Path, log_dir: Path) -> dict:
+    out_dir = out_dir_root / case_name
+    log_path = log_dir / f"{case_name}.log"
     out_dir.mkdir(parents=True, exist_ok=True)
     log_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -218,13 +242,13 @@ def run_case(case_name: str, cfg_path: Path) -> dict:
         "-c",
         str(cfg_path),
         "--object-scale-key",
-        OBJECT_SCALE_KEY,
+        object_scale_key,
         "--coacd-path",
-        str(ASSET_DIR / "coacd.obj"),
+        str(asset_dir / "coacd.obj"),
         "--mjcf-path",
-        str(ASSET_DIR / "object.xml"),
+        str(asset_dir / "object.xml"),
         "--asset-dir",
-        str(ASSET_DIR),
+        str(asset_dir),
         "--output-dir",
         str(out_dir),
         "--force",
@@ -259,7 +283,11 @@ def run_case(case_name: str, cfg_path: Path) -> dict:
 def main() -> None:
     args = parse_args()
     base_cfg = load_cfg(BASE_CFG)
-    WORK_DIR.mkdir(parents=True, exist_ok=True)
+    asset_dir = Path(args.asset_dir).resolve()
+    work_dir = Path(args.work_dir).resolve()
+    out_dir_root = work_dir / "outputs"
+    log_dir = work_dir / "logs"
+    work_dir.mkdir(parents=True, exist_ok=True)
 
     cfg_paths: dict[str, Path] = {}
     for name, solimp in SOLIMP_CASES.items():
@@ -271,7 +299,7 @@ def main() -> None:
     records: list[dict] = []
     if args.skip_run:
         for name, path in cfg_paths.items():
-            case_log = LOG_DIR / f"{name}.log"
+            case_log = log_dir / f"{name}.log"
             if not case_log.exists():
                 raise FileNotFoundError(f"Missing log for --skip-run: {case_log}")
             stdout = case_log.read_text(encoding="utf-8")
@@ -284,7 +312,7 @@ def main() -> None:
                 "wall_time_sec": None,
                 "config_path": str(path),
                 "log_path": str(case_log),
-                "output_dir": str(OUT_DIR / name),
+                "output_dir": str(out_dir_root / name),
             }
             rec.update(s)
             if s["samples"]:
@@ -295,8 +323,12 @@ def main() -> None:
                 rec["no_col_rate"] = None
             records.append(rec)
     else:
-        with ThreadPoolExecutor(max_workers=len(cfg_paths)) as ex:
-            futs = {ex.submit(run_case, name, path): name for name, path in cfg_paths.items()}
+        workers = max(1, min(int(args.max_workers), len(cfg_paths)))
+        with ThreadPoolExecutor(max_workers=workers) as ex:
+            futs = {
+                ex.submit(run_case, name, path, args.object_scale_key, asset_dir, out_dir_root, log_dir): name
+                for name, path in cfg_paths.items()
+            }
             for fut in as_completed(futs):
                 rec = fut.result()
                 print(
@@ -309,8 +341,8 @@ def main() -> None:
     records.sort(key=lambda x: order.index(x["case"]))
 
     if not args.no_depth:
-        object_name = OBJECT_SCALE_KEY.split("__", 1)[0]
-        object_xml = ASSET_DIR / "object.xml"
+        object_name = args.object_scale_key.split("__", 1)[0]
+        object_xml = asset_dir / "object.xml"
         for rec in records:
             depth = compute_depth_metrics(
                 cfg_path=Path(rec["config_path"]),
@@ -320,8 +352,8 @@ def main() -> None:
             )
             rec.update(depth)
 
-    summary_json = WORK_DIR / "summary.json"
-    summary_csv = WORK_DIR / "summary.csv"
+    summary_json = work_dir / "summary.json"
+    summary_csv = work_dir / "summary.csv"
     summary_json.write_text(json.dumps(records, ensure_ascii=False, indent=2), encoding="utf-8")
 
     fields = [

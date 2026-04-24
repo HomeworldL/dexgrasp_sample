@@ -110,9 +110,9 @@
         0.003,
         1.0
       ],
-      "kp": 10.0,
-      "forcerange": 30.0,
-      "actuatorfrcrange": 30.0
+      "kp": 6.0,
+      "forcerange": 20.0,
+      "actuatorfrcrange": 20.0
     },
     "anchor_params": {
       "thumb_intermediate": {
@@ -162,8 +162,8 @@
     "downsample_for_sim": 512,
     "Nd": 1,
     "rot_n": 8,
-    "d_min": 0.02,
-    "d_max": 0.06,
+    "d_min": 0.01,
+    "d_max": 0.05,
     "max_points": null,
     "pc_subdir": "pc_warp"
   },
@@ -171,7 +171,7 @@
     "Mp": 20,
     "steps": 40,
     "speed_gain": 1.5,
-    "max_tip_speed": 0.05,
+    "max_tip_speed": 0.02,
     "contact_min_count": 4,
     "target_point_method": 2
   },

@@ -7,11 +7,11 @@
     "objdata_tag": "objdata_YCB",
     "graspdata_tag": "graspdata_YCB_inspire_right",
     "scales": [
-      0.06,
       0.08,
       0.1,
       0.12,
-      0.14
+      0.14,
+      0.16
     ],
     "verbose": false,
     "max_cap": 100,
@@ -109,47 +109,50 @@
       "solref": [
         0.003,
         1.0
-      ]
+      ],
+      "kp": 10.0,
+      "forcerange": 30.0,
+      "actuatorfrcrange": 30.0
     },
     "anchor_params": {
       "thumb_intermediate": {
-        "weight": 0.5,
+        "weight": 0.9,
         "axis": "Z"
       },
       "thumb_tip": {
-        "weight": 0.3,
+        "weight": 0.0,
         "axis": "Z"
       },
       "index_intermediate": {
-        "weight": 0.5,
+        "weight": 0.9,
         "axis": "Z"
       },
       "index_tip": {
-        "weight": 0.3,
+        "weight": 0.0,
         "axis": "Z"
       },
       "middle_intermediate": {
-        "weight": 0.5,
+        "weight": 0.9,
         "axis": "Z"
       },
       "middle_tip": {
-        "weight": 0.3,
+        "weight": 0.0,
         "axis": "Z"
       },
       "ring_intermediate": {
-        "weight": 0.5,
+        "weight": 0.9,
         "axis": "Z"
       },
       "ring_tip": {
-        "weight": 0.3,
+        "weight": 0.0,
         "axis": "Z"
       },
       "pinky_intermediate": {
-        "weight": 0.5,
+        "weight": 0.9,
         "axis": "Z"
       },
       "pinky_tip": {
-        "weight": 0.3,
+        "weight": 0.0,
         "axis": "Z"
       }
     }

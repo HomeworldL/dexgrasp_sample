@@ -265,6 +265,18 @@ def _validate_contact_profile(profile: Dict, path: str, require_control: bool) -
             except Exception as exc:
                 raise ValueError(f"{path}.{field}[{idx}] must be numeric.") from exc
 
+    # Optional runtime actuation overrides for MjHO hand setup.
+    optional_positive_scalars = ["kp", "forcerange", "actuatorfrcrange"]
+    for field in optional_positive_scalars:
+        if field not in profile:
+            continue
+        try:
+            value = float(profile[field])
+        except Exception as exc:
+            raise ValueError(f"{path}.{field} must be numeric when provided.") from exc
+        if value <= 0.0:
+            raise ValueError(f"{path}.{field} must be > 0 when provided.")
+
 
 def _validate_hand_profile(cfg: Dict) -> None:
     _validate_contact_profile(_require(cfg, "hand.profile"), "hand.profile", require_control=True)

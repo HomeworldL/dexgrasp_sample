@@ -74,6 +74,7 @@ class MjHO:
             raise ValueError("object_profile must be provided explicitly.")
         self.hand_profile = dict(hand_profile)
         self.object_profile = dict(object_profile)
+        self.hand_actuation_profile = self._read_hand_actuation_profile(self.hand_profile)
         self.root_stabilization = (
             dict(root_stabilization) if root_stabilization is not None else None
         )
@@ -232,11 +233,57 @@ class MjHO:
         geom.solimp[:5] = np.asarray(profile["solimp"], dtype=float)
         geom.solref[:2] = np.asarray(profile["solref"], dtype=float)
 
+    def _read_hand_actuation_profile(self, profile: Dict) -> Dict[str, Optional[float]]:
+        out: Dict[str, Optional[float]] = {
+            "kp": None,
+            "forcerange": None,
+            "actuatorfrcrange": None,
+        }
+        for key in out.keys():
+            if key not in profile:
+                continue
+            value = float(profile[key])
+            if (not np.isfinite(value)) or value <= 0.0:
+                raise ValueError(f"hand.profile.{key} must be finite and > 0 when provided.")
+            out[key] = value
+        return out
+
+    def _apply_hand_actuation_profile(self, hand_spec: mujoco.MjSpec) -> None:
+        kp = self.hand_actuation_profile["kp"]
+        actuator_force_abs = self.hand_actuation_profile["forcerange"]
+        joint_actuator_force_abs = self.hand_actuation_profile["actuatorfrcrange"]
+
+        if kp is not None or actuator_force_abs is not None:
+            for actuator in hand_spec.actuators:
+                if kp is not None:
+                    # For position actuators, kp is encoded in gainprm[0] and biasprm[1]=-kp.
+                    actuator.gainprm[0] = float(kp)
+                    actuator.biasprm[1] = -float(kp)
+                if actuator_force_abs is not None:
+                    actuator.forcerange[:] = np.asarray(
+                        [-float(actuator_force_abs), float(actuator_force_abs)],
+                        dtype=float,
+                    )
+                    actuator.forcelimited = mujoco.mjtLimited.mjLIMITED_TRUE
+
+        if joint_actuator_force_abs is not None:
+            force_range = np.asarray(
+                [-float(joint_actuator_force_abs), float(joint_actuator_force_abs)],
+                dtype=float,
+            )
+            for joint in hand_spec.joints:
+                joint_name = str(getattr(joint, "name", "") or "")
+                if not joint_name or joint_name == "world_to_hand":
+                    continue
+                joint.actfrcrange[:] = force_range
+                joint.actfrclimited = mujoco.mjtLimited.mjLIMITED_TRUE
+
     def _add_hand(self, hand_xml_path: str) -> mujoco.MjSpec:
         """Load hand MJCF and apply the hand contact profile."""
         hand_spec = mujoco.MjSpec.from_file(hand_xml_path)
         # adjust meshdir so relative mesh paths resolve relative to hand xml
         hand_spec.meshdir = os.path.dirname(hand_xml_path)
+        self._apply_hand_actuation_profile(hand_spec)
         hand_spec.option.cone = mujoco.mjtCone.mjCONE_ELLIPTIC
         hand_spec.option.noslip_iterations = 2
         hand_spec.option.impratio = 10
@@ -532,6 +579,12 @@ class MjHO:
                 "tip_positions": [],
                 "pts_top_Mp": [],
                 "pts_target": [],
+                "v_anchors": [],
+                "dq_per_anchor": [],
+                "jacobian_per_anchor": [],
+                "total_dq_hand": [],
+                "actuated_dq": [],
+                "ctrl": [],
             }
             if record_history
             else {}
@@ -624,6 +677,8 @@ class MjHO:
             total_dq_hand = np.zeros(
                 (self.nq_hand - 7), dtype=float
             )  # accumulate contributions
+            dq_per_anchor = []
+            jacobian_per_anchor = []
             # prepare jac arrays (width model.nv)
             jacp = np.zeros((3, self.model.nv), dtype=float)
             jacr = np.zeros((3, self.model.nv), dtype=float)
@@ -643,6 +698,8 @@ class MjHO:
                 # dq_sol, *_ = np.linalg.lstsq(J_hand, v_des, rcond=None)
                 # dq_sol = np.asarray(dq_sol).reshape(-1)
                 dq_sol = self.anchor_weights[ti] * np.linalg.pinv(J_hand) @ v_des
+                dq_per_anchor.append(np.asarray(dq_sol, dtype=float).copy())
+                jacobian_per_anchor.append(np.asarray(J_hand, dtype=float).copy())
 
                 # print(self.anchor_weights[ti])
 
@@ -668,6 +725,13 @@ class MjHO:
 
             # step the simulation by 1 (ctrl already set by set_hand_qpos, but ensure we step with it)
             ctrl = self.qpos2ctrl(hand_qpos)
+            if record_history:
+                history["v_anchors"].append(v_anchors.copy())  # (n_anchors, 3)
+                history["dq_per_anchor"].append(np.asarray(dq_per_anchor, dtype=float))
+                history["jacobian_per_anchor"].append(np.asarray(jacobian_per_anchor, dtype=float))
+                history["total_dq_hand"].append(total_dq_hand.copy())  # (n_hand_dofs,)
+                history["actuated_dq"].append(np.take(total_dq_hand, self.ctrl_qpos_indices - 7))
+                history["ctrl"].append(ctrl.copy())  # (nu,)
             self.step(1, ctrl=ctrl)
 
             if visualize:

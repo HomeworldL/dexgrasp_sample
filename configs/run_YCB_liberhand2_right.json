@@ -137,7 +137,10 @@
       "solref": [
         0.003,
         1.0
-      ]
+      ],
+      "kp": 10.0,
+      "forcerange": 30.0,
+      "actuatorfrcrange": 30.0
     },
     "anchor_params": {
       "hand_right_f13": {

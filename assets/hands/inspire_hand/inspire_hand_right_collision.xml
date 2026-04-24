@@ -113,7 +113,6 @@
   </worldbody>
   <contact>
     <exclude name="ex_hand_base_link_thumb_proximal_base" body1="hand_base_link" body2="thumb_proximal_base" />
-    <exclude name="ex_hand_base_link_thumb_proximal" body1="hand_base_link" body2="thumb_proximal" />
     <exclude name="ex_thumb_proximal_base_thumb_proximal" body1="thumb_proximal_base" body2="thumb_proximal" />
     <exclude name="ex_thumb_proximal_thumb_intermediate" body1="thumb_proximal" body2="thumb_intermediate" />
     <exclude name="ex_thumb_intermediate_thumb_distal" body1="thumb_intermediate" body2="thumb_distal" />
@@ -130,14 +129,15 @@
     <exclude name="ex_hand_base_link_pinky_proximal" body1="hand_base_link" body2="pinky_proximal" />
     <exclude name="ex_pinky_proximal_pinky_intermediate" body1="pinky_proximal" body2="pinky_intermediate" />
     <exclude name="ex_pinky_intermediate_pinky_tip" body1="pinky_intermediate" body2="pinky_tip" />
+    <exclude name="ex_hand_base_link_thumb_proximal" body1="hand_base_link" body2="thumb_proximal" />
   </contact>
   <equality>
-    <joint name="thumb_intermediate_joint_mimic" joint1="thumb_intermediate_joint" joint2="thumb_proximal_pitch_joint" polycoef="0 1.334 0 0 0" />
-    <joint name="thumb_distal_joint_mimic" joint1="thumb_distal_joint" joint2="thumb_proximal_pitch_joint" polycoef="0 0.667 0 0 0" />
-    <joint name="index_intermediate_joint_mimic" joint1="index_intermediate_joint" joint2="index_proximal_joint" polycoef="-0.04545 1.06399 0 0 0" />
-    <joint name="middle_intermediate_joint_mimic" joint1="middle_intermediate_joint" joint2="middle_proximal_joint" polycoef="-0.04545 1.06399 0 0 0" />
-    <joint name="ring_intermediate_joint_mimic" joint1="ring_intermediate_joint" joint2="ring_proximal_joint" polycoef="-0.04545 1.06399 0 0 0" />
-    <joint name="pinky_intermediate_joint_mimic" joint1="pinky_intermediate_joint" joint2="pinky_proximal_joint" polycoef="-0.04545 1.06399 0 0 0" />
+    <joint name="thumb_intermediate_joint_mimic" joint1="thumb_intermediate_joint" joint2="thumb_proximal_pitch_joint" polycoef="0 1.334 0 0 0" solref="0.002 1" solimp="0.9 0.99 0.001" />
+    <joint name="thumb_distal_joint_mimic" joint1="thumb_distal_joint" joint2="thumb_proximal_pitch_joint" polycoef="0 0.667 0 0 0" solref="0.002 1" solimp="0.9 0.99 0.001" />
+    <joint name="index_intermediate_joint_mimic" joint1="index_intermediate_joint" joint2="index_proximal_joint" polycoef="-0.04545 1.06399 0 0 0" solref="0.002 1" solimp="0.9 0.99 0.001" />
+    <joint name="middle_intermediate_joint_mimic" joint1="middle_intermediate_joint" joint2="middle_proximal_joint" polycoef="-0.04545 1.06399 0 0 0" solref="0.002 1" solimp="0.9 0.99 0.001" />
+    <joint name="ring_intermediate_joint_mimic" joint1="ring_intermediate_joint" joint2="ring_proximal_joint" polycoef="-0.04545 1.06399 0 0 0" solref="0.002 1" solimp="0.9 0.99 0.001" />
+    <joint name="pinky_intermediate_joint_mimic" joint1="pinky_intermediate_joint" joint2="pinky_proximal_joint" polycoef="-0.04545 1.06399 0 0 0" solref="0.002 1" solimp="0.9 0.99 0.001" />
   </equality>
   <actuator>
     <position name="thumb_proximal_yaw_joint_actuator" joint="thumb_proximal_yaw_joint" kp="1" ctrlrange="0.0 1.308" />

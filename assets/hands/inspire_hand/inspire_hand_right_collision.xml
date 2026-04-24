@@ -140,11 +140,11 @@
     <joint name="pinky_intermediate_joint_mimic" joint1="pinky_intermediate_joint" joint2="pinky_proximal_joint" polycoef="-0.04545 1.06399 0 0 0" solref="0.002 1" solimp="0.9 0.99 0.001" />
   </equality>
   <actuator>
-    <position name="thumb_proximal_yaw_joint_actuator" joint="thumb_proximal_yaw_joint" kp="1" ctrlrange="0.0 1.308" />
-    <position name="thumb_proximal_pitch_joint_actuator" joint="thumb_proximal_pitch_joint" kp="1" ctrlrange="0 0.6" />
-    <position name="index_proximal_joint_actuator" joint="index_proximal_joint" kp="1" ctrlrange="0 1.47" />
-    <position name="middle_proximal_joint_actuator" joint="middle_proximal_joint" kp="1" ctrlrange="0 1.47" />
-    <position name="ring_proximal_joint_actuator" joint="ring_proximal_joint" kp="1" ctrlrange="0 1.47" />
-    <position name="pinky_proximal_joint_actuator" joint="pinky_proximal_joint" kp="1" ctrlrange="0 1.47" />
+    <position name="thumb_proximal_yaw_joint_actuator" joint="thumb_proximal_yaw_joint" kp="1" forcerange="-1 1" ctrlrange="0.0 1.308" />
+    <position name="thumb_proximal_pitch_joint_actuator" joint="thumb_proximal_pitch_joint" kp="1" forcerange="-1 1" ctrlrange="0 0.6" />
+    <position name="index_proximal_joint_actuator" joint="index_proximal_joint" kp="1" forcerange="-1 1" ctrlrange="0 1.47" />
+    <position name="middle_proximal_joint_actuator" joint="middle_proximal_joint" kp="1" forcerange="-1 1" ctrlrange="0 1.47" />
+    <position name="ring_proximal_joint_actuator" joint="ring_proximal_joint" kp="1" forcerange="-1 1" ctrlrange="0 1.47" />
+    <position name="pinky_proximal_joint_actuator" joint="pinky_proximal_joint" kp="1" forcerange="-1 1" ctrlrange="0 1.47" />
   </actuator>
 </mujoco>

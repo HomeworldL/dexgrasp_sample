@@ -21,6 +21,7 @@ from utils.utils_file import (
     raw_dataset_name_from_config,
     raw_dataset_root_from_config,
     run_scales_from_config,
+    use_native_asset_from_config,
 )
 from utils.utils_vis import visualize_with_viser
 
@@ -37,7 +38,13 @@ def _entries_for_same_object(ds: DatasetObjects, object_name: str) -> List[Dict]
     entries = [item for item in ds.get_entries() if item["object_name"] == object_name]
     if not entries:
         raise RuntimeError(f"No object-scale entries found for object '{object_name}'.")
-    return sorted(entries, key=lambda item: float(item["scale"]))
+    return sorted(
+        entries,
+        key=lambda item: (
+            0 if item.get("scale") is None else 1,
+            float(item["scale"]) if item.get("scale") is not None else 0.0,
+        ),
+    )
 
 
 def _layout_offsets(meshes: List[trimesh.Trimesh], gap_ratio: float = 0.25) -> List[np.ndarray]:
@@ -85,6 +92,7 @@ def main() -> None:
         raw_dataset_name=raw_dataset_name_from_config(cfg),
         scales=run_scales_from_config(cfg),
         objdata_tag=objdata_tag_from_config(cfg, args.config),
+        include_native=use_native_asset_from_config(cfg),
         graspdata_tag=graspdata_tag_from_config(cfg, args.config),
         generated_dataset_root=generated_dataset_root_from_config(cfg),
         verbose=data_verbose_from_config(cfg),
@@ -101,11 +109,11 @@ def main() -> None:
     for entry, mesh, offset in zip(entries, base_meshes, offsets):
         placed_mesh = mesh.copy()
         placed_mesh.apply_translation(offset)
-        scale_tag = f"scale{int(round(float(entry['scale']) * 1000)):03d}"
+        scale_tag = str(entry.get("scale_tag") or f"scale{int(round(float(entry['scale']) * 1000)):03d}")
         mesh_name = f"{object_name}/{scale_tag}"
         meshes_for_vis[mesh_name] = placed_mesh
         print(
-            f"[vis_obj_scale] name={object_name} scale={entry['scale']:.3f} "
+            f"[vis_obj_scale] name={object_name} scale_tag={scale_tag} scale={entry['scale']} "
             f"offset=({offset[0]:.4f}, {offset[1]:.4f}, {offset[2]:.4f}) mesh={entry['coacd_abs']}"
         )
 

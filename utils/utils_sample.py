@@ -25,10 +25,12 @@ def as_array(values: np.ndarray) -> np.ndarray:
 def parse_object_scale_key(object_scale_key: str) -> Tuple[str, Optional[float]]:
     if "__" not in object_scale_key:
         return object_scale_key, None
-    object_name, suffix = object_scale_key.split("__", 1)
-    if not suffix.startswith("scale"):
+    object_name, scale_tag = object_scale_key.split("__", 1)
+    if scale_tag == "native":
         return object_name, None
-    digits = suffix[len("scale") :]
+    if not scale_tag.startswith("scale"):
+        return object_name, None
+    digits = scale_tag[len("scale") :]
     if not digits.isdigit():
         return object_name, None
     return object_name, float(int(digits)) / 1000.0

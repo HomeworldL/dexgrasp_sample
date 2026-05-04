@@ -1,4 +1,4 @@
-"""Build per-scale object assets under datasets/<config>/<object>/scaleXXX/."""
+"""Build object assets under datasets/<config>/<object>/<scale_tag>/."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ import trimesh
 
 
 class ScaleDatasetBuilder:
-    """Generate scaled convex parts + coacd + MJCF for one object/scale."""
+    """Generate object assets for one object/scale tag."""
 
     MIN_PART_MAX_EXTENT = 1e-5
     MIN_PART_AREA = 1e-10
@@ -21,21 +21,23 @@ class ScaleDatasetBuilder:
 
     def __init__(self, base_output_dir: str):
         self.base_output_dir = Path(base_output_dir)
+        self._raw_cache: Dict[str, Dict] = {}
         self._norm_cache: Dict[str, Dict] = {}
 
     @staticmethod
     def scale_tag(scale: float) -> str:
         return f"scale{int(round(float(scale) * 1000)):03d}"
 
-    def _load_normalized_meshes(self, object_info: Dict) -> Dict:
+    @staticmethod
+    def native_tag() -> str:
+        return "native"
+
+    def _load_raw_meshes(self, object_info: Dict) -> Dict:
         object_name = object_info["object_name"]
-        cached = self._norm_cache.get(object_name)
+        cached = self._raw_cache.get(object_name)
         if cached is not None:
             return cached
 
-        # For current COACD OBJ files, plain load + split preserves pieces
-        # more reliably than force="scene", which may collapse everything
-        # into a single geometry.
         loaded = trimesh.load(object_info["coacd_abs"], process=False)
         if isinstance(loaded, trimesh.Scene):
             merged = trimesh.util.concatenate(list(loaded.geometry.values()))
@@ -50,6 +52,24 @@ class ScaleDatasetBuilder:
             convex_meshes = [merged.copy()]
 
         merged_convex = trimesh.util.concatenate(convex_meshes)
+        rec = {
+            "object_name": object_name,
+            "raw_convex": convex_meshes,
+            "raw_merged": merged_convex,
+            "orig_coacd_volume": self._mesh_volume_safe(merged_convex),
+        }
+        self._raw_cache[object_name] = rec
+        return rec
+
+    def _load_normalized_meshes(self, object_info: Dict) -> Dict:
+        raw = self._load_raw_meshes(object_info)
+        object_name = raw["object_name"]
+        cached = self._norm_cache.get(object_name)
+        if cached is not None:
+            return cached
+
+        convex_meshes = raw["raw_convex"]
+        merged_convex = raw["raw_merged"]
         center = np.asarray(merged_convex.bounding_box.centroid, dtype=np.float64)
         extent = float(np.max(merged_convex.extents))
         if extent <= 1e-12:
@@ -64,7 +84,7 @@ class ScaleDatasetBuilder:
         rec = {
             "object_name": object_name,
             "norm_convex": norm_convex,
-            "orig_coacd_volume": self._mesh_volume_safe(merged_convex),
+            "orig_coacd_volume": float(raw["orig_coacd_volume"]),
             "norm_volume": self._mesh_volume_safe(trimesh.util.concatenate(norm_convex)),
         }
         self._norm_cache[object_name] = rec
@@ -146,6 +166,88 @@ class ScaleDatasetBuilder:
         ]
         return "\n".join(xml_lines) + "\n"
 
+    def build_native_assets(
+        self,
+        config_stem: str,
+        object_info: Dict,
+        mass_kg: float,
+        principal_moments: Sequence[float],
+        overwrite: bool = False,
+    ) -> Dict:
+        raw = self._load_raw_meshes(object_info)
+        object_name = raw["object_name"]
+        scale_tag = self.native_tag()
+        scale_dir = self.base_output_dir / config_stem / object_name / scale_tag
+        convex_dir = scale_dir / "convex_parts"
+        coacd_path = scale_dir / "coacd.obj"
+        xml_path = scale_dir / "object.xml"
+
+        if not overwrite and xml_path.exists() and coacd_path.exists() and convex_dir.is_dir():
+            convex_parts_abs = [str(p.resolve()) for p in sorted(convex_dir.glob("*.obj"))]
+            if convex_parts_abs:
+                return {
+                    "object_name": object_name,
+                    "scale": None,
+                    "scale_tag": scale_tag,
+                    "is_native": True,
+                    "coacd_abs": str(coacd_path.resolve()),
+                    "convex_parts_abs": convex_parts_abs,
+                    "xml_abs": str(xml_path.resolve()),
+                }
+
+        convex_dir.mkdir(parents=True, exist_ok=True)
+
+        native_paths: List[Path] = []
+        native_parts: List[trimesh.Trimesh] = []
+        for i, mesh in enumerate(raw["raw_convex"]):
+            mc = mesh.copy()
+            if not self._scaled_part_is_valid(mc):
+                continue
+            part_path = convex_dir / f"part_{i:03d}.obj"
+            mc.export(part_path)
+            native_paths.append(part_path)
+            native_parts.append(mc)
+
+        if not native_parts:
+            raise ValueError(f"All native convex parts were filtered out as invalid for {object_name}.")
+
+        scene = trimesh.Scene()
+        for i, mesh in enumerate(native_parts):
+            scene.add_geometry(mesh.copy(), node_name=f"part_{i:03d}", geom_name=f"part_{i:03d}")
+        scene.export(str(coacd_path))
+
+        mass_native = float(mass_kg)
+        inertia_native = np.asarray(principal_moments, dtype=np.float64).reshape(3)
+        if (
+            (not np.isfinite(mass_native))
+            or mass_native <= self.MIN_OBJECT_MASS
+            or np.any(~np.isfinite(inertia_native))
+            or np.any(inertia_native <= self.MIN_OBJECT_INERTIA)
+        ):
+            raise ValueError(
+                f"Native inertial is below valid threshold for {object_name}: "
+                f"mass={mass_native:.6e}, inertia={inertia_native.tolist()}"
+            )
+
+        convex_rel_paths = [os.path.relpath(p, scale_dir).replace("\\", "/") for p in native_paths]
+        xml_text = self._build_object_xml(
+            object_name=object_name,
+            mass_kg_scaled=mass_native,
+            inertia_diag_scaled=inertia_native,
+            convex_rel_paths=convex_rel_paths,
+        )
+        xml_path.write_text(xml_text, encoding="utf-8")
+
+        return {
+            "object_name": object_name,
+            "scale": None,
+            "scale_tag": scale_tag,
+            "is_native": True,
+            "coacd_abs": str(coacd_path.resolve()),
+            "convex_parts_abs": [str(p.resolve()) for p in native_paths],
+            "xml_abs": str(xml_path.resolve()),
+        }
+
     def build_scale_assets(
         self,
         config_stem: str,
@@ -170,6 +272,7 @@ class ScaleDatasetBuilder:
                     "object_name": object_name,
                     "scale": scale_value,
                     "scale_tag": self.scale_tag(scale_value),
+                    "is_native": False,
                     "coacd_abs": str(coacd_path.resolve()),
                     "convex_parts_abs": convex_parts_abs,
                     "xml_abs": str(xml_path.resolve()),
@@ -235,6 +338,7 @@ class ScaleDatasetBuilder:
             "object_name": object_name,
             "scale": scale_value,
             "scale_tag": self.scale_tag(scale_value),
+            "is_native": False,
             "coacd_abs": str(coacd_path.resolve()),
             "convex_parts_abs": [str(p.resolve()) for p in scaled_convex_paths],
             "xml_abs": str(xml_path.resolve()),
@@ -244,7 +348,7 @@ class ScaleDatasetBuilder:
         self,
         config_stem: str,
         object_info: Dict,
-        scales: List[float],
+        scales: Sequence[float],
         mass_kg: float,
         principal_moments: Sequence[float],
         overwrite: bool = False,
@@ -259,5 +363,5 @@ class ScaleDatasetBuilder:
                 principal_moments=principal_moments,
                 overwrite=overwrite,
             )
-            out[self.scale_tag(float(scale))] = rec
+            out[str(rec["scale_tag"])] = rec
         return out

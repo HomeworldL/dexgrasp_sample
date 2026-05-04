@@ -1,15 +1,16 @@
 # dexgrasp_sample
 
-一个基于 MuJoCo 的离线灵巧手抓取采样仓库，面向“缩放后的 3D 物体 -> 抓取状态 -> 部分点云”的整套数据构造流程。
+一个基于 MuJoCo 的离线灵巧手抓取采样仓库，当前面向“物体资产准备 -> 抓取状态构造 -> 可选聚类与 RL 元数据”的整套数据流程。
 
-主线流水线是：
+当前主线流程是：
 
-1. 基于 manifest 构建 object-scale 索引
-2. 采样表面点和抓取帧
-3. 用 MuJoCo 做碰撞与稳定性筛选
-4. 保存抓取状态到 `grasp.h5` 与 `grasp.npy`
-5. 用 Warp 渲染多视角部分点云
-6. 构建按 object 切分的数据集级别 `train.json` / `test.json`
+1. 先准备物体资产到 `datasets/objdata_*`
+2. 基于已准备好的资产构建 object-scale 索引
+3. 采样表面点和抓取帧
+4. 用 MuJoCo 做碰撞与稳定性筛选
+5. 保存抓取状态到 `datasets/graspdata_*`
+6. 用 Warp 渲染多视角部分点云
+7. 按需构建形状聚类与 RL 专用元数据到 `_meta/`
 
 当前同时支持：
 - CPU MuJoCo 采样：`run.py` / `run_multi.py`
@@ -19,7 +20,9 @@
 - [仓库介绍](#仓库介绍)
 - [安装与依赖](#安装与依赖)
 - [数据集构造](#数据集构造)
+- [聚类与 RL 元数据](#聚类与-rl-元数据)
 - [运行指令](#运行指令)
+- [工具脚本](#工具脚本)
 - [主要文件详解](#主要文件详解)
 - [注意事项](#注意事项)
 - [Tuning Notes](#tuning-notes)
@@ -29,14 +32,17 @@
 ## 仓库介绍
 
 主线目标：
+- 先准备可复用的物体资产
 - 为 object-scale 条目离线生成抓取状态
 - 用 MuJoCo 物理过滤不合理抓取
 - 用统一格式保存抓取结果
 - 在抓取完成后额外渲染部分点云，供下游学习使用
+- 按需构建不依赖 grasp 文件的形状聚类与 RL 清单
 
 当前主线约定：
 - config-first
 - manifest 先过滤，再进入索引
+- `objdata_*` 和 `graspdata_*` 显式分离
 - 全局 id 空间是 object-scale 粒度
 - `grasp.h5` 是主结果，`grasp.npy` 由它导出
 - 主线 grasp 数组按 `float32` 存储
@@ -102,6 +108,25 @@ assets/objects -> /home/ccs/repositories/mesh_process/assets/objects
 - `process_status = success`
 
 的物体才会进入索引。
+
+### 物体资产准备
+
+`prepare_object_assets.py` 是采样前必须先运行的准备入口。
+
+它会：
+- 从 `assets/objects/processed/<dataset>/manifest.process_meshes.json` 扫描可用物体
+- 在 `datasets/objdata_<dataset>/` 下构建物体资产
+- 写出 `coacd.obj`、`object.xml`、`convex_parts/*.obj`
+- 写出 `pc_warp/global_pc.npy` 和 `pc_warp/global_normals.npy`
+- 在配置启用时额外生成与 `scaleXXX` 平级的 `native/` 资产
+
+示例：
+
+```bash
+python prepare_object_assets.py -c configs/assets_YCB.json --force --jobs 8
+```
+
+`DatasetObjects` 现在是针对已准备资产的只读索引器，不负责隐式重建资产。
 
 ### Object-Scale 扁平化
 
@@ -195,6 +220,74 @@ datasets/graspdata_YCB_liberhand_right/<object>/scaleXXX/
 - 写出最终 manifest 前会过滤空 grasp 文件
 - manifest 中保存相对 dataset root 的相对路径，便于整体迁移
 
+## 聚类与 RL 元数据
+
+形状聚类和 RL 划分独立于模仿学习数据集构建流程。
+
+### 形状聚类
+
+使用 `run_shape_cluster.py` 基于已准备好的 objdata 资产构建 object-level 形状特征和 KMeans 聚类：
+
+```bash
+python run_shape_cluster.py -c configs/assets_YCB.json --force
+```
+
+当前约定：
+- 使用预先保存的 `global_pc.npy`
+- 使用一个配置的 scale tag，通常是 `scale120`
+- 聚类是 object-level
+- 不包含 `native`
+- 所有输出只写到 `_meta`
+
+主要输出目录：
+
+```text
+datasets/objdata_YCB/_meta/shape_cluster/<cluster_tag>/
+```
+
+主要文件：
+- `meta.json`
+- `object_features.npy`
+- `cluster_centers.npy`
+- `object_cluster.json`
+- `cluster_index.json`
+- `curriculum_index.json`
+
+### RL 专用划分
+
+使用 `build_dataset_splits_rl.py` 基于 objdata 资产和 shape-cluster 元数据构建 RL 专用 train/test 清单：
+
+```bash
+python build_dataset_splits_rl.py -c configs/assets_YCB.json --force
+```
+
+主要输出目录：
+
+```text
+datasets/objdata_YCB/_meta/rl_split/<split_tag>/
+```
+
+当前约定：
+- 按 `object_name` 划分
+- 再展开回 object-scale 条目
+- 将 object-level 聚类信息继承到每条 object-scale 记录
+- 当前只使用标准 `scaleXXX` 资产
+- 不依赖 `grasp.h5` 或 Warp partial render 输出
+
+### 聚类可视化
+
+使用 `vis_shape_cluster.py` 生成按簇组织的缩略图页：
+
+```bash
+python vis_shape_cluster.py -c configs/assets_YCB.json
+```
+
+输出目录：
+
+```text
+datasets/objdata_YCB/_meta/shape_cluster/<cluster_tag>/vis/
+```
+
 ## 运行指令
 
 ### CPU：单个 Object-Scale
@@ -258,6 +351,17 @@ python run_multi.py -c configs/run_YCB_liberhand_right.json -j 16 --force
 常用参数：
 - `-j/--max-parallel`
 - `--script`：替换为其他单条目脚本
+
+## 工具脚本
+
+### 检查索引结果
+
+使用 `print_dataset_objects.py` 查看 `DatasetObjects` 条目，而不启动采样：
+
+```bash
+python print_dataset_objects.py -c configs/run_YCB_liberhand_right.json
+python print_dataset_objects.py -c configs/run_YCB_liberhand_right_native.json --native-only
+```
 - `--force`
 - `-v`：只透传给子进程 `run.py`
 

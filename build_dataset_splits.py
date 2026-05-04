@@ -20,6 +20,7 @@ from utils.utils_file import (
     raw_dataset_root_from_config,
     relpath_str,
     run_scales_from_config,
+    use_native_asset_from_config,
 )
 from utils.utils_sample import grasp_h5_nonempty
 
@@ -96,7 +97,8 @@ def _collect_entry_record(
         "cam_ex_path": [relpath_str(path, dataset_dir) for path in cam_ex_paths],
         "cam_in": relpath_str(cam_in_path, dataset_dir),
         "global_pc_path": relpath_str(global_pc_path, dataset_dir),
-        "scale": float(entry["scale"]),
+        "scale_tag": str(entry.get("scale_tag", "")),
+        "scale": None if entry.get("scale") is None else float(entry["scale"]),
     }
     return record, None
 
@@ -228,6 +230,7 @@ def main() -> None:
         raw_dataset_name=raw_dataset_name_from_config(cfg),
         scales=run_scales_from_config(cfg),
         objdata_tag=objdata_tag,
+        include_native=use_native_asset_from_config(cfg),
         graspdata_tag=graspdata_tag,
         generated_dataset_root=generated_dataset_root_from_config(cfg),
         verbose=data_verbose_from_config(cfg),

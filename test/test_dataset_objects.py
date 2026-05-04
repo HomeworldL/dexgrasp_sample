@@ -4,6 +4,7 @@ import json
 import trimesh
 
 from src.dataset_objects import DatasetObjects
+from src.scale_dataset_builder import ScaleDatasetBuilder
 
 
 def _make_mesh(path: Path):
@@ -37,8 +38,27 @@ def _make_dataset_with_manifest(tmp_path: Path, dataset_name: str, obj_name: str
     return obj_dir
 
 
+def _build_objdata_assets(
+    tmp_path: Path,
+    dataset_name: str,
+    obj_name: str,
+    scales: list[float],
+) -> None:
+    obj_dir = tmp_path / dataset_name / obj_name
+    builder = ScaleDatasetBuilder(str(tmp_path / "datasets"))
+    builder.build_multi_scale_assets(
+        config_stem=f"objdata_{dataset_name}",
+        object_info={"object_name": obj_name, "coacd_abs": str((obj_dir / "coacd.obj").resolve())},
+        scales=scales,
+        mass_kg=0.12,
+        principal_moments=[1e-4, 2e-4, 3e-4],
+        overwrite=False,
+    )
+
+
 def test_manifest_driven_build_returns_object_scale_items(tmp_path: Path):
     _make_dataset_with_manifest(tmp_path, "YCB", "YCB_001_obj")
+    _build_objdata_assets(tmp_path, "YCB", "YCB_001_obj", scales=[0.06, 0.08])
 
     ds = DatasetObjects(
         raw_dataset_root=str(tmp_path),
@@ -47,7 +67,6 @@ def test_manifest_driven_build_returns_object_scale_items(tmp_path: Path):
         objdata_tag="objdata_YCB",
         graspdata_tag="graspdata_YCB_liberhand",
         generated_dataset_root=str(tmp_path / "datasets"),
-        rebuild_existing_assets=True,
         verbose=False,
     )
 
@@ -73,7 +92,6 @@ def test_dataset_missing_dir_raises(tmp_path: Path):
             objdata_tag="objdata_YCB",
             graspdata_tag="graspdata_YCB_liberhand",
             generated_dataset_root=str(tmp_path / "datasets"),
-            rebuild_existing_assets=True,
             verbose=False,
         )
         assert False, "Expected FileNotFoundError"
@@ -83,6 +101,7 @@ def test_dataset_missing_dir_raises(tmp_path: Path):
 
 def test_get_point_cloud_uses_coacd(tmp_path: Path):
     _make_dataset_with_manifest(tmp_path, "YCB", "YCB_001_obj")
+    _build_objdata_assets(tmp_path, "YCB", "YCB_001_obj", scales=[0.06])
     ds = DatasetObjects(
         raw_dataset_root=str(tmp_path),
         raw_dataset_name="YCB",
@@ -90,7 +109,6 @@ def test_get_point_cloud_uses_coacd(tmp_path: Path):
         objdata_tag="objdata_YCB",
         graspdata_tag="graspdata_YCB_liberhand",
         generated_dataset_root=str(tmp_path / "datasets"),
-        rebuild_existing_assets=True,
         verbose=False,
     )
 
@@ -102,6 +120,8 @@ def test_get_point_cloud_uses_coacd(tmp_path: Path):
 def test_object_name_filter_limits_index(tmp_path: Path):
     _make_dataset_with_manifest(tmp_path, "YCB", "YCB_001_obj")
     _make_dataset_with_manifest(tmp_path, "YCB", "YCB_002_obj")
+    _build_objdata_assets(tmp_path, "YCB", "YCB_001_obj", scales=[0.06])
+    _build_objdata_assets(tmp_path, "YCB", "YCB_002_obj", scales=[0.06])
 
     ds = DatasetObjects(
         raw_dataset_root=str(tmp_path),
@@ -111,7 +131,6 @@ def test_object_name_filter_limits_index(tmp_path: Path):
         objdata_tag="objdata_YCB",
         graspdata_tag="graspdata_YCB_liberhand",
         generated_dataset_root=str(tmp_path / "datasets"),
-        rebuild_existing_assets=True,
         verbose=False,
     )
 
@@ -120,8 +139,9 @@ def test_object_name_filter_limits_index(tmp_path: Path):
     assert items[0]["object_name"] == "YCB_002_obj"
 
 
-def test_rebuild_existing_assets_cleans_scale_dir(tmp_path: Path):
+def test_existing_assets_preserve_scale_dir_contents(tmp_path: Path):
     _make_dataset_with_manifest(tmp_path, "YCB", "YCB_001_obj")
+    _build_objdata_assets(tmp_path, "YCB", "YCB_001_obj", scales=[0.06])
 
     ds = DatasetObjects(
         raw_dataset_root=str(tmp_path),
@@ -130,7 +150,6 @@ def test_rebuild_existing_assets_cleans_scale_dir(tmp_path: Path):
         objdata_tag="objdata_YCB",
         graspdata_tag="graspdata_YCB_liberhand",
         generated_dataset_root=str(tmp_path / "datasets"),
-        rebuild_existing_assets=True,
         verbose=False,
     )
 
@@ -139,22 +158,21 @@ def test_rebuild_existing_assets_cleans_scale_dir(tmp_path: Path):
     stale_path.write_text("stale", encoding="utf-8")
     assert stale_path.exists()
 
-    rebuilt = DatasetObjects(
+    indexed = DatasetObjects(
         raw_dataset_root=str(tmp_path),
         raw_dataset_name="YCB",
         scales=[0.06],
         objdata_tag="objdata_YCB",
         graspdata_tag="graspdata_YCB_liberhand",
         generated_dataset_root=str(tmp_path / "datasets"),
-        rebuild_existing_assets=True,
         verbose=False,
     )
 
-    rebuilt_asset_dir = Path(rebuilt.get_entries()[0]["asset_dir_abs"])
-    assert rebuilt_asset_dir == asset_dir
-    assert not stale_path.exists()
-    assert (rebuilt_asset_dir / "object.xml").exists()
-    assert (rebuilt_asset_dir / "coacd.obj").exists()
+    indexed_asset_dir = Path(indexed.get_entries()[0]["asset_dir_abs"])
+    assert indexed_asset_dir == asset_dir
+    assert stale_path.exists()
+    assert (indexed_asset_dir / "object.xml").exists()
+    assert (indexed_asset_dir / "coacd.obj").exists()
 
 
 def test_missing_objdata_asset_raises_without_rebuild(tmp_path: Path):

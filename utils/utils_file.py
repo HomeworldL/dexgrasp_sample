@@ -71,8 +71,8 @@ def data_verbose_from_config(cfg: Dict) -> bool:
 
 def asset_scales_from_config(cfg: Dict) -> List[float]:
     scales = _require(cfg, "data.asset_scales")
-    if not isinstance(scales, list) or not scales:
-        raise ValueError("Config field data.asset_scales must be a non-empty list.")
+    if not isinstance(scales, list):
+        raise ValueError("Config field data.asset_scales must be a list.")
     parsed = [float(scale) for scale in scales]
     for scale in parsed:
         if scale <= 0.0:
@@ -82,13 +82,27 @@ def asset_scales_from_config(cfg: Dict) -> List[float]:
 
 def run_scales_from_config(cfg: Dict) -> List[float]:
     scales = _require(cfg, "data.scales")
-    if not isinstance(scales, list) or not scales:
-        raise ValueError("Config field data.scales must be a non-empty list.")
+    if not isinstance(scales, list):
+        raise ValueError("Config field data.scales must be a list.")
     parsed = [float(scale) for scale in scales]
     for scale in parsed:
         if scale <= 0.0:
             raise ValueError("All data.scales values must be > 0.")
     return parsed
+
+
+def build_native_asset_from_config(cfg: Dict) -> bool:
+    value = cfg.get("data", {}).get("build_native_asset", False)
+    if not isinstance(value, bool):
+        raise ValueError("Config field data.build_native_asset must be a boolean when provided.")
+    return value
+
+
+def use_native_asset_from_config(cfg: Dict) -> bool:
+    value = cfg.get("data", {}).get("use_native_asset", False)
+    if not isinstance(value, bool):
+        raise ValueError("Config field data.use_native_asset must be a boolean when provided.")
+    return value
 
 
 def hand_profile_from_config(cfg: Dict) -> Dict:
@@ -114,7 +128,6 @@ def anchor_params_from_config(cfg: Dict) -> Dict[str, Dict[str, float | str]]:
     for body_name, value in params.items():
         if not isinstance(body_name, str) or not body_name.strip():
             raise ValueError("Each key in hand.anchor_params must be a non-empty body name string.")
-        # Backward compatibility: allow numeric value as shorthand for {"weight": value, "axis": "Z"}.
         if isinstance(value, (int, float)):
             normalized[body_name] = {"weight": float(value), "axis": "Z"}
             continue
@@ -265,7 +278,6 @@ def _validate_contact_profile(profile: Dict, path: str, require_control: bool) -
             except Exception as exc:
                 raise ValueError(f"{path}.{field}[{idx}] must be numeric.") from exc
 
-    # Optional runtime actuation overrides for MjHO hand setup.
     optional_positive_scalars = ["kp", "forcerange", "actuatorfrcrange"]
     for field in optional_positive_scalars:
         if field not in profile:
@@ -301,7 +313,10 @@ def _validate_asset_config(cfg: Dict, source_path: str) -> None:
     tag = _require(cfg, "data.objdata_tag")
     if not isinstance(tag, str) or not tag.strip():
         raise ValueError("Config field data.objdata_tag must be a non-empty string.")
-    asset_scales_from_config(cfg)
+    scales = asset_scales_from_config(cfg)
+    build_native = build_native_asset_from_config(cfg)
+    if not scales and not build_native:
+        raise ValueError("Config must enable at least one asset scale or data.build_native_asset=true.")
     _require(cfg, "sampling.n_points")
     _require(cfg, "warp_render")
 
@@ -312,7 +327,10 @@ def _validate_run_config(cfg: Dict, source_path: str) -> None:
         tag = _require(cfg, f"data.{tag_field}")
         if not isinstance(tag, str) or not tag.strip():
             raise ValueError(f"Config field data.{tag_field} must be a non-empty string.")
-    run_scales_from_config(cfg)
+    scales = run_scales_from_config(cfg)
+    use_native = use_native_asset_from_config(cfg)
+    if not scales and not use_native:
+        raise ValueError("Config must enable at least one run scale or data.use_native_asset=true.")
     for k in ["n_points", "downsample_for_sim", "Nd", "rot_n", "d_min", "d_max", "pc_subdir"]:
         _require(cfg, f"sampling.{k}")
 
@@ -381,28 +399,15 @@ def _validate_run_config(cfg: Dict, source_path: str) -> None:
         raise ValueError("data.max_time_sec must be > 0.")
 
 
-def _load_json_config(path: Optional[str]) -> tuple[str, Dict]:
-    if not path:
-        raise ValueError("Config path is required. Example: -c configs/run_YCB_liberhand_right.json")
-    abs_path = os.path.abspath(path)
-    if not os.path.exists(abs_path):
-        raise FileNotFoundError(f"Config file not found: {path} -> {abs_path}")
-    with open(abs_path, "r", encoding="utf-8") as f:
+def load_asset_config(config_path: str) -> Dict:
+    with open(config_path, "r", encoding="utf-8") as f:
         cfg = json.load(f)
-    return abs_path, cfg
-
-
-def load_asset_config(path: Optional[str]) -> Dict:
-    abs_path, cfg = _load_json_config(path)
-    _validate_asset_config(cfg, abs_path)
+    _validate_asset_config(cfg, config_path)
     return cfg
 
 
-def load_run_config(path: Optional[str]) -> Dict:
-    abs_path, cfg = _load_json_config(path)
-    _validate_run_config(cfg, abs_path)
+def load_config(config_path: str) -> Dict:
+    with open(config_path, "r", encoding="utf-8") as f:
+        cfg = json.load(f)
+    _validate_run_config(cfg, config_path)
     return cfg
-
-
-def load_config(path: Optional[str]) -> Dict:
-    return load_run_config(path)

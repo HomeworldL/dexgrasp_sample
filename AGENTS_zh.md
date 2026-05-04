@@ -2,9 +2,13 @@
 
 ## 仓库用途
 基于 MuJoCo 的 3D 物体灵巧抓取采样仓库。
-主线工作聚焦于离线抓取配置生成。
+当前主线工作分为三部分：
+- 物体资产准备（`objdata_*`）
+- 离线抓取配置生成（`graspdata_*`）
+- 可选的形状聚类与 RL 专用元数据构建（位于 `_meta/` 下）
 
 ## 主线代码（不要漂移）
+- `prepare_object_assets.py`
 - `run_multi.py`
 - `run.py`
 - `run_warp_render.py`
@@ -13,8 +17,32 @@
 - `src/dataset_objects.py`
 
 ## 架构说明
-- 主数据流：物体 mesh -> 表面点/法向 -> 抓取坐标系采样 -> MuJoCo 碰撞/稳定性过滤 -> HDF5 抓取状态。
+- 当前数据流分成两个阶段：
+  - 准备阶段：原始 processed mesh -> `prepare_object_assets.py` -> `datasets/objdata_*`
+  - 采样阶段：`objdata_*` 资产 -> 抓取帧采样 -> MuJoCo 碰撞/稳定性过滤 -> `datasets/graspdata_*`
 - 采样后的视觉流程：每个 object-scale 完成抓取采样后，运行 `run_warp_render.py`，基于缩放后的 `coacd.obj` 渲染多视角局部点云。
+- 资产准备由 `prepare_object_assets.py` 负责；它直接基于 manifest 允许的源 mesh 构建 `objdata_*` 资产，并写出 `global_pc.npy` / `global_normals.npy`。
+- 物体资产和抓取输出是显式分离的：
+  - 物体资产位于 `datasets/objdata_*`
+  - 抓取输出位于 `datasets/graspdata_*`
+- `print_dataset_objects.py` 是 `DatasetObjects` 的轻量检查入口；用它可以在不启动采样的情况下确认 object-scale 扁平索引以及是否包含 native。
+- 形状聚类与 RL 划分工具独立于模仿学习数据集构建，并且只写入 `_meta`：
+  - `run_shape_cluster.py` 在 `datasets/<objdata_tag>/_meta/shape_cluster/` 下构建 object-level shape embedding 与 KMeans 聚类
+  - `build_dataset_splits_rl.py` 在 `datasets/<objdata_tag>/_meta/rl_split/` 下构建 RL 专用 train/test manifest
+  - `vis_shape_cluster.py` 为每个 cluster 渲染缩略图页，便于快速人工检查
+
+## 数据集准备
+- `prepare_object_assets.py` 是采样前必须先运行的入口。
+- 它会扫描 `manifest.process_meshes.json`，过滤 `process_status=success`，并在 `datasets/objdata_*` 下构建物体资产。
+- 每个准备好的资产目录包含：
+  - `coacd.obj`
+  - `object.xml`
+  - `convex_parts/*.obj`
+  - `pc_warp/global_pc.npy`
+  - `pc_warp/global_normals.npy`
+- 标准缩放资产使用 `scaleXXX/` 目录。
+- 当开关启用时，`native/` 会作为 `scaleXXX/` 的平级目录创建。
+- `DatasetObjects` 是针对已准备好资产的只读索引器；它不能隐式重建资产。
 
 ## 数据集接口
 - 首选数据集根目录为 `assets/objects/processed`。
@@ -24,6 +52,7 @@
   - `["YCB"]`
 - `DatasetObjects` 在合并后的数据集列表之上暴露全局整数 id 空间。
 - `run.py` 通过 `--object-scale-key` 采样单个条目；`run_multi.py` 按 `global_id` 顺序遍历全部条目。
+- `print_dataset_objects.py` 应作为检查索引结果和 scale/native 包含情况的首选工具。
 
 ## 缩放策略
 - 所有数据集统一使用配置中的固定 scale 列表（`data.scales`）。
@@ -108,6 +137,24 @@
 - 空的 grasp 文件在最终 manifest 使用前必须过滤掉。
 - manifest 中的路径应保存为相对 dataset root 的相对路径，便于数据集整体迁移。
 
+## 形状聚类与 RL 元数据
+- `run_shape_cluster.py` 用于 RL 导向的物体聚类，不属于模仿学习数据集构建流程。
+- 当前形状聚类：
+  - 使用 `objdata_*` 中预先保存的 `global_pc.npy`
+  - 按一个配置的 scale tag 提取 object-level 特征，通常是 `scale120`
+  - 不包含 `native`
+  - 全部输出写入 `datasets/<objdata_tag>/_meta/shape_cluster/<cluster_tag>/`
+- 主要聚类产物包括：
+  - `meta.json`
+  - `object_features.npy`
+  - `cluster_centers.npy`
+  - `object_cluster.json`
+  - `cluster_index.json`
+  - `curriculum_index.json`
+- `build_dataset_splits_rl.py` 会在 `datasets/<objdata_tag>/_meta/rl_split/<split_tag>/` 下写出 RL 专用 train/test manifest。
+- RL 划分先按 `object_name` 分组，再展开回 object-scale 记录，并继承 object-level 聚类信息。
+- 当前 RL 划分仅针对标准缩放资产，不包含 `native`。
+
 ## 配置策略（强制）
 - 主线采用 config-first：所有 CLI 入口都必须加载 JSON 配置。
 - 不允许在 Python 代码中重新构造默认值（禁止 `build_default_*` 风格）。
@@ -185,6 +232,12 @@
   - 按相同命名规则将该 TODO 归档到 `docs/`
   - 在仓库根目录创建下一轮新的 `TODO.md`
 - 执行任务时，始终先读取根目录当前激活的 `TODO.md`；历史文件仅供参考。
+
+## CHANGELOG 规则（强制）
+- 从当前仓库状态开始，在根目录维护 `CHANGELOG.md`。
+- 每次 commit 前，必须在同一次变更中更新 `CHANGELOG.md`。
+- 记录保持简明，聚焦用户可见的流水线、配置、数据集或工具变更。
+- 除非旧条目存在事实错误，否则不要重写历史条目；新增内容应以日期分节追加。
 
 ## Python 代码风格（简明）
 - 遵循 PEP 8，并使用 `black` + `isort` 格式化。

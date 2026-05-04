@@ -2,14 +2,15 @@
 
 MuJoCo-based offline dexterous grasp sampling for scaled 3D objects.
 
-The mainline pipeline is:
+The current repository workflow is:
 
-1. build a manifest-driven object-scale index
-2. sample surface points and grasp frames
-3. run MuJoCo collision and stability filtering
-4. save validated grasp states to `grasp.h5` and `grasp.npy`
-5. render multi-view partial point clouds with Warp
-6. build object-level dataset splits in `train.json` and `test.json`
+1. prepare object assets under `datasets/objdata_*`
+2. build a manifest-driven object-scale index from prepared assets
+3. sample surface points and grasp frames
+4. run MuJoCo collision and stability filtering
+5. save validated grasp states under `datasets/graspdata_*`
+6. render multi-view partial point clouds with Warp
+7. optionally build shape clusters and RL-only metadata under `_meta/`
 
 This repository supports both:
 - CPU MuJoCo sampling via `run.py` / `run_multi.py`
@@ -19,7 +20,9 @@ This repository supports both:
 - [Repository Introduction](#repository-introduction)
 - [Installation and Dependencies](#installation-and-dependencies)
 - [Dataset Construction](#dataset-construction)
+- [Clustering and RL Metadata](#clustering-and-rl-metadata)
 - [Run Commands](#run-commands)
+- [Utility Scripts](#utility-scripts)
 - [Main Files](#main-files)
 - [Notes](#notes)
 - [Tuning Notes](#tuning-notes)
@@ -29,14 +32,17 @@ This repository supports both:
 ## Repository Introduction
 
 Mainline purpose:
+- prepare reusable object assets before sampling
 - generate grasp candidates offline for object-scale entries
 - validate them with MuJoCo physics
 - save grasp states in a stable dataset format
 - render post-sampling partial point clouds for downstream learning
+- optionally build object-level shape clusters and RL manifests without depending on grasp files
 
 Current mainline assumptions:
 - config-first workflow
 - manifest-gated dataset indexing
+- object assets (`objdata_*`) and grasp outputs (`graspdata_*`) are stored separately
 - one flattened global id space over object-scale entries
 - `grasp.h5` is the source of truth, `grasp.npy` is derived from it
 - mainline grasp arrays are stored as `float32`
@@ -102,6 +108,25 @@ Only objects listed in `manifest.process_meshes.json` with:
 - `process_status = success`
 
 are eligible for indexing.
+
+### Object Asset Preparation
+
+`prepare_object_assets.py` is the required preparation entrypoint before sampling.
+
+It:
+- scans manifest-eligible objects from `assets/objects/processed/<dataset>/manifest.process_meshes.json`
+- builds object assets under `datasets/objdata_<dataset>/`
+- writes `coacd.obj`, `object.xml`, `convex_parts/*.obj`
+- writes `pc_warp/global_pc.npy` and `pc_warp/global_normals.npy`
+- optionally builds peer `native/` assets when enabled in asset config
+
+Example:
+
+```bash
+python prepare_object_assets.py -c configs/assets_YCB.json --force --jobs 8
+```
+
+`DatasetObjects` is now a read-only indexer over prepared assets. It should not rebuild missing assets implicitly.
 
 ### Object-Scale Flattening
 
@@ -195,6 +220,74 @@ Current split rules:
 - filter out empty grasp files before writing final manifests
 - store paths relative to dataset root for portability
 
+## Clustering and RL Metadata
+
+Shape clustering and RL split are separate from imitation-learning dataset construction.
+
+### Shape Clustering
+
+Use `run_shape_cluster.py` to build object-level shape features and KMeans clusters from prepared objdata assets:
+
+```bash
+python run_shape_cluster.py -c configs/assets_YCB.json --force
+```
+
+Current assumptions:
+- uses prepared `global_pc.npy`
+- uses one configured scale tag, typically `scale120`
+- clustering is object-level
+- `native` is excluded
+- outputs are written only under `_meta`
+
+Main output directory:
+
+```text
+datasets/objdata_YCB/_meta/shape_cluster/<cluster_tag>/
+```
+
+Main files:
+- `meta.json`
+- `object_features.npy`
+- `cluster_centers.npy`
+- `object_cluster.json`
+- `cluster_index.json`
+- `curriculum_index.json`
+
+### RL-Only Split
+
+Use `build_dataset_splits_rl.py` to build train/test manifests for RL from objdata assets plus shape-cluster metadata:
+
+```bash
+python build_dataset_splits_rl.py -c configs/assets_YCB.json --force
+```
+
+Main output directory:
+
+```text
+datasets/objdata_YCB/_meta/rl_split/<split_tag>/
+```
+
+Current assumptions:
+- split by `object_name`
+- expand back to object-scale entries
+- inherit object-level cluster metadata onto each object-scale row
+- use standard `scaleXXX` assets only
+- do not require `grasp.h5` or Warp partial render outputs
+
+### Cluster Visualization
+
+Use `vis_shape_cluster.py` to render per-cluster thumbnail pages:
+
+```bash
+python vis_shape_cluster.py -c configs/assets_YCB.json
+```
+
+This writes cluster overview images under:
+
+```text
+datasets/objdata_YCB/_meta/shape_cluster/<cluster_tag>/vis/
+```
+
 ## Run Commands
 
 ### CPU: Single Object-Scale
@@ -245,6 +338,17 @@ Replay all saved grasps for one object-scale under MuJoCo extforce:
 python vis_grasp_mujoco.py \
   --object-scale-dir datasets/graspdata_YCB_liberhand_right/YCB_002_master_chef_can/scale120 \
   -c configs/run_YCB_liberhand_right.json -v
+```
+
+## Utility Scripts
+
+### Inspect Indexed Objects
+
+Use `print_dataset_objects.py` to inspect `DatasetObjects` entries without starting sampling:
+
+```bash
+python print_dataset_objects.py -c configs/run_YCB_liberhand_right.json
+python print_dataset_objects.py -c configs/run_YCB_liberhand_right_native.json --native-only
 ```
 
 ### CPU: Whole Dataset in Parallel

@@ -3,14 +3,14 @@
 Design notes
 - No dataset-root resolver. `raw_dataset_root` must be explicitly passed from config.
 - Build object list from `manifest.process_meshes.json` only (`process_status=success`).
-- Scaled object assets live under an object asset tag, separate from grasp outputs.
-- Output info granularity is object-scale (one info per scale).
+- Object assets live under an object asset tag, separate from grasp outputs.
+- Output info granularity is object-scale (one info per scale tag).
+- `native` is treated as an optional peer of `scaleXXX` during read-only indexing.
 """
 
 from __future__ import annotations
 
 import json
-import shutil
 import time
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Union
@@ -22,6 +22,7 @@ from tqdm import tqdm
 from src.scale_dataset_builder import ScaleDatasetBuilder
 from utils.utils_pointcloud import preview_pointcloud_with_normals, sample_surface_o3d
 
+
 class DatasetObjects:
     """Manifest-driven single-dataset object-scale index.
 
@@ -30,9 +31,9 @@ class DatasetObjects:
         raw_dataset_name: Dataset name, e.g. ``YCB``.
         scales: Explicit scale list from config.
         objdata_tag: Output tag for object-scale assets, e.g. ``objdata_YCB``.
+        include_native: Include ``native`` assets when True.
         graspdata_tag: Output tag for hand-specific grasp artifacts.
         generated_dataset_root: Root folder for generated scaled assets.
-        rebuild_existing_assets: Remove and rebuild existing object-scale assets while indexing.
         verbose: Print all skip/build messages when True.
 
     Info format (one row per object-scale):
@@ -44,8 +45,10 @@ class DatasetObjects:
             "output_dir_abs": str,
             "coacd_abs": str,
             "convex_parts_abs": List[str],
-            "scale": float,
-            "mjcf_abs": str,  
+            "scale_tag": str,
+            "scale": Optional[float],
+            "is_native": bool,
+            "mjcf_abs": str,
         }
     """
 
@@ -56,9 +59,9 @@ class DatasetObjects:
         scales: List[float],
         objdata_tag: str,
         object_names: Optional[List[str]] = None,
+        include_native: bool = False,
         graspdata_tag: Optional[str] = None,
         generated_dataset_root: str = "datasets",
-        rebuild_existing_assets: bool = False,
         verbose: bool = False,
     ):
         if not raw_dataset_root:
@@ -73,8 +76,9 @@ class DatasetObjects:
             raise ValueError("raw_dataset_name cannot be empty.")
 
         self.scales = [float(s) for s in scales]
-        if not self.scales:
-            raise ValueError("scales cannot be empty.")
+        self.include_native = bool(include_native)
+        if not self.scales and not self.include_native:
+            raise ValueError("At least one scale or include_native=True is required.")
         self.object_names = (
             {str(name).strip() for name in object_names if str(name).strip()}
             if object_names is not None
@@ -84,7 +88,6 @@ class DatasetObjects:
         self.objdata_tag = str(objdata_tag)
         self.graspdata_tag = str(graspdata_tag or objdata_tag)
         self.generated_dataset_root = str(generated_dataset_root)
-        self.rebuild_existing_assets = bool(rebuild_existing_assets)
         self.verbose = bool(verbose)
 
         self._builder = ScaleDatasetBuilder(self.generated_dataset_root)
@@ -102,12 +105,12 @@ class DatasetObjects:
 
     def get_entries(self) -> List[Dict]:
         return self.items
-    
+
     def get_obj_info_by_index(self, obj_id: int) -> Dict:
         if obj_id < 0 or obj_id >= len(self.items):
             raise KeyError(f"Object id '{obj_id}' out of range. Total={len(self.items)}")
         return self.items[obj_id]
-    
+
     def get_obj_info_by_scale_key(self, obj_scale_key: str) -> Dict:
         if obj_scale_key in self._key_to_index:
             return self.items[self._key_to_index[obj_scale_key]]
@@ -116,10 +119,6 @@ class DatasetObjects:
     def _log(self, msg: str) -> None:
         if self.verbose:
             print(msg)
-
-    @staticmethod
-    def _scale_to_key(scale: float) -> str:
-        return f"scale{int(round(float(scale) * 1000)):03d}"
 
     @staticmethod
     def _to_abs_path(path_str: str) -> Path:
@@ -144,11 +143,10 @@ class DatasetObjects:
         if not isinstance(objects, list):
             raise ValueError(f"Invalid manifest objects list: {manifest_path}")
 
-        default_mass = float(manifest.get("summary", {}).get("default_mass_kg", 0.1))
-        expected_entries = len(objects) * len(self.scales)
+        expected_entries = len(objects) * (len(self.scales) + (1 if self.include_native else 0))
         print(
             f"[DatasetObjects] indexing dataset={self.raw_dataset_name} "
-            f"objects={len(objects)} scales={len(self.scales)} "
+            f"objects={len(objects)} scales={len(self.scales)} include_native={self.include_native} "
             f"expected_entries<={expected_entries} objdata_tag={self.objdata_tag} "
             f"graspdata_tag={self.graspdata_tag}"
         )
@@ -176,71 +174,52 @@ class DatasetObjects:
                 continue
 
             object_dir = self._to_abs_path(mesh_path_raw).parent
-            coacd_abs = str((object_dir / "coacd.obj").resolve())
+            _ = str((object_dir / "coacd.obj").resolve())
 
-            base_info = {
-                "object_name": object_name,
-                "coacd_abs": coacd_abs,
-            }
+            asset_recs: List[Dict] = []
+            if self.include_native:
+                native_rec = self._existing_native_assets(object_name=object_name)
+                if native_rec is None:
+                    raise FileNotFoundError(
+                        f"Missing objdata asset for {object_name} scale=native under {self.objdata_tag}. "
+                        "First-time creation or rebuild must use prepare_object_assets.py --force."
+                    )
+                asset_recs.append(native_rec)
 
-            mass_kg = float(obj.get("mass_kg", default_mass))
-            pm = obj.get("principal_moments")
-            if not isinstance(pm, list) or len(pm) != 3:
-                pm = [1e-6, 1e-6, 1e-6]
-            principal_moments = [float(pm[0]), float(pm[1]), float(pm[2])]
-
-            scale_assets = {}
             for scale in self.scales:
-                if self.rebuild_existing_assets:
-                    self._clean_scale_assets(object_name=object_name, scale=float(scale))
-                    try:
-                        rec = self._builder.build_scale_assets(
-                            config_stem=self.objdata_tag,
-                            object_info=base_info,
-                            scale=float(scale),
-                            mass_kg=mass_kg,
-                            principal_moments=principal_moments,
-                            overwrite=False,
-                        )
-                    except Exception as exc:
-                        raise RuntimeError(
-                            f"Failed to rebuild objdata asset for {object_name} "
-                            f"scale={float(scale):.6f} under {self.objdata_tag}: {exc}"
-                        ) from exc
-                    scale_assets[self._builder.scale_tag(float(scale))] = rec
-                    continue
-
                 existing_rec = self._existing_scale_assets(object_name=object_name, scale=float(scale))
-                if existing_rec is not None:
-                    scale_assets[self._builder.scale_tag(float(scale))] = existing_rec
-                    continue
-                raise FileNotFoundError(
-                    f"Missing objdata asset for {object_name} scale={float(scale):.6f} "
-                    f"under {self.objdata_tag}. First-time creation or rebuild must use "
-                    "prepare_object_assets.py --force."
-                )
+                if existing_rec is None:
+                    raise FileNotFoundError(
+                        f"Missing objdata asset for {object_name} scale={float(scale):.6f} "
+                        f"under {self.objdata_tag}. First-time creation or rebuild must use "
+                        "prepare_object_assets.py --force."
+                    )
+                asset_recs.append(existing_rec)
 
-            for scale_key, rec in sorted(scale_assets.items()):
+            for rec in sorted(asset_recs, key=lambda item: str(item["scale_tag"])):
+                scale_tag = str(rec["scale_tag"])
                 asset_dir_abs = Path(rec["xml_abs"]).resolve().parent
                 output_dir_abs = (
                     self._builder.base_output_dir
                     / self.graspdata_tag
                     / object_name
-                    / scale_key
+                    / scale_tag
                 ).resolve()
                 info = {
                     "global_id": gid,
-                    "object_scale_key": f"{object_name}__{scale_key}",
+                    "object_scale_key": f"{object_name}__{scale_tag}",
                     "object_name": object_name,
                     "asset_dir_abs": str(asset_dir_abs),
                     "output_dir_abs": str(output_dir_abs),
                     "coacd_abs": rec["coacd_abs"],
                     "convex_parts_abs": list(rec["convex_parts_abs"]),
                     "mjcf_abs": rec["xml_abs"],
-                    "scale": float(rec["scale"]),
+                    "scale_tag": scale_tag,
+                    "scale": rec["scale"],
+                    "is_native": bool(rec.get("is_native", False)),
                 }
                 self.items.append(info)
-                self._key_to_index[f"{object_name}__{scale_key}"] = gid
+                self._key_to_index[str(info["object_scale_key"])] = gid
                 gid += 1
 
             if not self.verbose and obj_idx % 200 == 0 and len(objects) >= 500:
@@ -256,8 +235,7 @@ class DatasetObjects:
             f"indexed={gid} elapsed={elapsed:.1f}s"
         )
 
-    def _existing_scale_assets(self, object_name: str, scale: float) -> Optional[Dict]:
-        scale_tag = self._builder.scale_tag(float(scale))
+    def _existing_asset_by_tag(self, object_name: str, scale_tag: str, scale_value: Optional[float]) -> Optional[Dict]:
         scale_dir = self._builder.base_output_dir / self.objdata_tag / object_name / scale_tag
         convex_dir = scale_dir / "convex_parts"
         coacd_path = scale_dir / "coacd.obj"
@@ -272,18 +250,27 @@ class DatasetObjects:
 
         return {
             "object_name": object_name,
-            "scale": float(scale),
+            "scale": scale_value,
             "scale_tag": scale_tag,
+            "is_native": scale_value is None,
             "coacd_abs": str(coacd_path.resolve()),
             "convex_parts_abs": convex_parts_abs,
             "xml_abs": str(xml_path.resolve()),
         }
 
-    def _clean_scale_assets(self, object_name: str, scale: float) -> None:
-        scale_tag = self._builder.scale_tag(float(scale))
-        scale_dir = self._builder.base_output_dir / self.objdata_tag / object_name / scale_tag
-        if scale_dir.exists():
-            shutil.rmtree(scale_dir)
+    def _existing_scale_assets(self, object_name: str, scale: float) -> Optional[Dict]:
+        return self._existing_asset_by_tag(
+            object_name=object_name,
+            scale_tag=self._builder.scale_tag(float(scale)),
+            scale_value=float(scale),
+        )
+
+    def _existing_native_assets(self, object_name: str) -> Optional[Dict]:
+        return self._existing_asset_by_tag(
+            object_name=object_name,
+            scale_tag=self._builder.native_tag(),
+            scale_value=None,
+        )
 
     def load_mesh(self, mesh_or_path: Union[str, trimesh.Trimesh]) -> trimesh.Trimesh:
         if isinstance(mesh_or_path, trimesh.Trimesh):
@@ -319,9 +306,6 @@ class DatasetObjects:
             mesh.visual.vertex_colors = np.tile(np.array([128, 128, 128, a], dtype=np.uint8), (n, 1))
         return mesh
 
-    # -------------------------
-    # Surface sampling (Open3D)
-    # -------------------------
     def sample_surface_o3d(
         self,
         obj_path: str,
@@ -329,14 +313,7 @@ class DatasetObjects:
         method: str = "uniform",
         preview: bool = False,
     ) -> Tuple[np.ndarray, np.ndarray]:
-        """
-        Sample surface points from an OBJ using Open3D.
-
-        Returns:
-            points (N,3) numpy array, normals (N,3) numpy array
-        """
         pts, norms = sample_surface_o3d(obj_path=obj_path, n_points=n_points, method=method)
-
         if preview:
             self._preview_pointcloud_with_normals(pts, norms)
         return pts, norms

@@ -6,6 +6,7 @@ import pytest
 import trimesh
 
 from src.dataset_objects import DatasetObjects
+from src.scale_dataset_builder import ScaleDatasetBuilder
 from utils.utils_seed import set_seed
 from utils.utils_pointcloud import sample_surface_o3d
 
@@ -16,6 +17,19 @@ def _make_mesh_object(obj_dir: Path):
     m = trimesh.creation.icosphere(radius=0.5)
     m.export(obj_dir / "coacd.obj")
     m.export(obj_dir / "convex_parts" / "part_000.obj")
+
+
+def _build_objdata_assets(tmp_path: Path, dataset_name: str, obj_name: str, scales: list[float]) -> None:
+    obj_dir = tmp_path / dataset_name / obj_name
+    builder = ScaleDatasetBuilder(str(tmp_path / "datasets"))
+    builder.build_multi_scale_assets(
+        config_stem=f"objdata_{dataset_name}",
+        object_info={"object_name": obj_name, "coacd_abs": str((obj_dir / "coacd.obj").resolve())},
+        scales=scales,
+        mass_kg=0.1,
+        principal_moments=[1e-4, 2e-4, 3e-4],
+        overwrite=False,
+    )
 
 
 def test_sample_surface_mesh_with_coacd_path(tmp_path: Path):
@@ -37,6 +51,7 @@ def test_sample_surface_mesh_with_coacd_path(tmp_path: Path):
         ],
     }
     (tmp_path / "MSO" / "manifest.process_meshes.json").write_text(json.dumps(manifest), encoding="utf-8")
+    _build_objdata_assets(tmp_path, "MSO", "obj_a", scales=[0.06])
 
     ds = DatasetObjects(
         raw_dataset_root=str(tmp_path),
@@ -45,7 +60,6 @@ def test_sample_surface_mesh_with_coacd_path(tmp_path: Path):
         objdata_tag="objdata_MSO",
         graspdata_tag="graspdata_YCB_liberhand",
         generated_dataset_root=str(tmp_path / "datasets"),
-        rebuild_existing_assets=True,
         verbose=False,
     )
     info = ds.get_obj_info_by_index(0)

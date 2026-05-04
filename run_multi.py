@@ -24,6 +24,7 @@ from utils.utils_file import (
     raw_dataset_root_from_config,
     run_scales_from_config,
     safe_filename,
+    use_native_asset_from_config,
 )
 from utils.utils_sample import grasp_outputs_exist
 
@@ -146,6 +147,7 @@ def main():
         raw_dataset_name=raw_dataset_name_from_config(cfg),
         scales=run_scales_from_config(cfg),
         objdata_tag=objdata_tag,
+        include_native=use_native_asset_from_config(cfg),
         graspdata_tag=graspdata_tag,
         generated_dataset_root=generated_dataset_root_from_config(cfg),
         verbose=bool(args.verbose or data_verbose_from_config(cfg)),

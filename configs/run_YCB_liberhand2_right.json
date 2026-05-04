@@ -22,7 +22,8 @@
     "fail_h5_name": "grasp_fail.h5",
     "fail_npy_name": "grasp_fail.npy",
     "fail_keep_ratio": 1.2,
-    "min_valid_count": 5
+    "min_valid_count": 5,
+    "use_native_asset": false
   },
   "hand": {
     "xml_path": "./assets/hands/liberhand2/liberhand2_right.xml",

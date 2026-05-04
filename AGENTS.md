@@ -2,9 +2,13 @@
 
 ## Repository Purpose
 MuJoCo-based dexterous grasp sampling for 3D objects.
-Mainline work focuses on offline grasp configuration generation.
+Current mainline work is split into:
+- object asset preparation (`objdata_*`)
+- offline grasp configuration generation (`graspdata_*`)
+- optional shape clustering and RL-only metadata construction under `_meta/`
 
 ## Mainline Code (Do Not Drift)
+- `prepare_object_assets.py`
 - `run_multi.py`
 - `run.py`
 - `run_warp_render.py`
@@ -13,8 +17,32 @@ Mainline work focuses on offline grasp configuration generation.
 - `src/dataset_objects.py`
 
 ## Architecture Notes
-- Main data flow: object mesh -> surface points/normals -> grasp frame sampling -> MuJoCo collision/stability filtering -> HDF5 grasp states.
+- Current data flow is split into two stages:
+  - preparation stage: raw processed mesh -> `prepare_object_assets.py` -> `datasets/objdata_*`
+  - sampling stage: `objdata_*` asset -> grasp frame sampling -> MuJoCo collision/stability filtering -> `datasets/graspdata_*`
 - Post-sampling vision flow: after grasp sampling for each object-scale, run `run_warp_render.py` to render multi-view partial point clouds from scaled `coacd.obj`.
+- Asset preparation is handled by `prepare_object_assets.py`; it builds `objdata_*` assets directly from manifest-eligible source meshes and writes `global_pc.npy` / `global_normals.npy`.
+- Object assets and grasp outputs are intentionally separated:
+  - object assets live under `datasets/objdata_*`
+  - grasp outputs live under `datasets/graspdata_*`
+- `print_dataset_objects.py` is the lightweight inspection entrypoint for `DatasetObjects`; use it to verify flattened object-scale indexing and native inclusion without launching sampling.
+- Shape clustering and RL split utilities are separate from imitation-learning dataset construction and live only under `_meta`:
+  - `run_shape_cluster.py` builds object-level shape embeddings and KMeans clusters under `datasets/<objdata_tag>/_meta/shape_cluster/`
+  - `build_dataset_splits_rl.py` builds RL-only train/test manifests under `datasets/<objdata_tag>/_meta/rl_split/`
+  - `vis_shape_cluster.py` renders per-cluster thumbnail pages for quick visual inspection
+
+## Dataset Preparation
+- `prepare_object_assets.py` is the required entrypoint before sampling.
+- It scans `manifest.process_meshes.json`, filters `process_status=success`, and builds object assets under `datasets/objdata_*`.
+- Each prepared asset directory contains:
+  - `coacd.obj`
+  - `object.xml`
+  - `convex_parts/*.obj`
+  - `pc_warp/global_pc.npy`
+  - `pc_warp/global_normals.npy`
+- Standard scaled assets use `scaleXXX/` directories.
+- When enabled, `native/` is created as a peer of `scaleXXX/`.
+- `DatasetObjects` is a read-only indexer over prepared assets; it must not rebuild assets implicitly.
 
 ## Dataset Interface
 - Preferred dataset root is `assets/objects/processed`.
@@ -24,6 +52,7 @@ Mainline work focuses on offline grasp configuration generation.
   - `["YCB"]`
 - `DatasetObjects` exposes a global integer id space over the merged list.
 - `run.py` samples a single entry by `--object-scale-key`; `run_multi.py` iterates all entries by `global_id` ordering.
+- `print_dataset_objects.py` should be the first-line inspection tool for validating indexed entries and scale/native inclusion.
 
 ## Scale Policy
 - All datasets use the unified fixed scale list from config (`data.scales`).
@@ -108,6 +137,24 @@ Mainline work focuses on offline grasp configuration generation.
 - Empty grasp files must be filtered out before the final manifests are used.
 - Manifest paths should be stored relative to the dataset root so the dataset can be moved without rewriting absolute paths.
 
+## Shape Cluster and RL Metadata
+- `run_shape_cluster.py` is for RL-oriented object clustering, not imitation-learning dataset construction.
+- Current shape clustering:
+  - uses prepared `global_pc.npy` from `objdata_*`
+  - currently clusters object-level features from one configured scale tag, typically `scale120`
+  - excludes `native`
+  - writes all outputs under `datasets/<objdata_tag>/_meta/shape_cluster/<cluster_tag>/`
+- Main shape cluster outputs:
+  - `meta.json`
+  - `object_features.npy`
+  - `cluster_centers.npy`
+  - `object_cluster.json`
+  - `cluster_index.json`
+  - `curriculum_index.json`
+- `build_dataset_splits_rl.py` writes RL-only train/test manifests under `datasets/<objdata_tag>/_meta/rl_split/<split_tag>/`
+- RL split is object-name grouped, then expanded back to object-scale records with inherited cluster metadata.
+- RL split currently targets standard scaled assets only and does not include `native`.
+
 ## Config Policy (Mandatory)
 - Mainline is config-first: all CLI entrypoints must load a JSON config.
 - Do not rebuild defaults inside Python code (`build_default_*` style is disallowed).
@@ -185,6 +232,11 @@ Mainline work focuses on offline grasp configuration generation.
   - archive that TODO to `docs/` with the same naming rule
   - create a new root `TODO.md` for the next iteration
 - During execution, always read the active root `TODO.md` first; history files are reference only.
+
+## CHANGELOG Rules (Mandatory)
+- Before every commit, update `CHANGELOG.md` in the same change.
+- Keep entries concise and task-oriented; record user-visible pipeline, config, dataset, or tooling changes.
+- Do not rewrite old entries unless they are factually incorrect; append new dated sections instead.
 
 ## Python Code Style (Concise)
 - Follow PEP 8 and format with `black` + `isort`.

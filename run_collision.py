@@ -22,6 +22,7 @@ from utils.utils_file import (
     raw_dataset_root_from_config,
     run_scales_from_config,
     anchor_params_from_config,
+    use_native_asset_from_config,
 )
 from utils.utils_sample import build_pose_candidates
 from utils.utils_seed import set_seed
@@ -104,6 +105,7 @@ def main() -> None:
         raw_dataset_name=raw_dataset_name_from_config(cfg),
         scales=run_scales_from_config(cfg),
         objdata_tag=objdata_tag_from_config(cfg, args.config),
+        include_native=use_native_asset_from_config(cfg),
         graspdata_tag=graspdata_tag_from_config(cfg, args.config),
         generated_dataset_root=generated_dataset_root_from_config(cfg),
         verbose=data_verbose_from_config(cfg),

@@ -23,7 +23,8 @@
       0.19,
       0.2
     ],
-    "verbose": false
+    "verbose": false,
+    "build_native_asset": false
   },
   "sampling": {
     "n_points": 4096

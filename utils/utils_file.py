@@ -110,14 +110,31 @@ def usd_convert_cfg_from_config(cfg: Dict) -> Dict:
     if not isinstance(usd_cfg, dict) or not usd_cfg:
         raise ValueError("Config field usd_convert must be a non-empty object.")
 
-    normalized = {}
-    for key in ["enabled", "force", "fix_base", "import_sites", "verify_inertial"]:
-        if key not in usd_cfg:
-            raise KeyError(f"Missing required config field: usd_convert.{key}")
-        value = usd_cfg[key]
+    normalized = {
+        "backend": str(usd_cfg.get("backend", "urdf")).strip().lower(),
+        "force": bool(usd_cfg.get("force", False)),
+        "fix_base": bool(usd_cfg.get("fix_base", False)),
+        "import_sites": bool(usd_cfg.get("import_sites", False)),
+        "verify_inertial": bool(usd_cfg.get("verify_inertial", True)),
+        "merge_joints": bool(usd_cfg.get("merge_joints", False)),
+        "make_instanceable": bool(usd_cfg.get("make_instanceable", False)),
+        "convex_decompose_mesh": bool(usd_cfg.get("convex_decompose_mesh", True)),
+    }
+    if normalized["backend"] not in {"urdf", "mjcf"}:
+        raise ValueError("Config field usd_convert.backend must be one of: urdf, mjcf")
+
+    for key in [
+        "force",
+        "fix_base",
+        "import_sites",
+        "verify_inertial",
+        "merge_joints",
+        "make_instanceable",
+        "convex_decompose_mesh",
+    ]:
+        value = usd_cfg.get(key, normalized[key])
         if not isinstance(value, bool):
             raise ValueError(f"Config field usd_convert.{key} must be a boolean.")
-        normalized[key] = value
     return normalized
 
 

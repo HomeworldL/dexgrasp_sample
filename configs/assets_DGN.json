@@ -44,9 +44,12 @@
     "version": "v1"
   },
   "usd_convert": {
-    "enabled": true,
+    "backend": "urdf",
     "force": false,
+    "merge_joints": false,
     "fix_base": false,
+    "make_instanceable": false,
+    "convex_decompose_mesh": true,
     "import_sites": false,
     "verify_inertial": true
   },

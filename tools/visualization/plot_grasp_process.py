@@ -31,7 +31,14 @@ OBJECT_PROFILE = {
 }
 
 if __name__ == "__main__":
-    ds = DatasetObjects("assets/ycb_datasets")
+    ds = DatasetObjects(
+        scales=[0.08],
+        objdata_tag="objdata_YCB",
+        include_native=False,
+        graspdata_tag="graspdata_YCB_liberhand",
+        generated_dataset_root="datasets",
+        verbose=False,
+    )
 
     obj_name = "035_power_drill"
     obj_info = ds.get_info(obj_name)

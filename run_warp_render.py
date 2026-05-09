@@ -18,8 +18,6 @@ from utils.utils_file import (
     generated_dataset_root_from_config,
     load_asset_config,
     objdata_tag_from_config,
-    raw_dataset_name_from_config,
-    raw_dataset_root_from_config,
 )
 from utils.utils_seed import stable_seed
 from utils.utils_sample import parse_object_scale_key
@@ -337,8 +335,6 @@ def main() -> None:
     ds_start = time.perf_counter()
     with redirect_stdout(io.StringIO()):
         ds = DatasetObjects(
-            raw_dataset_root=raw_dataset_root_from_config(cfg),
-            raw_dataset_name=raw_dataset_name_from_config(cfg),
             scales=selected_scales,
             object_names=selected_object_names,
             objdata_tag=objdata_tag,

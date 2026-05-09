@@ -50,3 +50,7 @@
 - Tightened scale dataset utilities (`src/scale_dataset_builder.py`, `utils/utils_file.py`) and expanded corresponding test coverage in `test/test_scale_dataset_builder.py`.
 - Updated asset configs (`configs/assets_YCB.json`, `configs/assets_DGN.json`) to match the current clustering/split pipeline expectations.
 - Synced workflow documentation (`README.md`, `README_zh.md`, `AGENTS.md`, `AGENTS_zh.md`) with the current objdata/graspdata + USD + RL metadata pipeline.
+- Refactored `prepare_object_assets.py` to use object-level source checks, scale-level skip/cleanup behavior, and a minimal objdata manifest containing only successful objects with `name` and `scales_available`.
+- Refactored `src/dataset_objects.py` into a pure objdata reader that no longer depends on source-raw manifest fields or `ScaleDatasetBuilder`, and updated all call sites accordingly.
+- Switched URDF export for USD conversion to visual/collision mesh parity on `manifold.obj` (`<static>false</static>`, no extra world/floating joint block), and aligned `prepare_object_usds.py` with current IsaacLab `UrdfConverterCfg` fields (`collider_type`, `joint_drive=None`, `collision_from_visuals`).
+- Removed `usd_convert.enabled` from asset config handling and exposed URDF conversion controls through `backend`, `merge_joints`, `fix_base`, `make_instanceable`, and `convex_decompose_mesh`.

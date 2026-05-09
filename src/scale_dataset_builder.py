@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 from pathlib import Path
 from typing import Dict, List, Sequence
 
@@ -32,34 +33,42 @@ class ScaleDatasetBuilder:
     def native_tag() -> str:
         return "native"
 
+    @staticmethod
+    def _load_mesh_as_trimesh(mesh_path: str) -> trimesh.Trimesh:
+        loaded = trimesh.load(mesh_path, process=False)
+        if isinstance(loaded, trimesh.Scene):
+            mesh = trimesh.util.concatenate(list(loaded.geometry.values()))
+        else:
+            mesh = loaded
+        if not isinstance(mesh, trimesh.Trimesh):
+            raise TypeError(f"Unsupported mesh type for {mesh_path}: {type(loaded)!r}")
+        return mesh.copy()
+
     def _load_raw_meshes(self, object_info: Dict) -> Dict:
         object_name = object_info["object_name"]
+        coacd_abs = str(object_info["coacd_abs"])
+        manifold_abs = str(object_info["manifold_abs"])
+
         cached = self._raw_cache.get(object_name)
         if cached is not None:
             return cached
 
-        loaded = trimesh.load(object_info["coacd_abs"], process=False)
-        if isinstance(loaded, trimesh.Scene):
-            merged = trimesh.util.concatenate(list(loaded.geometry.values()))
-        else:
-            merged = loaded
-
-        if not isinstance(merged, trimesh.Trimesh):
-            raise TypeError(f"Unsupported mesh type for {object_info['coacd_abs']}: {type(loaded)!r}")
-
+        merged = self._load_mesh_as_trimesh(coacd_abs)
         convex_meshes = [m.copy() for m in merged.split(only_watertight=False)]
         if not convex_meshes:
             convex_meshes = [merged.copy()]
 
+        manifold_mesh = self._load_mesh_as_trimesh(manifold_abs)
         merged_convex = trimesh.util.concatenate(convex_meshes)
-        rec = {
+        record = {
             "object_name": object_name,
             "raw_convex": convex_meshes,
             "raw_merged": merged_convex,
+            "raw_manifold": manifold_mesh.copy(),
             "orig_coacd_volume": self._mesh_volume_safe(merged_convex),
         }
-        self._raw_cache[object_name] = rec
-        return rec
+        self._raw_cache[object_name] = record
+        return record
 
     def _load_normalized_meshes(self, object_info: Dict) -> Dict:
         raw = self._load_raw_meshes(object_info)
@@ -81,9 +90,13 @@ class ScaleDatasetBuilder:
             mc.vertices = (mc.vertices - center) / extent
             norm_convex.append(mc)
 
+        manifold = raw["raw_manifold"].copy()
+        manifold.vertices = (manifold.vertices - center) / extent
+
         rec = {
             "object_name": object_name,
             "norm_convex": norm_convex,
+            "norm_manifold": manifold,
             "orig_coacd_volume": float(raw["orig_coacd_volume"]),
             "norm_volume": self._mesh_volume_safe(trimesh.util.concatenate(norm_convex)),
         }
@@ -171,6 +184,47 @@ class ScaleDatasetBuilder:
         ]
         return "\n".join(xml_lines) + "\n"
 
+    def _build_object_urdf(
+        self,
+        object_name: str,
+        scale_tag: str,
+        mass_kg_scaled: float,
+        inertia_diag_scaled: np.ndarray,
+        mesh_rel_path: str,
+    ) -> str:
+        model_name = f"{object_name}_{scale_tag}"
+        urdf_lines = [
+            '<?xml version="1.0"?>',
+            f'<robot name="{model_name}">',
+            "  <static>false</static>",
+            '  <link name="base_link">',
+            "    <inertial>",
+            '      <origin xyz="0 0 0" rpy="0 0 0"/>',
+            f'      <mass value="{mass_kg_scaled:.10f}"/>',
+            (
+                "      <inertia "
+                f'ixx="{inertia_diag_scaled[0]:.12e}" ixy="0" ixz="0" '
+                f'iyy="{inertia_diag_scaled[1]:.12e}" iyz="0" '
+                f'izz="{inertia_diag_scaled[2]:.12e}"/>'
+            ),
+            "    </inertial>",
+            '    <visual name="visual">',
+            "      <origin xyz=\"0 0 0\" rpy=\"0 0 0\"/>",
+            "      <geometry>",
+            f'        <mesh filename="{mesh_rel_path}"/>',
+            "      </geometry>",
+            "    </visual>",
+            '    <collision name="collision">',
+            "      <origin xyz=\"0 0 0\" rpy=\"0 0 0\"/>",
+            "      <geometry>",
+            f'        <mesh filename="{mesh_rel_path}"/>',
+            "      </geometry>",
+            "    </collision>",
+            "  </link>",
+            "</robot>",
+        ]
+        return "\n".join(urdf_lines) + "\n"
+
     def build_native_assets(
         self,
         config_stem: str,
@@ -185,9 +239,18 @@ class ScaleDatasetBuilder:
         scale_dir = self.base_output_dir / config_stem / object_name / scale_tag
         convex_dir = scale_dir / "convex_parts"
         coacd_path = scale_dir / "coacd.obj"
+        manifold_path = scale_dir / "manifold.obj"
         xml_path = scale_dir / "object.xml"
+        urdf_path = scale_dir / "object.urdf"
 
-        if not overwrite and xml_path.exists() and coacd_path.exists() and convex_dir.is_dir():
+        if (
+            not overwrite
+            and xml_path.exists()
+            and urdf_path.exists()
+            and coacd_path.exists()
+            and manifold_path.exists()
+            and convex_dir.is_dir()
+        ):
             convex_parts_abs = [str(p.resolve()) for p in sorted(convex_dir.glob("*.obj"))]
             if convex_parts_abs:
                 return {
@@ -196,11 +259,15 @@ class ScaleDatasetBuilder:
                     "scale_tag": scale_tag,
                     "is_native": True,
                     "coacd_abs": str(coacd_path.resolve()),
+                    "manifold_abs": str(manifold_path.resolve()),
                     "convex_parts_abs": convex_parts_abs,
                     "xml_abs": str(xml_path.resolve()),
+                    "urdf_abs": str(urdf_path.resolve()),
                 }
 
         convex_dir.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(str(object_info["coacd_abs"]), str(coacd_path))
+        shutil.copy2(str(object_info["manifold_abs"]), str(manifold_path))
 
         native_paths: List[Path] = []
         native_parts: List[trimesh.Trimesh] = []
@@ -215,11 +282,6 @@ class ScaleDatasetBuilder:
 
         if not native_parts:
             raise ValueError(f"All native convex parts were filtered out as invalid for {object_name}.")
-
-        scene = trimesh.Scene()
-        for i, mesh in enumerate(native_parts):
-            scene.add_geometry(mesh.copy(), node_name=f"part_{i:03d}", geom_name=f"part_{i:03d}")
-        scene.export(str(coacd_path))
 
         mass_native = float(mass_kg)
         inertia_native = np.asarray(principal_moments, dtype=np.float64).reshape(3)
@@ -242,7 +304,15 @@ class ScaleDatasetBuilder:
             inertia_diag_scaled=inertia_native,
             convex_rel_paths=convex_rel_paths,
         )
+        urdf_text = self._build_object_urdf(
+            object_name=object_name,
+            scale_tag=scale_tag,
+            mass_kg_scaled=mass_native,
+            inertia_diag_scaled=inertia_native,
+            mesh_rel_path=os.path.relpath(manifold_path, scale_dir).replace("\\", "/"),
+        )
         xml_path.write_text(xml_text, encoding="utf-8")
+        urdf_path.write_text(urdf_text, encoding="utf-8")
 
         return {
             "object_name": object_name,
@@ -250,8 +320,10 @@ class ScaleDatasetBuilder:
             "scale_tag": scale_tag,
             "is_native": True,
             "coacd_abs": str(coacd_path.resolve()),
+            "manifold_abs": str(manifold_path.resolve()),
             "convex_parts_abs": [str(p.resolve()) for p in native_paths],
             "xml_abs": str(xml_path.resolve()),
+            "urdf_abs": str(urdf_path.resolve()),
         }
 
     def build_scale_assets(
@@ -269,9 +341,18 @@ class ScaleDatasetBuilder:
         scale_dir = self.base_output_dir / config_stem / object_name / self.scale_tag(scale_value)
         convex_dir = scale_dir / "convex_parts"
         coacd_path = scale_dir / "coacd.obj"
+        manifold_path = scale_dir / "manifold.obj"
         xml_path = scale_dir / "object.xml"
+        urdf_path = scale_dir / "object.urdf"
 
-        if not overwrite and xml_path.exists() and coacd_path.exists() and convex_dir.is_dir():
+        if (
+            not overwrite
+            and xml_path.exists()
+            and urdf_path.exists()
+            and coacd_path.exists()
+            and manifold_path.exists()
+            and convex_dir.is_dir()
+        ):
             convex_parts_abs = [str(p.resolve()) for p in sorted(convex_dir.glob("*.obj"))]
             if convex_parts_abs:
                 return {
@@ -280,8 +361,10 @@ class ScaleDatasetBuilder:
                     "scale_tag": self.scale_tag(scale_value),
                     "is_native": False,
                     "coacd_abs": str(coacd_path.resolve()),
+                    "manifold_abs": str(manifold_path.resolve()),
                     "convex_parts_abs": convex_parts_abs,
                     "xml_abs": str(xml_path.resolve()),
+                    "urdf_abs": str(urdf_path.resolve()),
                 }
 
         convex_dir.mkdir(parents=True, exist_ok=True)
@@ -307,6 +390,9 @@ class ScaleDatasetBuilder:
         for i, mesh in enumerate(scaled_coacd_parts):
             scene.add_geometry(mesh.copy(), node_name=f"part_{i:03d}", geom_name=f"part_{i:03d}")
         scene.export(str(coacd_path))
+        manifold_mesh = norm["norm_manifold"].copy()
+        manifold_mesh.vertices = manifold_mesh.vertices * scale_value
+        manifold_mesh.export(str(manifold_path))
 
         m0 = float(mass_kg)
         p0 = np.asarray(principal_moments, dtype=np.float64).reshape(3)
@@ -339,7 +425,15 @@ class ScaleDatasetBuilder:
             inertia_diag_scaled=inertia_scaled,
             convex_rel_paths=convex_rel_paths,
         )
+        urdf_text = self._build_object_urdf(
+            object_name=object_name,
+            scale_tag=self.scale_tag(scale_value),
+            mass_kg_scaled=mass_scaled,
+            inertia_diag_scaled=inertia_scaled,
+            mesh_rel_path=os.path.relpath(manifold_path, scale_dir).replace("\\", "/"),
+        )
         xml_path.write_text(xml_text, encoding="utf-8")
+        urdf_path.write_text(urdf_text, encoding="utf-8")
 
         return {
             "object_name": object_name,
@@ -347,8 +441,10 @@ class ScaleDatasetBuilder:
             "scale_tag": self.scale_tag(scale_value),
             "is_native": False,
             "coacd_abs": str(coacd_path.resolve()),
+            "manifold_abs": str(manifold_path.resolve()),
             "convex_parts_abs": [str(p.resolve()) for p in scaled_convex_paths],
             "xml_abs": str(xml_path.resolve()),
+            "urdf_abs": str(urdf_path.resolve()),
         }
 
     def build_multi_scale_assets(

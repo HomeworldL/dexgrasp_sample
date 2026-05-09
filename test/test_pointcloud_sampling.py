@@ -16,20 +16,51 @@ def _make_mesh_object(obj_dir: Path):
     (obj_dir / "convex_parts").mkdir(parents=True, exist_ok=True)
     m = trimesh.creation.icosphere(radius=0.5)
     m.export(obj_dir / "coacd.obj")
+    m.export(obj_dir / "manifold.obj")
     m.export(obj_dir / "convex_parts" / "part_000.obj")
 
 
 def _build_objdata_assets(tmp_path: Path, dataset_name: str, obj_name: str, scales: list[float]) -> None:
     obj_dir = tmp_path / dataset_name / obj_name
+    objdata_tag = f"objdata_{dataset_name}"
     builder = ScaleDatasetBuilder(str(tmp_path / "datasets"))
-    builder.build_multi_scale_assets(
-        config_stem=f"objdata_{dataset_name}",
-        object_info={"object_name": obj_name, "coacd_abs": str((obj_dir / "coacd.obj").resolve())},
+    out = builder.build_multi_scale_assets(
+        config_stem=objdata_tag,
+        object_info={
+            "object_name": obj_name,
+            "coacd_abs": str((obj_dir / "coacd.obj").resolve()),
+            "manifold_abs": str((obj_dir / "manifold.obj").resolve()),
+        },
         scales=scales,
         mass_kg=0.1,
         principal_moments=[1e-4, 2e-4, 3e-4],
         overwrite=False,
     )
+    assets = []
+    for scale_tag, rec in sorted(out.items()):
+        assets.append(
+            {
+                "scale_tag": scale_tag,
+                "is_native": False,
+                "asset_dir": str(Path(rec["xml_abs"]).resolve().parent),
+                "coacd_abs": str(Path(rec["coacd_abs"]).resolve()),
+            }
+        )
+    manifest = {
+        "dataset": objdata_tag,
+        "summary": {"object_count": 1},
+        "objects": [
+            {
+                "object_id": obj_name,
+                "name": obj_name,
+                "process_status": "success",
+                "assets": assets,
+            }
+        ],
+    }
+    manifest_path = tmp_path / "datasets" / objdata_tag / "manifest.process_meshes.json"
+    manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
 
 
 def test_sample_surface_mesh_with_coacd_path(tmp_path: Path):
@@ -54,8 +85,6 @@ def test_sample_surface_mesh_with_coacd_path(tmp_path: Path):
     _build_objdata_assets(tmp_path, "MSO", "obj_a", scales=[0.06])
 
     ds = DatasetObjects(
-        raw_dataset_root=str(tmp_path),
-        raw_dataset_name="MSO",
         scales=[0.06],
         objdata_tag="objdata_MSO",
         graspdata_tag="graspdata_YCB_liberhand",

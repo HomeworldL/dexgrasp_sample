@@ -19,8 +19,6 @@ from utils.utils_file import (
     load_config,
     object_profile_from_config,
     objdata_tag_from_config,
-    raw_dataset_name_from_config,
-    raw_dataset_root_from_config,
     run_scales_from_config,
     anchor_params_from_config,
     use_native_asset_from_config,
@@ -182,8 +180,6 @@ def main() -> None:
     set_seed(int(cfg["seed"]))
 
     ds = DatasetObjects(
-        raw_dataset_root=raw_dataset_root_from_config(cfg),
-        raw_dataset_name=raw_dataset_name_from_config(cfg),
         scales=run_scales_from_config(cfg),
         objdata_tag=objdata_tag_from_config(cfg, args.config),
         include_native=use_native_asset_from_config(cfg),

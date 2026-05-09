@@ -15,8 +15,10 @@ def test_build_scale_assets(tmp_path: Path):
     raw_obj = {
         "object_name": "obj_a",
         "coacd_abs": str((tmp_path / "raw" / "coacd.obj").resolve()),
+        "manifold_abs": str((tmp_path / "raw" / "manifold.obj").resolve()),
     }
     _make_cube_mesh(Path(raw_obj["coacd_abs"]))
+    _make_cube_mesh(Path(raw_obj["manifold_abs"]))
 
     b = ScaleDatasetBuilder(str(tmp_path / "datasets"))
     rec = b.build_scale_assets(
@@ -45,8 +47,10 @@ def test_build_multi_scale_assets(tmp_path: Path):
     raw_obj = {
         "object_name": "obj_b",
         "coacd_abs": str((tmp_path / "raw2" / "coacd.obj").resolve()),
+        "manifold_abs": str((tmp_path / "raw2" / "manifold.obj").resolve()),
     }
     _make_cube_mesh(Path(raw_obj["coacd_abs"]))
+    _make_cube_mesh(Path(raw_obj["manifold_abs"]))
 
     b = ScaleDatasetBuilder(str(tmp_path / "datasets"))
     out = b.build_multi_scale_assets(

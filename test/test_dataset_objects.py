@@ -16,6 +16,7 @@ def _make_mesh(path: Path):
 def _make_dataset_with_manifest(tmp_path: Path, dataset_name: str, obj_name: str) -> Path:
     obj_dir = tmp_path / dataset_name / obj_name
     _make_mesh(obj_dir / "coacd.obj")
+    _make_mesh(obj_dir / "manifold.obj")
     _make_mesh(obj_dir / "convex_parts" / "part_000.obj")
 
     manifest = {
@@ -45,15 +46,45 @@ def _build_objdata_assets(
     scales: list[float],
 ) -> None:
     obj_dir = tmp_path / dataset_name / obj_name
+    objdata_tag = f"objdata_{dataset_name}"
     builder = ScaleDatasetBuilder(str(tmp_path / "datasets"))
-    builder.build_multi_scale_assets(
-        config_stem=f"objdata_{dataset_name}",
-        object_info={"object_name": obj_name, "coacd_abs": str((obj_dir / "coacd.obj").resolve())},
+    out = builder.build_multi_scale_assets(
+        config_stem=objdata_tag,
+        object_info={
+            "object_name": obj_name,
+            "coacd_abs": str((obj_dir / "coacd.obj").resolve()),
+            "manifold_abs": str((obj_dir / "manifold.obj").resolve()),
+        },
         scales=scales,
         mass_kg=0.12,
         principal_moments=[1e-4, 2e-4, 3e-4],
         overwrite=False,
     )
+    assets = []
+    for scale_tag, rec in sorted(out.items()):
+        assets.append(
+            {
+                "scale_tag": scale_tag,
+                "is_native": False,
+                "asset_dir": str(Path(rec["xml_abs"]).resolve().parent),
+                "coacd_abs": str(Path(rec["coacd_abs"]).resolve()),
+            }
+        )
+    manifest = {
+        "dataset": objdata_tag,
+        "summary": {"object_count": 1},
+        "objects": [
+            {
+                "object_id": obj_name,
+                "name": obj_name,
+                "process_status": "success",
+                "assets": assets,
+            }
+        ],
+    }
+    manifest_path = tmp_path / "datasets" / objdata_tag / "manifest.process_meshes.json"
+    manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
 
 
 def test_manifest_driven_build_returns_object_scale_items(tmp_path: Path):
@@ -61,8 +92,6 @@ def test_manifest_driven_build_returns_object_scale_items(tmp_path: Path):
     _build_objdata_assets(tmp_path, "YCB", "YCB_001_obj", scales=[0.06, 0.08])
 
     ds = DatasetObjects(
-        raw_dataset_root=str(tmp_path),
-        raw_dataset_name="YCB",
         scales=[0.06, 0.08],
         objdata_tag="objdata_YCB",
         graspdata_tag="graspdata_YCB_liberhand",
@@ -86,8 +115,6 @@ def test_manifest_driven_build_returns_object_scale_items(tmp_path: Path):
 def test_dataset_missing_dir_raises(tmp_path: Path):
     try:
         DatasetObjects(
-            raw_dataset_root=str(tmp_path),
-            raw_dataset_name="MISSING_DATASET",
             scales=[0.06],
             objdata_tag="objdata_YCB",
             graspdata_tag="graspdata_YCB_liberhand",
@@ -103,8 +130,6 @@ def test_get_point_cloud_uses_coacd(tmp_path: Path):
     _make_dataset_with_manifest(tmp_path, "YCB", "YCB_001_obj")
     _build_objdata_assets(tmp_path, "YCB", "YCB_001_obj", scales=[0.06])
     ds = DatasetObjects(
-        raw_dataset_root=str(tmp_path),
-        raw_dataset_name="YCB",
         scales=[0.06],
         objdata_tag="objdata_YCB",
         graspdata_tag="graspdata_YCB_liberhand",
@@ -124,8 +149,6 @@ def test_object_name_filter_limits_index(tmp_path: Path):
     _build_objdata_assets(tmp_path, "YCB", "YCB_002_obj", scales=[0.06])
 
     ds = DatasetObjects(
-        raw_dataset_root=str(tmp_path),
-        raw_dataset_name="YCB",
         scales=[0.06],
         object_names=["YCB_002_obj"],
         objdata_tag="objdata_YCB",
@@ -144,8 +167,6 @@ def test_existing_assets_preserve_scale_dir_contents(tmp_path: Path):
     _build_objdata_assets(tmp_path, "YCB", "YCB_001_obj", scales=[0.06])
 
     ds = DatasetObjects(
-        raw_dataset_root=str(tmp_path),
-        raw_dataset_name="YCB",
         scales=[0.06],
         objdata_tag="objdata_YCB",
         graspdata_tag="graspdata_YCB_liberhand",
@@ -159,8 +180,6 @@ def test_existing_assets_preserve_scale_dir_contents(tmp_path: Path):
     assert stale_path.exists()
 
     indexed = DatasetObjects(
-        raw_dataset_root=str(tmp_path),
-        raw_dataset_name="YCB",
         scales=[0.06],
         objdata_tag="objdata_YCB",
         graspdata_tag="graspdata_YCB_liberhand",
@@ -180,8 +199,6 @@ def test_missing_objdata_asset_raises_without_rebuild(tmp_path: Path):
 
     try:
         DatasetObjects(
-            raw_dataset_root=str(tmp_path),
-            raw_dataset_name="YCB",
             scales=[0.06],
             objdata_tag="objdata_YCB",
             graspdata_tag="graspdata_YCB_liberhand",
@@ -190,4 +207,4 @@ def test_missing_objdata_asset_raises_without_rebuild(tmp_path: Path):
         )
         assert False, "Expected FileNotFoundError"
     except FileNotFoundError as exc:
-        assert "Missing objdata asset" in str(exc)
+        assert "Objdata manifest not found" in str(exc)

@@ -16,8 +16,6 @@ from utils.utils_file import (
     list_existing_files,
     load_config,
     objdata_tag_from_config,
-    raw_dataset_name_from_config,
-    raw_dataset_root_from_config,
     relpath_str,
     run_scales_from_config,
     use_native_asset_from_config,
@@ -226,8 +224,6 @@ def main() -> None:
     objdata_tag = objdata_tag_from_config(cfg, args.config)
     graspdata_tag = graspdata_tag_from_config(cfg, args.config)
     ds = DatasetObjects(
-        raw_dataset_root=raw_dataset_root_from_config(cfg),
-        raw_dataset_name=raw_dataset_name_from_config(cfg),
         scales=run_scales_from_config(cfg),
         objdata_tag=objdata_tag,
         include_native=use_native_asset_from_config(cfg),

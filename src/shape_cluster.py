@@ -12,6 +12,7 @@ from torch.utils.data import DataLoader, Dataset
 
 from src.pointnet import PointNet
 from src.sample import farthest_point_sampling
+from utils.utils_seed import set_seed
 
 
 def normalize_point_cloud(points: np.ndarray) -> np.ndarray:
@@ -125,9 +126,7 @@ def train_autoencoder(
     if scheduler_eta_min < 0.0:
         raise ValueError("scheduler_eta_min must be >= 0.")
 
-    torch.manual_seed(seed)
-    if torch.cuda.is_available():
-        torch.cuda.manual_seed_all(seed)
+    set_seed(seed)
 
     dataset = PointCloudDataset(point_clouds)
     generator = torch.Generator()

@@ -51,7 +51,7 @@ class PointNet(nn.Module):
                 nn.init.xavier_normal_(module.weight)
         if len(global_mlp_hidden_layers_dim):
             for module in self.global_mlp:
-                if isinstance(module, nn.Conv1d):
+                if isinstance(module, nn.Linear):
                     nn.init.xavier_normal_(module.weight)
 
     def forward(self, x):

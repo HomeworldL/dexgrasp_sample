@@ -19,7 +19,7 @@ from utils.utils_file import (
     load_asset_config,
     objdata_tag_from_config,
 )
-from utils.utils_seed import stable_seed
+from utils.utils_seed import set_seed, stable_seed
 from utils.utils_sample import parse_object_scale_key
 from utils.utils_warp_render import (
     WarpPointCloudRenderer,
@@ -233,7 +233,8 @@ def _render_entry(
             pc_world = all_pc_world[b, depth_mask[b]]
             pc_cam = all_pc_cam[b, depth_mask[b]]
             if pc_world.shape[0] > int(render_cfg["max_point_num"]):
-                idx = torch.randperm(pc_world.shape[0], device=pc_world.device)[: int(render_cfg["max_point_num"])]
+                idx_np = rng.permutation(pc_world.shape[0])[: int(render_cfg["max_point_num"])]
+                idx = torch.from_numpy(idx_np).to(device=pc_world.device)
                 pc_world = pc_world[idx]
                 pc_cam = pc_cam[idx]
             np.save(out_dir / f"partial_pc_{data_id}.npy", pc_world.detach().cpu().numpy().astype(np.float16))
@@ -261,6 +262,7 @@ def _batch_worker(
     if wp is None:
         raise RuntimeError("warp-lang is not available. Install warp-lang first.")
 
+    set_seed(seed)
     device = _device_alias(device_token)
 
     intr = intrinsics_from_config(

@@ -54,3 +54,5 @@
 - Refactored `src/dataset_objects.py` into a pure objdata reader that no longer depends on source-raw manifest fields or `ScaleDatasetBuilder`, and updated all call sites accordingly.
 - Switched URDF export for USD conversion to visual/collision mesh parity on `manifold.obj` (`<static>false</static>`, no extra world/floating joint block), and aligned `prepare_object_usds.py` with current IsaacLab `UrdfConverterCfg` fields (`collider_type`, `joint_drive=None`, `collision_from_visuals`).
 - Removed `usd_convert.enabled` from asset config handling and exposed URDF conversion controls through `backend`, `merge_joints`, `fix_base`, `make_instanceable`, and `convex_decompose_mesh`.
+- Simplified dataset/sample pipeline internals across `run*`, `src/*`, and `utils/*` modules for cleaner control flow and more reproducible behavior under config-driven execution.
+- Updated `DatasetObjects` tests to match the minimized objdata manifest schema (`name` + `scales_available`) and made Open3D-dependent coverage explicitly skippable when the dependency is absent.

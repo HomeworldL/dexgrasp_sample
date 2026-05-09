@@ -8,6 +8,8 @@ from pathlib import Path
 from typing import Dict, List, Sequence
 
 import numpy as np
+
+from utils.utils_file import native_tag as _native_tag, scale_tag as _scale_tag
 import trimesh
 
 
@@ -27,11 +29,11 @@ class ScaleDatasetBuilder:
 
     @staticmethod
     def scale_tag(scale: float) -> str:
-        return f"scale{int(round(float(scale) * 1000)):03d}"
+        return _scale_tag(scale)
 
     @staticmethod
     def native_tag() -> str:
-        return "native"
+        return _native_tag()
 
     @staticmethod
     def _load_mesh_as_trimesh(mesh_path: str) -> trimesh.Trimesh:

@@ -24,20 +24,7 @@ except Exception:
     mj_viewer = None
 
 
-def _resolve_object_asset_name(obj_info: Dict) -> str:
-    obj_name = str(obj_info.get("name") or "").strip()
-    scale_tag = str(obj_info.get("scale_tag") or "").strip()
-    if obj_name and scale_tag:
-        return f"{obj_name}_{scale_tag}"
-
-    xml_abs = str(obj_info.get("xml_abs") or "").strip()
-    if xml_abs:
-        parent_name = os.path.basename(os.path.dirname(os.path.abspath(xml_abs)))
-        if parent_name:
-            if obj_name:
-                return f"{obj_name}_{parent_name}"
-            return parent_name
-    return obj_name
+from utils.utils_file import resolve_object_asset_name
 
 
 def _normalize_friction_coef(
@@ -321,7 +308,7 @@ class MjHO:
         obj_spec = mujoco.MjSpec.from_file(obj_xml)
         self.obj_info = obj_info
         self.obj_name = obj_name
-        self.obj_asset_name = _resolve_object_asset_name(obj_info)
+        self.obj_asset_name = resolve_object_asset_name(obj_info)
         # print(f"loading object xml: {obj_xml}")
         # attr in obj_spec
         # for a in dir(obj_spec):
@@ -886,7 +873,7 @@ class MjHO:
         check_steps: int = 50,
         close_steps: int = 100,
         visualize: bool = False,
-    ) -> bool:
+    ) -> Tuple[bool, float, float]:
 
         if self.object_fixed:
             raise RuntimeError(

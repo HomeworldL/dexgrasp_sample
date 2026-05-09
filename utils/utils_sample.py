@@ -9,6 +9,7 @@ import torch
 from scipy.spatial.transform import Rotation as R
 
 from src.sample import sample_grasp_frames
+from utils.utils_file import parse_scale_tag
 
 ARRAY_DTYPE = np.float32
 H5_DTYPE = "f4"
@@ -25,15 +26,8 @@ def as_array(values: np.ndarray) -> np.ndarray:
 def parse_object_scale_key(object_scale_key: str) -> Tuple[str, Optional[float]]:
     if "__" not in object_scale_key:
         return object_scale_key, None
-    object_name, scale_tag = object_scale_key.split("__", 1)
-    if scale_tag == "native":
-        return object_name, None
-    if not scale_tag.startswith("scale"):
-        return object_name, None
-    digits = scale_tag[len("scale") :]
-    if not digits.isdigit():
-        return object_name, None
-    return object_name, float(int(digits)) / 1000.0
+    object_name, scale_tag_str = object_scale_key.split("__", 1)
+    return object_name, parse_scale_tag(scale_tag_str)
 
 
 def grasp_outputs_exist(

@@ -3,8 +3,6 @@ import math
 from typing import Sequence, Optional
 import numpy as np
 
-torch.random.manual_seed(0)
-
 
 def sample_grasp_frames(
     points,

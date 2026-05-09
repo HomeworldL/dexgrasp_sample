@@ -18,6 +18,7 @@ import numpy as np
 import trimesh
 from tqdm import tqdm
 
+from utils.utils_file import native_tag as _native_tag, scale_tag as _scale_tag
 from utils.utils_pointcloud import preview_pointcloud_with_normals, sample_surface_o3d
 
 
@@ -56,6 +57,7 @@ class DatasetObjects:
         include_native: bool = False,
         graspdata_tag: Optional[str] = None,
         generated_dataset_root: str = "datasets",
+        pc_subdir: Optional[str] = None,
         verbose: bool = False,
     ):
         self.scales = [float(s) for s in scales]
@@ -72,6 +74,7 @@ class DatasetObjects:
         self.graspdata_tag = str(graspdata_tag or objdata_tag)
         self.generated_dataset_root = str(generated_dataset_root)
         self.generated_dataset_root_path = Path(self.generated_dataset_root).resolve()
+        self.pc_subdir = str(pc_subdir).strip() if pc_subdir else None
         self.verbose = bool(verbose)
 
         self.items: List[Dict] = []
@@ -187,6 +190,13 @@ class DatasetObjects:
                     "scale": rec["scale"],
                     "is_native": bool(rec.get("is_native", False)),
                 }
+                if self.pc_subdir:
+                    info["global_pc_abs"] = str(
+                        asset_dir_abs / self.pc_subdir / "global_pc.npy"
+                    )
+                    info["global_normals_abs"] = str(
+                        asset_dir_abs / self.pc_subdir / "global_normals.npy"
+                    )
                 self.items.append(info)
                 self._key_to_index[str(info["object_scale_key"])] = gid
                 gid += 1
@@ -251,11 +261,11 @@ class DatasetObjects:
 
     @staticmethod
     def scale_tag(scale: float) -> str:
-        return f"scale{int(round(float(scale) * 1000)):03d}"
+        return _scale_tag(scale)
 
     @staticmethod
     def native_tag() -> str:
-        return "native"
+        return _native_tag()
 
     def load_mesh(self, mesh_or_path: Union[str, trimesh.Trimesh]) -> trimesh.Trimesh:
         if isinstance(mesh_or_path, trimesh.Trimesh):

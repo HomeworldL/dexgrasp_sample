@@ -28,20 +28,11 @@ except Exception as exc:  # pragma: no cover - depends on runtime install.
     ) from exc
 
 
-def _resolve_object_asset_name(obj_info: Dict) -> str:
-    obj_name = str(obj_info.get("name") or "").strip()
-    scale_tag = str(obj_info.get("scale_tag") or "").strip()
-    if obj_name and scale_tag:
-        return f"{obj_name}_{scale_tag}"
+from utils.utils_file import resolve_object_asset_name
 
-    xml_abs = str(obj_info.get("xml_abs") or "").strip()
-    if xml_abs:
-        parent_name = os.path.basename(os.path.dirname(os.path.abspath(xml_abs)))
-        if parent_name:
-            if obj_name:
-                return f"{obj_name}_{parent_name}"
-            return parent_name
-    return obj_name
+
+def _resolve_object_asset_name(obj_info: Dict) -> str:
+    return resolve_object_asset_name(obj_info)
 
 
 @dataclass

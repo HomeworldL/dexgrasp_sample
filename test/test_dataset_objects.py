@@ -1,6 +1,7 @@
 from pathlib import Path
 import json
 
+import pytest
 import trimesh
 
 from src.dataset_objects import DatasetObjects
@@ -60,30 +61,24 @@ def _build_objdata_assets(
         principal_moments=[1e-4, 2e-4, 3e-4],
         overwrite=False,
     )
-    assets = []
-    for scale_tag, rec in sorted(out.items()):
-        assets.append(
-            {
-                "scale_tag": scale_tag,
-                "is_native": False,
-                "asset_dir": str(Path(rec["xml_abs"]).resolve().parent),
-                "coacd_abs": str(Path(rec["coacd_abs"]).resolve()),
-            }
-        )
-    manifest = {
-        "dataset": objdata_tag,
-        "summary": {"object_count": 1},
-        "objects": [
-            {
-                "object_id": obj_name,
-                "name": obj_name,
-                "process_status": "success",
-                "assets": assets,
-            }
-        ],
-    }
+    scales_available = sorted(str(scale_tag) for scale_tag in out.keys())
     manifest_path = tmp_path / "datasets" / objdata_tag / "manifest.process_meshes.json"
     manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    if manifest_path.exists():
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    else:
+        manifest = {"dataset": objdata_tag, "summary": {"object_count": 0}, "objects": []}
+    objects = manifest.get("objects", [])
+    if not isinstance(objects, list):
+        objects = []
+    objects = [
+        obj
+        for obj in objects
+        if str((obj or {}).get("name") or (obj or {}).get("object_id") or "") != obj_name
+    ]
+    objects.append({"name": obj_name, "scales_available": scales_available})
+    manifest["objects"] = sorted(objects, key=lambda item: str(item.get("name", "")))
+    manifest["summary"]["object_count"] = len(manifest["objects"])
     manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
 
 
@@ -127,6 +122,7 @@ def test_dataset_missing_dir_raises(tmp_path: Path):
 
 
 def test_get_point_cloud_uses_coacd(tmp_path: Path):
+    pytest.importorskip("open3d")
     _make_dataset_with_manifest(tmp_path, "YCB", "YCB_001_obj")
     _build_objdata_assets(tmp_path, "YCB", "YCB_001_obj", scales=[0.06])
     ds = DatasetObjects(

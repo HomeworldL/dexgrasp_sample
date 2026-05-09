@@ -25,7 +25,6 @@ from utils.utils_sample import (
     build_pose_candidates,
     encode_h5_str,
     grasp_outputs_exist,
-    load_global_pc_and_normals,
     make_qpos_triplets,
     parse_object_scale_key,
     sample_frames_from_points,
@@ -295,9 +294,9 @@ def run_sampling(
 def main():
     p = argparse.ArgumentParser(description="Sample grasps for one object-scale entry.")
     p.add_argument("--object-scale-key", type=str, required=True, help="Unique object-scale key.")
-    p.add_argument("--coacd-path", type=str, required=True, help="Path to scaled COACD mesh OBJ.")
     p.add_argument("--mjcf-path", type=str, required=True, help="Path to scaled object MJCF.")
-    p.add_argument("--asset-dir", type=str, default=None, help="Prepared object-scale asset directory.")
+    p.add_argument("--global-pc-path", type=str, required=True, help="Path to global_pc.npy prepared by prepare_object_assets.py.")
+    p.add_argument("--global-normals-path", type=str, required=True, help="Path to global_normals.npy prepared by prepare_object_assets.py.")
     p.add_argument("--output-dir", type=str, required=True, help="Output directory for grasp artifacts.")
     p.add_argument("--force", action="store_true", help="Re-run even if configured grasp outputs already exist.")
     p.add_argument("-v", "--verbose", action="store_true", help="Enable verbose logs.")
@@ -312,7 +311,6 @@ def main():
         print(f"Using object-scale key: {args.object_scale_key}")
     h5_name = str(cfg["data"]["h5_name"])
     npy_name = str(cfg["data"]["npy_name"])
-    pc_subdir = str(cfg["sampling"]["pc_subdir"])
     has_grasp_outputs = grasp_outputs_exist(args.output_dir, h5_name=h5_name, npy_name=npy_name)
     if (not args.force) and has_grasp_outputs:
         if verbose:
@@ -324,10 +322,10 @@ def main():
 
     hand_xml_path = os.path.abspath(cfg["hand"]["xml_path"])
     hand_name = Path(hand_xml_path).stem
-    asset_dir = args.asset_dir or str(Path(args.coacd_path).resolve().parent)
-    pts, norms = load_global_pc_and_normals(asset_dir, pc_subdir)
+    pts = np.asarray(np.load(args.global_pc_path, allow_pickle=False), dtype=np.float32)
+    norms = np.asarray(np.load(args.global_normals_path, allow_pickle=False), dtype=np.float32)
     if verbose:
-        print(f"[{args.object_scale_key}] loaded global_pc/global_normals from {asset_dir}/{pc_subdir}")
+        print(f"[{args.object_scale_key}] loaded global_pc/global_normals from {args.global_pc_path}")
     run_sampling(
         cfg=cfg,
         object_scale_key=args.object_scale_key,

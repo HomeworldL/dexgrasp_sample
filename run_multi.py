@@ -74,12 +74,12 @@ def run_one(
         config_path,
         "--object-scale-key",
         object_scale_key,
-        "--coacd-path",
-        str(entry["coacd_abs"]),
         "--mjcf-path",
         str(entry["mjcf_abs"]),
-        "--asset-dir",
-        str(entry["asset_dir_abs"]),
+        "--global-pc-path",
+        str(entry["global_pc_abs"]),
+        "--global-normals-path",
+        str(entry["global_normals_abs"]),
         "--output-dir",
         str(entry["output_dir_abs"]),
     ]
@@ -140,12 +140,14 @@ def main():
     logs_dir = build_logs_dir(args.script, graspdata_tag)
     logs_dir.mkdir(parents=True, exist_ok=True)
     discover_start = time.perf_counter()
+    pc_subdir = str(cfg["sampling"]["pc_subdir"])
     ds = DatasetObjects(
         scales=run_scales_from_config(cfg),
         objdata_tag=objdata_tag,
         include_native=use_native_asset_from_config(cfg),
         graspdata_tag=graspdata_tag,
         generated_dataset_root=generated_dataset_root_from_config(cfg),
+        pc_subdir=pc_subdir,
         verbose=bool(args.verbose or data_verbose_from_config(cfg)),
     )
     discover_elapsed = time.perf_counter() - discover_start

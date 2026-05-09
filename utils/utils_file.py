@@ -226,6 +226,53 @@ def safe_filename(name: str) -> str:
     return "".join(c if c.isalnum() or c in "-_.()" else "_" for c in name)
 
 
+def resolve_object_asset_name(obj_info: Dict) -> str:
+    """Derive a stable asset name from an object-info dict.
+
+    Prefers ``name + scale_tag`` when both are present; falls back to the
+    parent directory of ``xml_abs``, then bare ``name``.
+    """
+    obj_name = str(obj_info.get("name") or "").strip()
+    scale_tag = str(obj_info.get("scale_tag") or "").strip()
+    if obj_name and scale_tag:
+        return f"{obj_name}_{scale_tag}"
+
+    xml_abs = str(obj_info.get("xml_abs") or "").strip()
+    if xml_abs:
+        parent_name = os.path.basename(os.path.dirname(os.path.abspath(xml_abs)))
+        if parent_name:
+            if obj_name:
+                return f"{obj_name}_{parent_name}"
+            return parent_name
+    return obj_name
+
+
+_SCALE_TAG_FACTOR = 1000
+
+
+def scale_tag(scale: float) -> str:
+    """Encode a float scale value to a scale-tag string (e.g. 1.5 -> ``scale1500``)."""
+    return f"scale{int(round(float(scale) * _SCALE_TAG_FACTOR)):03d}"
+
+
+def native_tag() -> str:
+    """Return the canonical scale-tag for native (unscaled) assets."""
+    return "native"
+
+
+def parse_scale_tag(tag: str) -> Optional[float]:
+    """Decode a scale-tag string back to a float, or ``None`` for native."""
+    tag = str(tag).strip()
+    if tag == "native":
+        return None
+    if not tag.startswith("scale"):
+        return None
+    digits = tag[len("scale") :]
+    if not digits.isdigit():
+        return None
+    return float(int(digits)) / _SCALE_TAG_FACTOR
+
+
 def build_logs_dir(script: str, dataset_tag: str) -> Path:
     script_name = Path(script).stem or "run"
     return Path("logs") / safe_filename(script_name) / safe_filename(dataset_tag)

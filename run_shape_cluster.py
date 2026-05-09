@@ -25,6 +25,7 @@ from utils.utils_file import (
     load_asset_config,
     objdata_tag_from_config,
 )
+from utils.utils_seed import set_seed
 
 
 def parse_args() -> argparse.Namespace:
@@ -94,9 +95,7 @@ def main() -> None:
 
     cfg = load_asset_config(args.config)
     seed = int(cfg["seed"])
-    torch.manual_seed(seed)
-    if torch.cuda.is_available():
-        torch.cuda.manual_seed_all(seed)
+    set_seed(seed)
 
     generated_root = Path(generated_dataset_root_from_config(cfg)).resolve()
     objdata_tag = objdata_tag_from_config(cfg, args.config)

@@ -5,7 +5,6 @@ import argparse
 import copy
 import csv
 import json
-import re
 import subprocess
 import sys
 import time
@@ -18,6 +17,8 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from scripts.sweep_utils import SUMMARY_RE, load_cfg, parse_summary, save_cfg
+
 BASE_CFG = "configs/run_YCB_liberhand_right.json"
 OBJECT_SCALE_KEY = "YCB_001_chips_can__scale080"
 ASSET_DIR = Path("datasets/objdata_YCB/YCB_001_chips_can/scale080").resolve()
@@ -25,16 +26,10 @@ WORK_DIR = Path("tmp/liberhand_actuation_sweep_YCB_001_chips_can_scale080").reso
 CONFIG_DIR = Path("scripts/configs/liberhand_actuation_cases").resolve()
 HAND_XML_TEMPLATE = Path("assets/hands/liberhand/liberhand_right.xml").resolve()
 HAND_XML_CASE_DIR = Path("assets/hands/liberhand").resolve()
+PC_SUBDIR = "pc_warp"
 
 DEFAULT_KP_VALUES = [1, 30]
 DEFAULT_FORCE_VALUES = [1, 30]
-
-SUMMARY_RE = re.compile(
-    r"samples=(?P<samples>\d+)\s+no_col=(?P<no_col>\d+)\s+valid=(?P<valid>\d+)\s+"
-    r"fail=(?P<fail>\d+)\s+time=(?P<sim_time>[0-9.]+)s\s+total_elapsed=(?P<total_elapsed>[0-9.]+)s\s+"
-    r"stop_reason=(?P<stop_reason>\w+)"
-)
-
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="2x2x2 sweep for liberhand kp/forcerange/actuatorfrcrange.")
@@ -81,41 +76,6 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--skip-run", action="store_true", help="Skip run.py execution and summarize from logs only.")
     return parser.parse_args()
-
-
-def load_cfg(path: str) -> dict[str, Any]:
-    with open(path, "r", encoding="utf-8") as f:
-        return json.load(f)
-
-
-def save_cfg(path: Path, cfg: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(cfg, f, ensure_ascii=False, indent=2)
-
-
-def parse_summary(stdout: str) -> dict[str, Any]:
-    for line in reversed(stdout.splitlines()):
-        match = SUMMARY_RE.search(line)
-        if match:
-            return {
-                "samples": int(match.group("samples")),
-                "no_col": int(match.group("no_col")),
-                "valid": int(match.group("valid")),
-                "fail": int(match.group("fail")),
-                "sim_time_sec": float(match.group("sim_time")),
-                "total_elapsed_sec": float(match.group("total_elapsed")),
-                "stop_reason": match.group("stop_reason"),
-            }
-    return {
-        "samples": None,
-        "no_col": None,
-        "valid": None,
-        "fail": None,
-        "sim_time_sec": None,
-        "total_elapsed_sec": None,
-        "stop_reason": None,
-    }
 
 
 def build_case_specs(kp_values: list[int], force_values: list[int]) -> list[dict[str, Any]]:
@@ -184,12 +144,12 @@ def run_case(
         str(cfg_path),
         "--object-scale-key",
         object_scale_key,
-        "--coacd-path",
-        str(asset_dir / "coacd.obj"),
         "--mjcf-path",
         str(asset_dir / "object.xml"),
-        "--asset-dir",
-        str(asset_dir),
+        "--global-pc-path",
+        str(asset_dir / PC_SUBDIR / "global_pc.npy"),
+        "--global-normals-path",
+        str(asset_dir / PC_SUBDIR / "global_normals.npy"),
         "--output-dir",
         str(out_dir),
         "--force",

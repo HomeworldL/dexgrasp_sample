@@ -1,4 +1,5 @@
 import os
+import warnings
 from typing import Tuple
 
 import numpy as np
@@ -33,6 +34,10 @@ def sample_surface_o3d(
         try:
             pcd = mesh_o3d.sample_points_poisson_disk(number_of_points=n_points, init_factor=5)
         except Exception:
+            warnings.warn(
+                f"Poisson disk sampling failed for {obj_path}, falling back to uniform sampling.",
+                RuntimeWarning,
+            )
             pcd = mesh_o3d.sample_points_uniformly(number_of_points=n_points)
     else:
         raise ValueError("Unknown sampling method: choose 'uniform' or 'poisson'")

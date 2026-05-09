@@ -5,7 +5,6 @@ import argparse
 import copy
 import csv
 import json
-import re
 import subprocess
 import sys
 import time
@@ -19,6 +18,8 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from scripts.sweep_utils import SUMMARY_RE, load_cfg, parse_summary, save_cfg
+
 from src.mj_ho import MjHO
 from utils.utils_file import hand_root_stabilization_from_config
 
@@ -28,6 +29,7 @@ ASSET_DIR = Path("datasets/objdata_YCB/YCB_013_apple/scale080").resolve()
 CONFIG_DIR = Path("scripts/configs/friction_only_cases").resolve()
 WORK_DIR = Path("tmp/friction_only_sweep_YCB_013_apple_scale080").resolve()
 OUT_DIR = WORK_DIR / "outputs"
+PC_SUBDIR = "pc_warp"
 LOG_DIR = WORK_DIR / "logs"
 
 # keep current baseline contact solver settings fixed
@@ -43,30 +45,12 @@ FRICTION_CASES = {
     "fric_0.7": [0.7, 0.01],
 }
 
-SUMMARY_RE = re.compile(
-    r"samples=(?P<samples>\d+)\s+no_col=(?P<no_col>\d+)\s+valid=(?P<valid>\d+)\s+"
-    r"fail=(?P<fail>\d+)\s+time=(?P<sim_time>[0-9.]+)s\s+total_elapsed=(?P<total_elapsed>[0-9.]+)s\s+"
-    r"stop_reason=(?P<stop_reason>\w+)"
-)
-
-
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Sweep friction_coef with fixed solimp/solref.")
     p.add_argument("--skip-run", action="store_true", help="Skip run.py and only recompute summary from existing logs/outputs.")
     p.add_argument("--no-depth", action="store_true", help="Disable penetration depth stats.")
     p.add_argument("--max-workers", type=int, default=5, help="Parallel case workers.")
     return p.parse_args()
-
-
-def load_cfg(path: str) -> dict:
-    with open(path, "r", encoding="utf-8") as f:
-        return json.load(f)
-
-
-def save_cfg(path: Path, cfg: dict) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(cfg, f, ensure_ascii=False, indent=2)
 
 
 def build_cfg(base_cfg: dict, friction: list[float]) -> dict:
@@ -85,30 +69,6 @@ def build_cfg(base_cfg: dict, friction: list[float]) -> dict:
     cfg["hand"]["profile"]["solref"] = [float(v) for v in FIXED_SOLREF]
     cfg["profile_object"]["solref"] = [float(v) for v in FIXED_SOLREF]
     return cfg
-
-
-def parse_summary(stdout: str) -> dict:
-    for line in reversed(stdout.splitlines()):
-        m = SUMMARY_RE.search(line)
-        if m:
-            return {
-                "samples": int(m.group("samples")),
-                "no_col": int(m.group("no_col")),
-                "valid": int(m.group("valid")),
-                "fail": int(m.group("fail")),
-                "sim_time_sec": float(m.group("sim_time")),
-                "total_elapsed_sec": float(m.group("total_elapsed")),
-                "stop_reason": m.group("stop_reason"),
-            }
-    return {
-        "samples": None,
-        "no_col": None,
-        "valid": None,
-        "fail": None,
-        "sim_time_sec": None,
-        "total_elapsed_sec": None,
-        "stop_reason": None,
-    }
 
 
 def _extract_ho_depths(mjho: MjHO) -> np.ndarray:
@@ -213,12 +173,12 @@ def run_case(case_name: str, cfg_path: Path) -> dict:
         str(cfg_path),
         "--object-scale-key",
         OBJECT_SCALE_KEY,
-        "--coacd-path",
-        str(ASSET_DIR / "coacd.obj"),
         "--mjcf-path",
         str(ASSET_DIR / "object.xml"),
-        "--asset-dir",
-        str(ASSET_DIR),
+        "--global-pc-path",
+        str(ASSET_DIR / PC_SUBDIR / "global_pc.npy"),
+        "--global-normals-path",
+        str(ASSET_DIR / PC_SUBDIR / "global_normals.npy"),
         "--output-dir",
         str(out_dir),
         "--force",

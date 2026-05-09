@@ -46,6 +46,8 @@ SUMMARY_RE = re.compile(
     r"stop_reason=(?P<stop_reason>\w+)"
 )
 
+PC_SUBDIR = "pc_warp"
+
 
 @dataclass(frozen=True)
 class ContactDepthStats:
@@ -360,6 +362,7 @@ def _run_one_case(
     config_path: Path,
     object_scale_key: str,
     asset_dir: Path,
+    pc_subdir: str,
     output_dir: Path,
     log_path: Path,
 ) -> Tuple[int, str, float]:
@@ -370,12 +373,12 @@ def _run_one_case(
         str(config_path),
         "--object-scale-key",
         object_scale_key,
-        "--coacd-path",
-        str(asset_dir / "coacd.obj"),
         "--mjcf-path",
         str(asset_dir / "object.xml"),
-        "--asset-dir",
-        str(asset_dir),
+        "--global-pc-path",
+        str(asset_dir / pc_subdir / "global_pc.npy"),
+        "--global-normals-path",
+        str(asset_dir / pc_subdir / "global_normals.npy"),
         "--output-dir",
         str(output_dir),
         "--force",
@@ -396,6 +399,7 @@ def _run_cases_parallel(
     config_paths: Dict[str, Path],
     object_scale_key: str,
     asset_dir: Path,
+    pc_subdir: str,
     out_dir: Path,
     logs_dir: Path,
     max_workers: int,
@@ -413,6 +417,7 @@ def _run_cases_parallel(
                 config_path=cfg_path,
                 object_scale_key=object_scale_key,
                 asset_dir=asset_dir,
+                pc_subdir=pc_subdir,
                 output_dir=case_output_dir,
                 log_path=case_log,
             )
@@ -619,6 +624,7 @@ def main() -> None:
             config_paths=config_paths,
             object_scale_key=object_scale_key,
             asset_dir=asset_dir,
+            pc_subdir=PC_SUBDIR,
             out_dir=out_dir,
             logs_dir=logs_dir,
             max_workers=int(args.max_workers),
@@ -633,6 +639,7 @@ def main() -> None:
                 config_path=cfg_path,
                 object_scale_key=object_scale_key,
                 asset_dir=asset_dir,
+                pc_subdir=PC_SUBDIR,
                 output_dir=case_output_dir,
                 log_path=case_log,
             )

@@ -28,6 +28,22 @@ except Exception as exc:  # pragma: no cover - depends on runtime install.
     ) from exc
 
 
+def _resolve_object_asset_name(obj_info: Dict) -> str:
+    obj_name = str(obj_info.get("name") or "").strip()
+    scale_tag = str(obj_info.get("scale_tag") or "").strip()
+    if obj_name and scale_tag:
+        return f"{obj_name}_{scale_tag}"
+
+    xml_abs = str(obj_info.get("xml_abs") or "").strip()
+    if xml_abs:
+        parent_name = os.path.basename(os.path.dirname(os.path.abspath(xml_abs)))
+        if parent_name:
+            if obj_name:
+                return f"{obj_name}_{parent_name}"
+            return parent_name
+    return obj_name
+
+
 @dataclass
 class ContactBatchResult:
     has_contact: np.ndarray
@@ -138,8 +154,9 @@ class MjWarpHO:
                 self.body_name_to_id[str(body_name)] = bi
         self.body_parentid = np.asarray(self.mj_model.body_parentid, dtype=np.int32)
         self.obj_name = str(self.obj_info.get("name") or "")
-        if self.obj_name and self.obj_name in self.body_name_to_id:
-            self.object_root_body_id = int(self.body_name_to_id[self.obj_name])
+        self.obj_asset_name = _resolve_object_asset_name(self.obj_info)
+        if self.obj_asset_name and self.obj_asset_name in self.body_name_to_id:
+            self.object_root_body_id = int(self.body_name_to_id[self.obj_asset_name])
         else:
             self.object_root_body_id = self.nbody - 1
         self.object_body_ids = self._collect_descendant_body_ids(self.object_root_body_id)
@@ -250,7 +267,7 @@ class MjWarpHO:
         self.spec.attach(obj_spec, frame=attach_frame, prefix="")
 
         if fixed:
-            obj_joint_name = f"{obj_name}_joint"
+            obj_joint_name = f"{_resolve_object_asset_name(obj_info)}_joint"
             for joint in list(self.spec.joints):
                 if joint.name == obj_joint_name:
                     self.spec.delete(joint)

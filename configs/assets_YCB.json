@@ -43,6 +43,13 @@
     "kmeans_max_iter": 100,
     "version": "v1"
   },
+  "usd_convert": {
+    "enabled": true,
+    "force": true,
+    "fix_base": false,
+    "import_sites": false,
+    "verify_inertial": true
+  },
   "warp_render": {
     "gpu_lst": [
       0

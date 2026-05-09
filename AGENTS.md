@@ -9,6 +9,7 @@ Current mainline work is split into:
 
 ## Mainline Code (Do Not Drift)
 - `prepare_object_assets.py`
+- `prepare_object_usds.py`
 - `run_multi.py`
 - `run.py`
 - `run_warp_render.py`
@@ -20,6 +21,8 @@ Current mainline work is split into:
 - Current data flow is split into two stages:
   - preparation stage: raw processed mesh -> `prepare_object_assets.py` -> `datasets/objdata_*`
   - sampling stage: `objdata_*` asset -> grasp frame sampling -> MuJoCo collision/stability filtering -> `datasets/graspdata_*`
+- USD export is an explicit post-preparation step:
+  - `prepare_object_usds.py` converts prepared `object.xml` assets into IsaacLab/Isaac Sim USD assets in place under `datasets/objdata_*`
 - Post-sampling vision flow: after grasp sampling for each object-scale, run `run_warp_render.py` to render multi-view partial point clouds from scaled `coacd.obj`.
 - Asset preparation is handled by `prepare_object_assets.py`; it builds `objdata_*` assets directly from manifest-eligible source meshes and writes `global_pc.npy` / `global_normals.npy`.
 - Object assets and grasp outputs are intentionally separated:
@@ -40,6 +43,15 @@ Current mainline work is split into:
   - `convex_parts/*.obj`
   - `pc_warp/global_pc.npy`
   - `pc_warp/global_normals.npy`
+- `prepare_object_usds.py` is the required follow-up entrypoint when RL / IsaacLab needs physics-ready USD assets.
+- After USD conversion, each prepared asset directory may additionally contain:
+  - `object.usd`
+  - `configuration/object_base.usd`
+  - `configuration/object_physics.usd`
+  - `configuration/object_robot.usd`
+  - `configuration/object_sensor.usd`
+  - `config.yaml`
+  - `.asset_hash`
 - Standard scaled assets use `scaleXXX/` directories.
 - When enabled, `native/` is created as a peer of `scaleXXX/`.
 - `DatasetObjects` is a read-only indexer over prepared assets; it must not rebuild assets implicitly.
@@ -146,14 +158,19 @@ Current mainline work is split into:
   - writes all outputs under `datasets/<objdata_tag>/_meta/shape_cluster/<cluster_tag>/`
 - Main shape cluster outputs:
   - `meta.json`
-  - `object_features.npy`
-  - `cluster_centers.npy`
-  - `object_cluster.json`
-  - `cluster_index.json`
-  - `curriculum_index.json`
+  - `train_history.json`
+  - `ae_state_dict.pt`
+  - `object_labels.json`
+  - `cluster_labels.json`
 - `build_dataset_splits_rl.py` writes RL-only train/test manifests under `datasets/<objdata_tag>/_meta/rl_split/<split_tag>/`
 - RL split is object-name grouped, then expanded back to object-scale records with inherited cluster metadata.
 - RL split currently targets standard scaled assets only and does not include `native`.
+- RL split outputs are:
+  - `train_object.json`
+  - `test_object.json`
+  - `train_cluster.json`
+  - `test_cluster.json`
+  - `meta.json`
 
 ## Config Policy (Mandatory)
 - Mainline is config-first: all CLI entrypoints must load a JSON config.

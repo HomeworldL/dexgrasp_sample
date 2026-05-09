@@ -68,75 +68,85 @@ def build_rl_split_tag(cluster_tag: str, split_seed: int, test_ratio: float) -> 
 
 
 def load_object_cluster_payload(cluster_dir: Path) -> Dict:
-    object_cluster_path = cluster_dir / "object_cluster.json"
-    cluster_index_path = cluster_dir / "cluster_index.json"
-    if not object_cluster_path.exists():
-        raise FileNotFoundError(f"Missing shape-cluster file: {object_cluster_path}")
-    if not cluster_index_path.exists():
-        raise FileNotFoundError(f"Missing shape-cluster file: {cluster_index_path}")
+    object_labels_path = cluster_dir / "object_labels.json"
+    cluster_labels_path = cluster_dir / "cluster_labels.json"
+    if not object_labels_path.exists():
+        raise FileNotFoundError(f"Missing shape-cluster file: {object_labels_path}")
+    if not cluster_labels_path.exists():
+        raise FileNotFoundError(f"Missing shape-cluster file: {cluster_labels_path}")
 
-    object_cluster_payload = json.loads(object_cluster_path.read_text(encoding="utf-8"))
-    cluster_index_payload = json.loads(cluster_index_path.read_text(encoding="utf-8"))
-    if not isinstance(object_cluster_payload, dict) or "objects" not in object_cluster_payload:
-        raise ValueError(f"Invalid object_cluster.json payload: {object_cluster_path}")
-    if not isinstance(cluster_index_payload, dict) or "clusters" not in cluster_index_payload:
-        raise ValueError(f"Invalid cluster_index.json payload: {cluster_index_path}")
+    object_labels_payload = json.loads(object_labels_path.read_text(encoding="utf-8"))
+    cluster_labels_payload = json.loads(cluster_labels_path.read_text(encoding="utf-8"))
+    if not isinstance(object_labels_payload, dict) or "objects" not in object_labels_payload:
+        raise ValueError(f"Invalid object_labels.json payload: {object_labels_path}")
+    if not isinstance(cluster_labels_payload, dict) or "clusters" not in cluster_labels_payload:
+        raise ValueError(f"Invalid cluster_labels.json payload: {cluster_labels_path}")
     return {
-        "cluster_tag": str(object_cluster_payload.get("cluster_tag", "")),
-        "scale_tag": str(object_cluster_payload.get("scale_tag", "")),
-        "objects": dict(object_cluster_payload["objects"]),
-        "clusters": dict(cluster_index_payload["clusters"]),
+        "cluster_tag": str(object_labels_payload.get("cluster_tag", "")),
+        "scale_tag": str(object_labels_payload.get("scale_tag", "")),
+        "objects": dict(object_labels_payload["objects"]),
+        "clusters": dict(cluster_labels_payload["clusters"]),
     }
 
-
-def build_rl_record(
+def build_scale_record(
     entry: Dict,
     objdata_root: Path,
-    cluster_tag: str,
-    cluster_scale_tag: str,
-    object_cluster_info: Dict,
 ) -> Dict:
     asset_dir = Path(str(entry["asset_dir_abs"])).resolve()
-    coacd_path = Path(str(entry["coacd_abs"])).resolve()
     mjcf_path = Path(str(entry["mjcf_abs"])).resolve()
+    usd_path = asset_dir / "object.usd"
     if not asset_dir.is_dir():
         raise FileNotFoundError(f"Missing asset_dir_abs: {asset_dir}")
-    if not coacd_path.exists():
-        raise FileNotFoundError(f"Missing coacd_abs: {coacd_path}")
     if not mjcf_path.exists():
         raise FileNotFoundError(f"Missing mjcf_abs: {mjcf_path}")
 
-    object_name = str(entry["object_name"])
     return {
-        "global_id": int(entry["global_id"]),
         "object_scale_key": str(entry["object_scale_key"]),
-        "object_name": object_name,
         "asset_path": relpath_str(asset_dir, objdata_root),
-        "coacd_path": relpath_str(coacd_path, objdata_root),
         "mjcf_path": relpath_str(mjcf_path, objdata_root),
+        "usd_path": relpath_str(usd_path, objdata_root) if usd_path.exists() else None,
         "scale_tag": str(entry.get("scale_tag", "")),
         "scale": None if entry.get("scale") is None else float(entry["scale"]),
-        "is_native": bool(entry.get("is_native", False)),
-        "cluster_tag": cluster_tag,
+    }
+
+
+def build_rl_object_record(
+    *,
+    object_name: str,
+    cluster_scale_tag: str,
+    object_cluster_info: Dict,
+    scale_records: Sequence[Dict],
+) -> Dict:
+    ordered_scales = sorted(
+        scale_records,
+        key=lambda item: (
+            str(item["scale_tag"]),
+            "" if item["scale"] is None else f"{float(item['scale']):.8f}",
+            str(item["object_scale_key"]),
+        ),
+    )
+    return {
+        "object_name": object_name,
         "cluster_scale_tag": cluster_scale_tag,
         "cluster_id": int(object_cluster_info["cluster_id"]),
-        "cluster_distance": float(object_cluster_info["distance_to_center"]),
         "cluster_rank": int(object_cluster_info["rank_in_cluster"]),
-        "cluster_feature_index": int(object_cluster_info["feature_index"]),
-        "cluster_center_object_name": str(object_cluster_info["center_object_name"]),
-        "cluster_center_object_scale_key": str(object_cluster_info["center_object_scale_key"]),
+        "cluster_distance": float(object_cluster_info["distance_to_center"]),
+        "distance_to_global_center": float(object_cluster_info["distance_to_global_center"]),
+        "num_scales": len(ordered_scales),
+        "scale_tags": [str(item["scale_tag"]) for item in ordered_scales],
+        "scales": list(ordered_scales),
     }
 
 
 def split_records_by_object(
-    records: Sequence[Dict],
+    records: Dict[str, Dict],
     seed: int,
     test_ratio: float,
-) -> Tuple[List[Dict], List[Dict]]:
+) -> Tuple[Dict[str, Dict], Dict[str, Dict]]:
     if not 0.0 <= float(test_ratio) < 1.0:
         raise ValueError("test_ratio must satisfy 0 <= test_ratio < 1.")
 
-    object_names = sorted({str(record["object_name"]) for record in records})
+    object_names = sorted(records.keys())
     random.Random(int(seed)).shuffle(object_names)
     if len(object_names) <= 1 or test_ratio <= 0.0:
         test_objects = set()
@@ -145,54 +155,131 @@ def split_records_by_object(
         test_count = min(test_count, len(object_names) - 1)
         test_objects = set(object_names[:test_count])
 
-    train_records = [
-        record for record in records if str(record["object_name"]) not in test_objects
-    ]
-    test_records = [
-        record for record in records if str(record["object_name"]) in test_objects
-    ]
+    train_records = {
+        object_name: records[object_name]
+        for object_name in sorted(records.keys())
+        if object_name not in test_objects
+    }
+    test_records = {
+        object_name: records[object_name]
+        for object_name in sorted(records.keys())
+        if object_name in test_objects
+    }
     return train_records, test_records
 
 
-def build_split_cluster_index(records: Sequence[Dict]) -> Dict:
+def build_split_cluster_index(records: Dict[str, Dict], cluster_labels_map: Dict[str, Dict]) -> Dict:
     grouped: Dict[str, List[Dict]] = {}
-    for record in records:
+    for record in records.values():
         grouped.setdefault(str(record["cluster_id"]), []).append(record)
 
     clusters: Dict[str, Dict] = {}
     for cluster_id in sorted(grouped.keys(), key=int):
-        unique_objects: Dict[str, Dict] = {}
-        for record in grouped[cluster_id]:
-            object_name = str(record["object_name"])
-            candidate = {
-                "object_name": object_name,
-                "object_scale_key": f"{object_name}__{record['cluster_scale_tag']}",
-                "distance_to_center": float(record["cluster_distance"]),
-                "rank_in_cluster": int(record["cluster_rank"]),
-            }
-            current = unique_objects.get(object_name)
-            if current is None or candidate["rank_in_cluster"] < current["rank_in_cluster"]:
-                unique_objects[object_name] = candidate
-
         members = sorted(
-            unique_objects.values(),
-            key=lambda item: (float(item["distance_to_center"]), int(item["rank_in_cluster"])),
+            grouped[cluster_id],
+            key=lambda item: (
+                int(item["cluster_rank"]),
+                float(item["cluster_distance"]),
+                str(item["object_name"]),
+            ),
         )
         split_center = members[0] if members else None
         clusters[cluster_id] = {
             "cluster_id": int(cluster_id),
             "member_count": len(members),
-            "global_center_object_name": str(grouped[cluster_id][0]["cluster_center_object_name"]),
-            "global_center_object_scale_key": str(
-                grouped[cluster_id][0]["cluster_center_object_scale_key"]
-            ),
+            "total_scale_count": sum(int(member["num_scales"]) for member in members),
+            "distance_to_global_center": float(cluster_labels_map[cluster_id]["distance_to_global_center"]),
             "split_center_object_name": None if split_center is None else split_center["object_name"],
-            "split_center_object_scale_key": None
-            if split_center is None
-            else split_center["object_scale_key"],
-            "members": members,
+            "members": list(members),
         }
     return {"clusters": clusters}
+
+
+def collect_rl_records(
+    *,
+    ds: DatasetObjects,
+    objdata_root: Path,
+    cluster_scale_tag: str,
+    object_cluster_map: Dict[str, Dict],
+    cluster_dir: Path,
+) -> Dict[str, Dict]:
+    grouped_scale_records: Dict[str, List[Dict]] = {}
+    for entry in sorted(ds.get_entries(), key=lambda item: int(item["global_id"])):
+        object_name = str(entry["object_name"])
+        if object_name not in object_cluster_map:
+            raise KeyError(
+                f"Object '{object_name}' not found in shape-cluster payload under {cluster_dir}"
+            )
+        grouped_scale_records.setdefault(object_name, []).append(
+            build_scale_record(entry=entry, objdata_root=objdata_root)
+        )
+
+    records: Dict[str, Dict] = {}
+    for object_name in sorted(grouped_scale_records.keys()):
+        records[object_name] = build_rl_object_record(
+            object_name=object_name,
+            cluster_scale_tag=cluster_scale_tag,
+            object_cluster_info=object_cluster_map[object_name],
+            scale_records=grouped_scale_records[object_name],
+        )
+    return records
+
+
+def prepare_output_dir(output_dir: Path, force: bool) -> None:
+    if output_dir.exists() and not force:
+        raise FileExistsError(f"Output already exists: {output_dir}. Use --force to overwrite.")
+    if output_dir.exists() and force:
+        for child in output_dir.iterdir():
+            if child.is_file():
+                child.unlink()
+
+
+def write_split_outputs(
+    *,
+    output_dir: Path,
+    split_tag: str,
+    cluster_tag: str,
+    cluster_scale_tag: str,
+    cluster_dir: Path,
+    objdata_root: Path,
+    cluster_cfg: Dict,
+    split_seed: int,
+    test_ratio: float,
+    records: Dict[str, Dict],
+    train_records: Dict[str, Dict],
+    test_records: Dict[str, Dict],
+    train_cluster_index: Dict,
+    test_cluster_index: Dict,
+) -> None:
+    write_json(output_dir / "train_object.json", {"objects": train_records})
+    write_json(output_dir / "test_object.json", {"objects": test_records})
+    write_json(output_dir / "train_cluster.json", train_cluster_index)
+    write_json(output_dir / "test_cluster.json", test_cluster_index)
+    write_json(
+        output_dir / "meta.json",
+        {
+            "split_tag": split_tag,
+            "cluster_tag": cluster_tag,
+            "cluster_scale_tag": cluster_scale_tag,
+            "shape_cluster_dir": relpath_str(cluster_dir, objdata_root),
+            "cluster_version": cluster_cfg["version"],
+            "split_seed": split_seed,
+            "test_ratio": float(test_ratio),
+            "num_objects": len(records),
+            "num_train_objects": len(train_records),
+            "num_test_objects": len(test_records),
+            "num_scales": sum(int(record["num_scales"]) for record in records.values()),
+            "num_train_scales": sum(int(record["num_scales"]) for record in train_records.values()),
+            "num_test_scales": sum(int(record["num_scales"]) for record in test_records.values()),
+            "include_native": False,
+            "files": {
+                "train_object": "train_object.json",
+                "test_object": "test_object.json",
+                "train_cluster": "train_cluster.json",
+                "test_cluster": "test_cluster.json",
+            },
+        },
+    )
 
 
 def write_json(path: Path, payload: Dict | List) -> None:
@@ -230,30 +317,21 @@ def main() -> None:
         verbose=data_verbose_from_config(cfg),
     )
 
-    records: List[Dict] = []
-    for entry in sorted(ds.get_entries(), key=lambda item: int(item["global_id"])):
-        object_name = str(entry["object_name"])
-        if object_name not in object_cluster_map:
-            raise KeyError(
-                f"Object '{object_name}' not found in shape-cluster payload under {cluster_dir}"
-            )
-        records.append(
-            build_rl_record(
-                entry=entry,
-                objdata_root=objdata_root,
-                cluster_tag=cluster_tag,
-                cluster_scale_tag=cluster_scale_tag,
-                object_cluster_info=object_cluster_map[object_name],
-            )
-        )
+    records = collect_rl_records(
+        ds=ds,
+        objdata_root=objdata_root,
+        cluster_scale_tag=cluster_scale_tag,
+        object_cluster_map=object_cluster_map,
+        cluster_dir=cluster_dir,
+    )
 
     train_records, test_records = split_records_by_object(
         records=records,
         seed=split_seed,
         test_ratio=float(args.test_ratio),
     )
-    train_cluster_index = build_split_cluster_index(train_records)
-    test_cluster_index = build_split_cluster_index(test_records)
+    train_cluster_index = build_split_cluster_index(train_records, cluster_payload["clusters"])
+    test_cluster_index = build_split_cluster_index(test_records, cluster_payload["clusters"])
 
     split_tag = build_rl_split_tag(
         cluster_tag=cluster_tag,
@@ -261,40 +339,22 @@ def main() -> None:
         test_ratio=float(args.test_ratio),
     )
     output_dir = objdata_root / "_meta" / "rl_split" / split_tag
-    if output_dir.exists() and not args.force:
-        raise FileExistsError(f"Output already exists: {output_dir}. Use --force to overwrite.")
-    if output_dir.exists() and args.force:
-        for child in output_dir.iterdir():
-            if child.is_file():
-                child.unlink()
-
-    write_json(output_dir / "train_rl.json", train_records)
-    write_json(output_dir / "test_rl.json", test_records)
-    write_json(output_dir / "train_cluster_index.json", train_cluster_index)
-    write_json(output_dir / "test_cluster_index.json", test_cluster_index)
-    write_json(
-        output_dir / "meta.json",
-        {
-            "split_tag": split_tag,
-            "cluster_tag": cluster_tag,
-            "cluster_scale_tag": cluster_scale_tag,
-            "shape_cluster_dir": relpath_str(cluster_dir, objdata_root),
-            "cluster_version": cluster_cfg["version"],
-            "split_seed": split_seed,
-            "test_ratio": float(args.test_ratio),
-            "num_records": len(records),
-            "num_train_records": len(train_records),
-            "num_test_records": len(test_records),
-            "num_train_objects": len({record["object_name"] for record in train_records}),
-            "num_test_objects": len({record["object_name"] for record in test_records}),
-            "include_native": False,
-            "files": {
-                "train_rl": "train_rl.json",
-                "test_rl": "test_rl.json",
-                "train_cluster_index": "train_cluster_index.json",
-                "test_cluster_index": "test_cluster_index.json",
-            },
-        },
+    prepare_output_dir(output_dir, args.force)
+    write_split_outputs(
+        output_dir=output_dir,
+        split_tag=split_tag,
+        cluster_tag=cluster_tag,
+        cluster_scale_tag=cluster_scale_tag,
+        cluster_dir=cluster_dir,
+        objdata_root=objdata_root,
+        cluster_cfg=cluster_cfg,
+        split_seed=split_seed,
+        test_ratio=float(args.test_ratio),
+        records=records,
+        train_records=train_records,
+        test_records=test_records,
+        train_cluster_index=train_cluster_index,
+        test_cluster_index=test_cluster_index,
     )
 
     print(

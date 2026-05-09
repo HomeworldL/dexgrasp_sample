@@ -9,6 +9,7 @@
 
 ## 主线代码（不要漂移）
 - `prepare_object_assets.py`
+- `prepare_object_usds.py`
 - `run_multi.py`
 - `run.py`
 - `run_warp_render.py`
@@ -20,6 +21,8 @@
 - 当前数据流分成两个阶段：
   - 准备阶段：原始 processed mesh -> `prepare_object_assets.py` -> `datasets/objdata_*`
   - 采样阶段：`objdata_*` 资产 -> 抓取帧采样 -> MuJoCo 碰撞/稳定性过滤 -> `datasets/graspdata_*`
+- USD 导出是显式的准备后步骤：
+  - `prepare_object_usds.py` 会把已准备好的 `object.xml` 原地转换成可供 IsaacLab / Isaac Sim 使用的 USD 资产，仍写回 `datasets/objdata_*`
 - 采样后的视觉流程：每个 object-scale 完成抓取采样后，运行 `run_warp_render.py`，基于缩放后的 `coacd.obj` 渲染多视角局部点云。
 - 资产准备由 `prepare_object_assets.py` 负责；它直接基于 manifest 允许的源 mesh 构建 `objdata_*` 资产，并写出 `global_pc.npy` / `global_normals.npy`。
 - 物体资产和抓取输出是显式分离的：
@@ -40,6 +43,15 @@
   - `convex_parts/*.obj`
   - `pc_warp/global_pc.npy`
   - `pc_warp/global_normals.npy`
+- 当 RL / IsaacLab 需要可模拟 USD 时，后续还需要运行 `prepare_object_usds.py`。
+- USD 转换后，每个资产目录还可能包含：
+  - `object.usd`
+  - `configuration/object_base.usd`
+  - `configuration/object_physics.usd`
+  - `configuration/object_robot.usd`
+  - `configuration/object_sensor.usd`
+  - `config.yaml`
+  - `.asset_hash`
 - 标准缩放资产使用 `scaleXXX/` 目录。
 - 当开关启用时，`native/` 会作为 `scaleXXX/` 的平级目录创建。
 - `DatasetObjects` 是针对已准备好资产的只读索引器；它不能隐式重建资产。
@@ -146,14 +158,19 @@
   - 全部输出写入 `datasets/<objdata_tag>/_meta/shape_cluster/<cluster_tag>/`
 - 主要聚类产物包括：
   - `meta.json`
-  - `object_features.npy`
-  - `cluster_centers.npy`
-  - `object_cluster.json`
-  - `cluster_index.json`
-  - `curriculum_index.json`
+  - `train_history.json`
+  - `ae_state_dict.pt`
+  - `object_labels.json`
+  - `cluster_labels.json`
 - `build_dataset_splits_rl.py` 会在 `datasets/<objdata_tag>/_meta/rl_split/<split_tag>/` 下写出 RL 专用 train/test manifest。
 - RL 划分先按 `object_name` 分组，再展开回 object-scale 记录，并继承 object-level 聚类信息。
 - 当前 RL 划分仅针对标准缩放资产，不包含 `native`。
+- RL 划分输出包括：
+  - `train_object.json`
+  - `test_object.json`
+  - `train_cluster.json`
+  - `test_cluster.json`
+  - `meta.json`
 
 ## 配置策略（强制）
 - 主线采用 config-first：所有 CLI 入口都必须加载 JSON 配置。

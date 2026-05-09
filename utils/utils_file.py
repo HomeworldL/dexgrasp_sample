@@ -105,6 +105,22 @@ def use_native_asset_from_config(cfg: Dict) -> bool:
     return value
 
 
+def usd_convert_cfg_from_config(cfg: Dict) -> Dict:
+    usd_cfg = _require(cfg, "usd_convert")
+    if not isinstance(usd_cfg, dict) or not usd_cfg:
+        raise ValueError("Config field usd_convert must be a non-empty object.")
+
+    normalized = {}
+    for key in ["enabled", "force", "fix_base", "import_sites", "verify_inertial"]:
+        if key not in usd_cfg:
+            raise KeyError(f"Missing required config field: usd_convert.{key}")
+        value = usd_cfg[key]
+        if not isinstance(value, bool):
+            raise ValueError(f"Config field usd_convert.{key} must be a boolean.")
+        normalized[key] = value
+    return normalized
+
+
 def hand_profile_from_config(cfg: Dict) -> Dict:
     profile = _require(cfg, "hand.profile")
     if not isinstance(profile, dict) or not profile:

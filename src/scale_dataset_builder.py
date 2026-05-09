@@ -132,29 +132,34 @@ class ScaleDatasetBuilder:
     def _build_object_xml(
         self,
         object_name: str,
+        scale_tag: str,
         mass_kg_scaled: float,
         inertia_diag_scaled: np.ndarray,
         convex_rel_paths: List[str],
     ) -> str:
-        mesh_assets = [f'    <mesh name="convex_{i}" file="{rel}"/>' for i, rel in enumerate(convex_rel_paths)]
+        asset_name = f"{object_name}_{scale_tag}"
+        mesh_assets = [
+            f'    <mesh name="{asset_name}_convex_{i}" file="{rel}"/>'
+            for i, rel in enumerate(convex_rel_paths)
+        ]
         geom_lines = [
             (
-                f'      <geom name="{object_name}_collision_{i}" type="mesh" mesh="convex_{i}" '
+                f'      <geom name="{asset_name}_collision_{i}" type="mesh" mesh="{asset_name}_convex_{i}" '
                 'contype="1" conaffinity="1" group="1" rgba="0.70 0.70 0.70 1"/>'
             )
             for i in range(len(convex_rel_paths))
         ]
 
         xml_lines = [
-            '<mujoco model="object">',
+            f'<mujoco model="{asset_name}">',
             '  <compiler angle="radian" coordinate="local"/>',
             '  <option gravity="0 0 0"/>',
             '  <asset>',
             *mesh_assets,
             '  </asset>',
             '  <worldbody>',
-            f'    <body name="{object_name}" pos="0 0 0">',
-            f'      <freejoint name="{object_name}_joint"/>',
+            f'    <body name="{asset_name}" pos="0 0 0">',
+            f'      <freejoint name="{asset_name}_joint"/>',
             (
                 f'      <inertial pos="0 0 0" mass="{mass_kg_scaled:.10f}" '
                 f'diaginertia="{inertia_diag_scaled[0]:.12e} {inertia_diag_scaled[1]:.12e} {inertia_diag_scaled[2]:.12e}"/>'
@@ -232,6 +237,7 @@ class ScaleDatasetBuilder:
         convex_rel_paths = [os.path.relpath(p, scale_dir).replace("\\", "/") for p in native_paths]
         xml_text = self._build_object_xml(
             object_name=object_name,
+            scale_tag=scale_tag,
             mass_kg_scaled=mass_native,
             inertia_diag_scaled=inertia_native,
             convex_rel_paths=convex_rel_paths,
@@ -328,6 +334,7 @@ class ScaleDatasetBuilder:
         convex_rel_paths = [os.path.relpath(p, scale_dir).replace("\\", "/") for p in scaled_convex_paths]
         xml_text = self._build_object_xml(
             object_name=object_name,
+            scale_tag=self.scale_tag(scale_value),
             mass_kg_scaled=mass_scaled,
             inertia_diag_scaled=inertia_scaled,
             convex_rel_paths=convex_rel_paths,

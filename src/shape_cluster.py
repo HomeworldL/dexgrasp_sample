@@ -270,6 +270,27 @@ def build_cluster_tag(version: str, feature_dim: int, k: int, seed: int) -> str:
     return f"{version}_ae{int(feature_dim)}_k{int(k)}_seed{int(seed)}"
 
 
+def reorder_clusters_by_global_center_distance(
+    labels: np.ndarray,
+    centers: np.ndarray,
+    features: np.ndarray,
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    labels = np.asarray(labels, dtype=np.int32)
+    centers = np.asarray(centers, dtype=np.float32)
+    features = np.asarray(features, dtype=np.float32)
+
+    global_center = features.mean(axis=0)
+    center_distances = np.linalg.norm(centers - global_center[None, :], axis=1)
+    sorted_old_ids = np.argsort(center_distances, kind="stable").astype(np.int32)
+
+    remap = np.empty(centers.shape[0], dtype=np.int32)
+    remap[sorted_old_ids] = np.arange(centers.shape[0], dtype=np.int32)
+    reordered_labels = remap[labels]
+    reordered_centers = centers[sorted_old_ids]
+    reordered_distances = center_distances[sorted_old_ids].astype(np.float32)
+    return reordered_labels.astype(np.int32), reordered_centers.astype(np.float32), reordered_distances
+
+
 def load_object_point_clouds(
     objdata_root: Path,
     scale_tag: str,
@@ -303,13 +324,10 @@ def load_object_point_clouds(
 def save_cluster_artifacts(
     output_dir: Path,
     object_names: Sequence[str],
-    object_dirs: Sequence[Path],
     labels: np.ndarray,
-    embeddings: np.ndarray,
     normalized_embeddings: np.ndarray,
     centers: np.ndarray,
-    feature_mean: np.ndarray,
-    feature_std: np.ndarray,
+    center_global_distances: np.ndarray,
     train_history: Sequence[float],
     cluster_tag: str,
     scale_tag: str,
@@ -324,79 +342,58 @@ def save_cluster_artifacts(
     output_dir.mkdir(parents=True, exist_ok=True)
 
     labels = np.asarray(labels, dtype=np.int32)
-    embeddings = np.asarray(embeddings, dtype=np.float32)
     normalized_embeddings = np.asarray(normalized_embeddings, dtype=np.float32)
     centers = np.asarray(centers, dtype=np.float32)
+    center_global_distances = np.asarray(center_global_distances, dtype=np.float32)
 
-    np.save(output_dir / "object_features.npy", embeddings)
-    np.save(output_dir / "object_features_normalized.npy", normalized_embeddings)
-    np.save(output_dir / "object_labels.npy", labels)
-    np.save(output_dir / "cluster_centers.npy", centers)
-    np.save(output_dir / "feature_mean.npy", feature_mean.astype(np.float32))
-    np.save(output_dir / "feature_std.npy", feature_std.astype(np.float32))
     torch.save(model_state_dict, output_dir / "ae_state_dict.pt")
 
     history_payload = {"train_loss": [float(v) for v in train_history]}
     (output_dir / "train_history.json").write_text(json.dumps(history_payload, indent=2), encoding="utf-8")
 
-    object_name_to_dir = {name: obj_dir for name, obj_dir in zip(object_names, object_dirs)}
     distances = np.linalg.norm(normalized_embeddings - centers[labels], axis=1)
+    global_center = normalized_embeddings.mean(axis=0)
+    global_distances = np.linalg.norm(normalized_embeddings - global_center[None, :], axis=1)
 
-    cluster_center_object_names: Dict[int, str] = {}
-    cluster_members_payload: Dict[str, Dict] = {}
-    object_cluster_payload: Dict[str, Dict] = {}
-    curriculum_payload: Dict[str, List[Dict]] = {}
+    cluster_labels_payload: Dict[str, Dict] = {}
+    object_labels_payload: Dict[str, Dict] = {}
 
     unique_cluster_ids = sorted(int(cluster_id) for cluster_id in np.unique(labels))
     for cluster_id in unique_cluster_ids:
         member_indices = np.where(labels == cluster_id)[0]
         ordered_indices = member_indices[np.argsort(distances[member_indices], kind="stable")]
-        center_object_index = int(ordered_indices[0])
-        center_object_name = str(object_names[center_object_index])
-        cluster_center_object_names[cluster_id] = center_object_name
 
         members_payload: List[Dict] = []
-        curriculum_members: List[Dict] = []
         for rank_in_cluster, member_index in enumerate(ordered_indices):
             object_name = str(object_names[int(member_index)])
             distance_to_center = float(distances[int(member_index)])
+            distance_to_global_center = float(global_distances[int(member_index)])
             members_payload.append(
                 {
                     "object_name": object_name,
                     "object_scale_key": f"{object_name}__{scale_tag}",
-                    "feature_index": int(member_index),
                     "distance_to_center": distance_to_center,
+                    "distance_to_global_center": distance_to_global_center,
                     "rank_in_cluster": int(rank_in_cluster),
                 }
             )
-            curriculum_members.append(
-                {
-                    "object_name": object_name,
-                    "object_scale_key": f"{object_name}__{scale_tag}",
-                    "distance_to_center": distance_to_center,
-                }
-            )
 
-        cluster_members_payload[str(cluster_id)] = {
+        cluster_labels_payload[str(cluster_id)] = {
             "cluster_id": int(cluster_id),
-            "center_object_name": center_object_name,
-            "center_object_scale_key": f"{center_object_name}__{scale_tag}",
+            "distance_to_global_center": float(center_global_distances[cluster_id]),
             "member_count": len(members_payload),
             "members": members_payload,
         }
-        curriculum_payload[str(cluster_id)] = curriculum_members
 
         for rank_in_cluster, member_index in enumerate(ordered_indices):
             object_name = str(object_names[int(member_index)])
-            object_cluster_payload[object_name] = {
+            object_labels_payload[object_name] = {
                 "object_name": object_name,
-                "object_dir_rel": object_name_to_dir[object_name].name,
+                "object_scale_key": f"{object_name}__{scale_tag}",
                 "cluster_id": int(cluster_id),
-                "feature_index": int(member_index),
                 "distance_to_center": float(distances[int(member_index)]),
+                "distance_to_global_center": float(global_distances[int(member_index)]),
                 "rank_in_cluster": int(rank_in_cluster),
-                "center_object_name": center_object_name,
-                "center_object_scale_key": f"{center_object_name}__{scale_tag}",
                 "scale_tag": scale_tag,
             }
 
@@ -409,51 +406,34 @@ def save_cluster_artifacts(
         "kmeans_k": int(kmeans_k),
         "seed": int(seed),
         "num_objects": len(object_names),
+        "cluster_order_rule": "cluster ids are sorted by ascending distance from cluster center to global feature center",
         "files": {
-            "object_features": "object_features.npy",
-            "object_features_normalized": "object_features_normalized.npy",
-            "labels": "object_labels.npy",
-            "centers": "cluster_centers.npy",
-            "feature_mean": "feature_mean.npy",
-            "feature_std": "feature_std.npy",
             "history": "train_history.json",
             "model": "ae_state_dict.pt",
-            "object_cluster": "object_cluster.json",
-            "cluster_index": "cluster_index.json",
-            "curriculum_index": "curriculum_index.json",
+            "object_labels": "object_labels.json",
+            "cluster_labels": "cluster_labels.json",
         },
     }
     if extra_meta:
         meta["training"] = extra_meta
     (output_dir / "meta.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
-    (output_dir / "object_cluster.json").write_text(
+    (output_dir / "object_labels.json").write_text(
         json.dumps(
             {
                 "cluster_tag": cluster_tag,
                 "scale_tag": scale_tag,
-                "objects": object_cluster_payload,
+                "objects": object_labels_payload,
             },
             indent=2,
         ),
         encoding="utf-8",
     )
-    (output_dir / "cluster_index.json").write_text(
+    (output_dir / "cluster_labels.json").write_text(
         json.dumps(
             {
                 "cluster_tag": cluster_tag,
                 "scale_tag": scale_tag,
-                "clusters": cluster_members_payload,
-            },
-            indent=2,
-        ),
-        encoding="utf-8",
-    )
-    (output_dir / "curriculum_index.json").write_text(
-        json.dumps(
-            {
-                "cluster_tag": cluster_tag,
-                "scale_tag": scale_tag,
-                "clusters": curriculum_payload,
+                "clusters": cluster_labels_payload,
             },
             indent=2,
         ),

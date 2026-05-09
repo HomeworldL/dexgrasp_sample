@@ -10,7 +10,8 @@
 4. 用 MuJoCo 做碰撞与稳定性筛选
 5. 保存抓取状态到 `datasets/graspdata_*`
 6. 用 Warp 渲染多视角部分点云
-7. 按需构建形状聚类与 RL 专用元数据到 `_meta/`
+7. 按需将已准备好的 MJCF 资产转换成 IsaacLab USD 资产
+8. 按需构建形状聚类与 RL 专用元数据到 `_meta/`
 
 当前同时支持：
 - CPU MuJoCo 采样：`run.py` / `run_multi.py`
@@ -20,6 +21,7 @@
 - [仓库介绍](#仓库介绍)
 - [安装与依赖](#安装与依赖)
 - [数据集构造](#数据集构造)
+- [USD 资产](#usd-资产)
 - [聚类与 RL 元数据](#聚类与-rl-元数据)
 - [运行指令](#运行指令)
 - [工具脚本](#工具脚本)
@@ -128,6 +130,28 @@ python prepare_object_assets.py -c configs/assets_YCB.json --force --jobs 8
 
 `DatasetObjects` 现在是针对已准备资产的只读索引器，不负责隐式重建资产。
 
+### 已准备资产结构
+
+准备好的物体资产位于：
+
+```text
+datasets/objdata_YCB/<object>/scaleXXX/
+  coacd.obj
+  object.xml
+  convex_parts/*.obj
+  pc_warp/
+    global_pc.npy
+    global_normals.npy
+```
+
+`object.xml` 里的内部名称现在会带上 `scale_tag`，例如：
+- `model="<object>_<scale_tag>"`
+- `body name="<object>_<scale_tag>"`
+- `mesh name="<object>_<scale_tag>_convex_i"`
+- `geom name="<object>_<scale_tag>_collision_i"`
+
+这样可以避免多物体 MuJoCo / USD 场景里的命名冲突。
+
 ### Object-Scale 扁平化
 
 每个 `(object, scale)` 会变成一个独立条目，包含：
@@ -220,6 +244,43 @@ datasets/graspdata_YCB_liberhand_right/<object>/scaleXXX/
 - 写出最终 manifest 前会过滤空 grasp 文件
 - manifest 中保存相对 dataset root 的相对路径，便于整体迁移
 
+## USD 资产
+
+当下游 RL 或仿真需要 IsaacLab / Isaac Sim 可直接使用的 USD 资产时，在 `prepare_object_assets.py` 之后运行 `prepare_object_usds.py`。
+
+示例：
+
+```bash
+python prepare_object_usds.py -c configs/assets_YCB.json
+```
+
+当前行为：
+- 读取与 `prepare_object_assets.py` 相同配置下的已准备 `object.xml`
+- 在单个 IsaacLab 进程中顺序转换
+- 将 USD 产物直接写回 `object.xml` 同级目录
+- 保持 IsaacLab importer 默认的碰撞近似 `convexHull`
+- 校验 MJCF 中的物体整体质量与对角惯量是否正确写入 USD 刚体根 prim
+
+单个资产目录的 USD 输出结构：
+
+```text
+datasets/objdata_YCB/<object>/scaleXXX/
+  object.xml
+  object.usd
+  config.yaml
+  .asset_hash
+  configuration/
+    object_base.usd
+    object_physics.usd
+    object_robot.usd
+    object_sensor.usd
+```
+
+给 RL 侧使用时：
+- 主资产路径是 `<asset_path>/object.usd`
+- 物理子层路径是 `<asset_path>/configuration/object_physics.usd`
+- RL split 里所有路径都相对于 `datasets/objdata_<dataset>/`
+
 ## 聚类与 RL 元数据
 
 形状聚类和 RL 划分独立于模仿学习数据集构建流程。
@@ -247,11 +308,18 @@ datasets/objdata_YCB/_meta/shape_cluster/<cluster_tag>/
 
 主要文件：
 - `meta.json`
-- `object_features.npy`
-- `cluster_centers.npy`
-- `object_cluster.json`
-- `cluster_index.json`
-- `curriculum_index.json`
+- `train_history.json`
+- `ae_state_dict.pt`
+- `object_labels.json`
+- `cluster_labels.json`
+
+当前标签语义：
+- cluster id 会按“cluster center 到全局特征中心的距离升序”重新编号
+- `cluster 0` 表示中心最接近全局中心的那一类
+- `object_labels.json` 是以物体为中心的标签表
+- `cluster_labels.json` 是以聚类为中心的标签表
+- 两者都记录 `distance_to_center`
+- 两者都记录 `distance_to_global_center`
 
 ### RL 专用划分
 
@@ -260,6 +328,31 @@ datasets/objdata_YCB/_meta/shape_cluster/<cluster_tag>/
 ```bash
 python build_dataset_splits_rl.py -c configs/assets_YCB.json --force
 ```
+
+输出目录：
+
+```text
+datasets/objdata_YCB/_meta/rl_split/<split_tag>/
+  train_object.json
+  test_object.json
+  train_cluster.json
+  test_cluster.json
+  meta.json
+```
+
+当前 RL 划分行为：
+- 先按 `object_name` 切 train/test，再展开回所有配置 scale
+- 不包含 `native`
+- `train_object.json` / `test_object.json` 是以 `object_name` 为 key 的 object 级映射
+- 每个 object 只保留一份公用 cluster 元数据，并在 `scales` 列表下挂具体尺度记录
+- 每个 scale 子项保留：
+  - `object_scale_key`
+  - `asset_path`
+  - `mjcf_path`
+  - `usd_path`
+  - `scale_tag`
+  - `scale`
+- `train_cluster.json` / `test_cluster.json` 会按 cluster 聚合 object 记录，并保留每个 object 下的全部 scale
 
 主要输出目录：
 

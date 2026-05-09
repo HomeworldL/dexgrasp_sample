@@ -23,11 +23,32 @@
       0.19,
       0.2
     ],
-    "verbose": false,
-    "build_native_asset": false
+    "build_native_asset": false,
+    "verbose": false
   },
   "sampling": {
     "n_points": 4096
+  },
+  "shape_cluster": {
+    "scale_tag": "scale120",
+    "fps_points": 1024,
+    "feature_dim": 128,
+    "kmeans_k": 4,
+    "epochs": 300,
+    "batch_size": 16,
+    "lr": 0.0005,
+    "weight_decay": 0.00001,
+    "scheduler_eta_min": 0.0000001,
+    "kmeans_n_init": 10,
+    "kmeans_max_iter": 100,
+    "version": "v1"
+  },
+  "usd_convert": {
+    "enabled": true,
+    "force": false,
+    "fix_base": false,
+    "import_sites": false,
+    "verify_inertial": true
   },
   "warp_render": {
     "gpu_lst": [

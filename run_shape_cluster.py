@@ -13,6 +13,7 @@ from src.shape_cluster import (
     build_cluster_tag,
     extract_embeddings,
     load_object_point_clouds,
+    reorder_clusters_by_global_center_distance,
     run_kmeans,
     save_cluster_artifacts,
     standardize_features,
@@ -152,17 +153,21 @@ def main() -> None:
         n_init=int(shape_cluster_cfg["kmeans_n_init"]),
         max_iter=int(shape_cluster_cfg["kmeans_max_iter"]),
     )
+    reordered_labels, reordered_centers, reordered_center_global_distances = (
+        reorder_clusters_by_global_center_distance(
+            labels=kmeans.labels,
+            centers=kmeans.centers,
+            features=normalized_embeddings,
+        )
+    )
 
     save_cluster_artifacts(
         output_dir=output_dir,
         object_names=object_names,
-        object_dirs=object_dirs,
-        labels=kmeans.labels,
-        embeddings=embeddings,
+        labels=reordered_labels,
         normalized_embeddings=normalized_embeddings,
-        centers=kmeans.centers,
-        feature_mean=feature_mean,
-        feature_std=feature_std,
+        centers=reordered_centers,
+        center_global_distances=reordered_center_global_distances,
         train_history=training.history,
         cluster_tag=cluster_tag,
         scale_tag=str(shape_cluster_cfg["scale_tag"]),

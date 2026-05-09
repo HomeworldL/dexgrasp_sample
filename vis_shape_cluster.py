@@ -127,7 +127,9 @@ def _render_cluster_pages(
         raise ValueError("columns must be > 0.")
     rows = int(math.ceil(members_per_page / columns))
     total_pages = int(math.ceil(len(members) / members_per_page))
-    center_object_name = str(cluster_payload["center_object_name"])
+    center_object_name = (
+        None if len(members) == 0 else str(min(members, key=lambda item: int(item["rank_in_cluster"]))["object_name"])
+    )
 
     saved_paths: List[Path] = []
     for page_idx in range(total_pages):
@@ -145,7 +147,7 @@ def _render_cluster_pages(
             object_name = str(member["object_name"])
             mesh_path = objdata_root / object_name / scale_tag / "coacd.obj"
             points = _load_mesh_points(mesh_path)
-            is_center = object_name == center_object_name
+            is_center = center_object_name is not None and object_name == center_object_name
             _draw_top_view(ax, points=points, point_size=point_size, highlight=is_center)
             title = (
                 f"{member['rank_in_cluster']:02d} {_short_object_name(object_name)}\n"
@@ -175,13 +177,13 @@ def main() -> None:
     objdata_tag = objdata_tag_from_config(cfg, args.config)
     objdata_root = generated_root / objdata_tag
     cluster_dir = objdata_root / "_meta" / "shape_cluster" / cluster_tag
-    cluster_index_path = cluster_dir / "cluster_index.json"
-    if not cluster_index_path.exists():
-        raise FileNotFoundError(f"Missing cluster index: {cluster_index_path}")
+    cluster_labels_path = cluster_dir / "cluster_labels.json"
+    if not cluster_labels_path.exists():
+        raise FileNotFoundError(f"Missing cluster labels: {cluster_labels_path}")
 
-    cluster_payload = json.loads(cluster_index_path.read_text(encoding="utf-8"))
+    cluster_payload = json.loads(cluster_labels_path.read_text(encoding="utf-8"))
     if not isinstance(cluster_payload, dict) or "clusters" not in cluster_payload:
-        raise ValueError(f"Invalid cluster index payload: {cluster_index_path}")
+        raise ValueError(f"Invalid cluster labels payload: {cluster_labels_path}")
     clusters = dict(cluster_payload["clusters"])
     scale_tag = str(cluster_payload.get("scale_tag", resolve_shape_cluster_cfg(cfg)["scale_tag"]))
 
@@ -195,7 +197,7 @@ def main() -> None:
     if args.cluster_id is not None:
         target_cluster_ids = [str(int(args.cluster_id))]
         if target_cluster_ids[0] not in clusters:
-            raise KeyError(f"Cluster id {args.cluster_id} not found in {cluster_index_path}")
+            raise KeyError(f"Cluster id {args.cluster_id} not found in {cluster_labels_path}")
 
     total_pages = 0
     for cluster_id in target_cluster_ids:
@@ -213,7 +215,7 @@ def main() -> None:
         total_pages += len(saved_paths)
         print(
             f"[vis_shape_cluster] cluster={cluster_id} members={clusters[cluster_id]['member_count']} "
-            f"pages={len(saved_paths)} center={clusters[cluster_id]['center_object_name']}"
+            f"pages={len(saved_paths)} distance_to_global_center={clusters[cluster_id]['distance_to_global_center']:.3f}"
         )
     print(
         f"[vis_shape_cluster] cluster_tag={cluster_tag} scale_tag={scale_tag} "

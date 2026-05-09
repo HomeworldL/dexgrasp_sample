@@ -24,6 +24,22 @@ except Exception:
     mj_viewer = None
 
 
+def _resolve_object_asset_name(obj_info: Dict) -> str:
+    obj_name = str(obj_info.get("name") or "").strip()
+    scale_tag = str(obj_info.get("scale_tag") or "").strip()
+    if obj_name and scale_tag:
+        return f"{obj_name}_{scale_tag}"
+
+    xml_abs = str(obj_info.get("xml_abs") or "").strip()
+    if xml_abs:
+        parent_name = os.path.basename(os.path.dirname(os.path.abspath(xml_abs)))
+        if parent_name:
+            if obj_name:
+                return f"{obj_name}_{parent_name}"
+            return parent_name
+    return obj_name
+
+
 def _normalize_friction_coef(
     friction_coef: float | Sequence[float],
 ) -> Tuple[np.ndarray, int]:
@@ -117,7 +133,7 @@ class MjHO:
         self.obj_collision_geom_indices = [
             gi
             for gi in range(self.model.ngeom)
-            if f"{self.obj_name}_collision" in self.model.geom(gi).name
+            if f"{self.obj_asset_name}_collision" in self.model.geom(gi).name
         ]
         ctrl_joint_indices = np.asarray(
             self.hand_profile["ctrl_joint_indices"],
@@ -305,6 +321,7 @@ class MjHO:
         obj_spec = mujoco.MjSpec.from_file(obj_xml)
         self.obj_info = obj_info
         self.obj_name = obj_name
+        self.obj_asset_name = _resolve_object_asset_name(obj_info)
         # print(f"loading object xml: {obj_xml}")
         # attr in obj_spec
         # for a in dir(obj_spec):
@@ -340,7 +357,7 @@ class MjHO:
             # delete free joints from object
             for j in self.spec.joints:
                 # print(f"joint {j.name} ")
-                if j.name == obj_name + "_joint":
+                if j.name == self.obj_asset_name + "_joint":
                     # print(f"joint {j.name} is fixed")
                     # self.spec.joints.remove(j)
                     # j.type = mujoco.mjtJoint.mjJNT_WELD
@@ -349,12 +366,12 @@ class MjHO:
 
     def _set_margin(self, obj_margin):
         for i in range(self.model.ngeom):
-            if f"{self.obj_name}_collision" in self.model.geom(i).name:
+            if f"{self.obj_asset_name}_collision" in self.model.geom(i).name:
                 self.model.geom_margin[i] = obj_margin
 
     def _set_gap(self, obj_gap):
         for i in range(self.model.ngeom):
-            if f"{self.obj_name}_collision" in self.model.geom(i).name:
+            if f"{self.obj_asset_name}_collision" in self.model.geom(i).name:
                 self.model.geom_gap[i] = obj_gap
 
     def _set_obj_pts_norms(self, obj_pts, obj_norms):

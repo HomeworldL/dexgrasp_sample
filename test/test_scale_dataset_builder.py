@@ -35,6 +35,10 @@ def test_build_scale_assets(tmp_path: Path):
     txt = Path(rec["xml_abs"]).read_text(encoding="utf-8")
     assert "<freejoint" in txt
     assert "diaginertia" in txt
+    assert 'model="obj_a_scale080"' in txt
+    assert 'body name="obj_a_scale080"' in txt
+    assert 'mesh name="obj_a_scale080_convex_0"' in txt
+    assert 'name="obj_a_scale080_joint"' in txt
 
 
 def test_build_multi_scale_assets(tmp_path: Path):

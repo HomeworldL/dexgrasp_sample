@@ -10,7 +10,8 @@ The current repository workflow is:
 4. run MuJoCo collision and stability filtering
 5. save validated grasp states under `datasets/graspdata_*`
 6. render multi-view partial point clouds with Warp
-7. optionally build shape clusters and RL-only metadata under `_meta/`
+7. optionally convert prepared MJCF assets into IsaacLab USD assets
+8. optionally build shape clusters and RL-only metadata under `_meta/`
 
 This repository supports both:
 - CPU MuJoCo sampling via `run.py` / `run_multi.py`
@@ -20,6 +21,7 @@ This repository supports both:
 - [Repository Introduction](#repository-introduction)
 - [Installation and Dependencies](#installation-and-dependencies)
 - [Dataset Construction](#dataset-construction)
+- [USD Assets](#usd-assets)
 - [Clustering and RL Metadata](#clustering-and-rl-metadata)
 - [Run Commands](#run-commands)
 - [Utility Scripts](#utility-scripts)
@@ -128,6 +130,28 @@ python prepare_object_assets.py -c configs/assets_YCB.json --force --jobs 8
 
 `DatasetObjects` is now a read-only indexer over prepared assets. It should not rebuild missing assets implicitly.
 
+### Prepared Asset Layout
+
+Prepared object assets live under:
+
+```text
+datasets/objdata_YCB/<object>/scaleXXX/
+  coacd.obj
+  object.xml
+  convex_parts/*.obj
+  pc_warp/
+    global_pc.npy
+    global_normals.npy
+```
+
+`object.xml` uses scale-aware internal names such as:
+- `model="<object>_<scale_tag>"`
+- `body name="<object>_<scale_tag>"`
+- `mesh name="<object>_<scale_tag>_convex_i"`
+- `geom name="<object>_<scale_tag>_collision_i"`
+
+This avoids name collisions in multi-object MuJoCo or USD scenes.
+
 ### Object-Scale Flattening
 
 Every `(object, scale)` pair becomes one flat entry with:
@@ -220,6 +244,43 @@ Current split rules:
 - filter out empty grasp files before writing final manifests
 - store paths relative to dataset root for portability
 
+## USD Assets
+
+Use `prepare_object_usds.py` after `prepare_object_assets.py` when downstream RL or simulation expects IsaacLab/Isaac Sim USD assets.
+
+Example:
+
+```bash
+python prepare_object_usds.py -c configs/assets_YCB.json
+```
+
+Current behavior:
+- reads prepared `object.xml` entries from the same asset config used by `prepare_object_assets.py`
+- converts in a single IsaacLab process
+- writes USD outputs beside each `object.xml`
+- keeps IsaacLab importer default collision approximation (`convexHull`)
+- verifies that object-level MJCF mass and diagonal inertia are preserved on the USD rigid-body root
+
+Per-asset output layout:
+
+```text
+datasets/objdata_YCB/<object>/scaleXXX/
+  object.xml
+  object.usd
+  config.yaml
+  .asset_hash
+  configuration/
+    object_base.usd
+    object_physics.usd
+    object_robot.usd
+    object_sensor.usd
+```
+
+For RL-side path usage:
+- primary asset path: `<asset_path>/object.usd`
+- physics sublayer path: `<asset_path>/configuration/object_physics.usd`
+- all paths in RL split manifests are relative to `datasets/objdata_<dataset>/`
+
 ## Clustering and RL Metadata
 
 Shape clustering and RL split are separate from imitation-learning dataset construction.
@@ -247,11 +308,18 @@ datasets/objdata_YCB/_meta/shape_cluster/<cluster_tag>/
 
 Main files:
 - `meta.json`
-- `object_features.npy`
-- `cluster_centers.npy`
-- `object_cluster.json`
-- `cluster_index.json`
-- `curriculum_index.json`
+- `train_history.json`
+- `ae_state_dict.pt`
+- `object_labels.json`
+- `cluster_labels.json`
+
+Current label semantics:
+- cluster ids are reordered by ascending distance from each cluster center to the global feature center
+- `cluster 0` is the cluster whose center is closest to the global center
+- `object_labels.json` is object-centric
+- `cluster_labels.json` is cluster-centric
+- both record `distance_to_center`
+- both record `distance_to_global_center`
 
 ### RL-Only Split
 
@@ -260,6 +328,31 @@ Use `build_dataset_splits_rl.py` to build train/test manifests for RL from objda
 ```bash
 python build_dataset_splits_rl.py -c configs/assets_YCB.json --force
 ```
+
+Output directory:
+
+```text
+datasets/objdata_YCB/_meta/rl_split/<split_tag>/
+  train_object.json
+  test_object.json
+  train_cluster.json
+  test_cluster.json
+  meta.json
+```
+
+Current RL split behavior:
+- split by `object_name`, then expand back to all configured scales
+- exclude `native`
+- `train_object.json` / `test_object.json` are object-centric maps keyed by `object_name`
+- each object record keeps shared cluster metadata once, plus a `scales` list
+- each scale item keeps:
+  - `object_scale_key`
+  - `asset_path`
+  - `mjcf_path`
+  - `usd_path`
+  - `scale_tag`
+  - `scale`
+- `train_cluster.json` / `test_cluster.json` group object records under each cluster and retain all scales under each object
 
 Main output directory:
 

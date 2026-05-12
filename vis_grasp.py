@@ -17,13 +17,13 @@ from src.dataset_objects import DatasetObjects
 from src.mj_ho import RobotKinematics
 from utils.utils_file import (
     DEFAULT_RUN_CONFIG_PATH,
-    data_verbose_from_config,
-    generated_dataset_root_from_config,
-    graspdata_tag_from_config,
-    load_config,
-    objdata_tag_from_config,
-    run_scales_from_config,
-    use_native_asset_from_config,
+    data_generated_dataset_root_cfg,
+    data_run_scales_cfg,
+    data_use_native_asset_cfg,
+    data_verbose_cfg,
+    graspdata_tag_cfg,
+    load_run_config,
+    objdata_tag_cfg,
 )
 from utils.utils_vis import visualize_with_plotly, visualize_with_viser
 
@@ -55,7 +55,9 @@ def _load_grasp_from_npy(npy_path: Path) -> Dict[str, np.ndarray]:
     return out
 
 
-def _resolve_grasp_path(output_dir: Path, cfg: Dict, grasp_path_arg: Optional[str]) -> Path:
+def _resolve_grasp_path(
+    output_dir: Path, cfg: Dict, grasp_path_arg: Optional[str]
+) -> Path:
     if grasp_path_arg:
         p = Path(grasp_path_arg).expanduser().resolve()
         if not p.exists():
@@ -83,7 +85,9 @@ def _resolve_grasp_path(output_dir: Path, cfg: Dict, grasp_path_arg: Optional[st
         if p.name and p.exists():
             return p
     joined = "\n".join(f"- {p}" for p in dedup_candidates)
-    raise FileNotFoundError(f"No grasp file found under {output_dir}. Checked:\n{joined}")
+    raise FileNotFoundError(
+        f"No grasp file found under {output_dir}. Checked:\n{joined}"
+    )
 
 
 def _load_grasp_data(grasp_path: Path) -> Dict[str, np.ndarray]:
@@ -119,11 +123,18 @@ def _parse_vis_ids(raw: Optional[str], total: int) -> List[int]:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Visualize object mesh + hand grasps (viser) and all grasp frames (plotly).")
+    parser = argparse.ArgumentParser(
+        description="Visualize object mesh + hand grasps (viser) and all grasp frames (plotly)."
+    )
     parser.add_argument("-c", "--config", type=str, default=DEFAULT_RUN_CONFIG_PATH)
     parser.add_argument("-i", "--obj-id", type=int, default=None)
     parser.add_argument("-k", "--obj-key", type=str, default=None)
-    parser.add_argument("--grasp-path", type=str, default=None, help="Optional grasp file path (.h5/.npy).")
+    parser.add_argument(
+        "--grasp-path",
+        type=str,
+        default=None,
+        help="Optional grasp file path (.h5/.npy).",
+    )
     parser.add_argument(
         "--vis-ids",
         type=str,
@@ -150,14 +161,14 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    cfg = load_config(args.config)
+    cfg = load_run_config(args.config)
     ds = DatasetObjects(
-        scales=run_scales_from_config(cfg),
-        objdata_tag=objdata_tag_from_config(cfg, args.config),
-        include_native=use_native_asset_from_config(cfg),
-        graspdata_tag=graspdata_tag_from_config(cfg, args.config),
-        generated_dataset_root=generated_dataset_root_from_config(cfg),
-        verbose=data_verbose_from_config(cfg),
+        scales=data_run_scales_cfg(cfg),
+        objdata_tag=objdata_tag_cfg(cfg, args.config),
+        include_native=data_use_native_asset_cfg(cfg),
+        graspdata_tag=graspdata_tag_cfg(cfg, args.config),
+        generated_dataset_root=data_generated_dataset_root_cfg(cfg),
+        verbose=data_verbose_cfg(cfg),
     )
 
     if args.obj_key:
@@ -181,10 +192,11 @@ def main() -> None:
 
     rk = RobotKinematics(str(Path(cfg["hand"]["xml_path"]).resolve()))
 
-    parts = [ds.load_mesh(path) for path in info["convex_parts_abs"]]
     meshes_for_vis: Dict[str, trimesh.Trimesh] = {
-        "obj_coacd": ds.load_mesh(info["coacd_abs"]),
-        "obj_convex_parts": trimesh.util.concatenate(parts),
+        "obj_coacd": ds.load_entry_mesh(info, kind="coacd", apply_scale=True),
+        "obj_convex_parts": ds.load_entry_mesh(
+            info, kind="convex_parts", apply_scale=True
+        ),
     }
 
     for idx in vis_ids:
@@ -194,14 +206,16 @@ def main() -> None:
                 continue
             meshes_for_vis[f"hand_{idx}_{qkey}"] = hand_mesh
 
-    pts, _ = ds.sample_surface_o3d(
-        info["coacd_abs"],
+    pts, _ = ds.sample_surface_for_entry(
+        info,
         n_points=min(2048, int(cfg.get("sampling", {}).get("n_points", 2048))),
         method="poisson",
     )
     cols = np.tile(np.array([[90, 160, 255]], dtype=np.uint8), (pts.shape[0], 1))
 
-    _server = visualize_with_viser(meshes=meshes_for_vis, pointclouds={"obj_pointcloud": (pts, cols)})
+    _server = visualize_with_viser(
+        meshes=meshes_for_vis, pointclouds={"obj_pointcloud": (pts, cols)}
+    )
     print("[vis_grasp] Viser started. Press Ctrl+C to quit.")
 
     if not args.skip_plotly:

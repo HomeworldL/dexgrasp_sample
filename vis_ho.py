@@ -19,16 +19,16 @@ from src.mj_ho import MjHO, RobotKinematics
 from src.sample import sample_grasp_frames
 from utils.utils_file import (
     DEFAULT_RUN_CONFIG_PATH,
-    anchor_params_from_config,
-    data_verbose_from_config,
-    generated_dataset_root_from_config,
-    graspdata_tag_from_config,
-    hand_profile_from_config,
-    load_config,
-    object_profile_from_config,
-    objdata_tag_from_config,
-    run_scales_from_config,
-    use_native_asset_from_config,
+    data_generated_dataset_root_cfg,
+    data_run_scales_cfg,
+    data_use_native_asset_cfg,
+    data_verbose_cfg,
+    graspdata_tag_cfg,
+    hand_anchor_params_cfg,
+    hand_profile_cfg,
+    load_run_config,
+    object_profile_cfg,
+    objdata_tag_cfg,
 )
 from utils.utils_seed import set_seed
 from utils.utils_sample import build_pose_candidates, make_qpos_triplets
@@ -36,11 +36,11 @@ from utils.utils_vis import visualize_with_viser
 
 
 def _sample_qpos_prepared(
-    cfg: Dict, ds: DatasetObjects, object_mesh_path: str
+    cfg: Dict, ds: DatasetObjects, info: Dict
 ) -> Tuple[np.ndarray, np.ndarray]:
     sampling_cfg = cfg["sampling"]
-    points, normals = ds.sample_surface_o3d(
-        object_mesh_path,
+    points, normals = ds.sample_surface_for_entry(
+        info,
         n_points=int(sampling_cfg["n_points"]),
         method="poisson",
     )
@@ -76,7 +76,9 @@ def _transform_to_pose_wxyz(transform: np.ndarray) -> np.ndarray:
 
 
 def main() -> None:
-    p = argparse.ArgumentParser(description="Visualize hand-object for one object-scale entry by global id or key.")
+    p = argparse.ArgumentParser(
+        description="Visualize hand-object for one object-scale entry by global id or key."
+    )
     p.add_argument("-c", "--config", type=str, default=DEFAULT_RUN_CONFIG_PATH)
     p.add_argument("-i", "--obj-id", type=int, default=None)
     p.add_argument(
@@ -88,17 +90,17 @@ def main() -> None:
     )
     args = p.parse_args()
 
-    cfg = load_config(args.config)
+    cfg = load_run_config(args.config)
     seed = int(cfg["seed"])
     set_seed(seed)
     rng = np.random.default_rng(seed)
     ds = DatasetObjects(
-        scales=run_scales_from_config(cfg),
-        objdata_tag=objdata_tag_from_config(cfg, args.config),
-        include_native=use_native_asset_from_config(cfg),
-        graspdata_tag=graspdata_tag_from_config(cfg, args.config),
-        generated_dataset_root=generated_dataset_root_from_config(cfg),
-        verbose=data_verbose_from_config(cfg),
+        scales=data_run_scales_cfg(cfg),
+        objdata_tag=objdata_tag_cfg(cfg, args.config),
+        include_native=data_use_native_asset_cfg(cfg),
+        graspdata_tag=graspdata_tag_cfg(cfg, args.config),
+        generated_dataset_root=data_generated_dataset_root_cfg(cfg),
+        verbose=data_verbose_cfg(cfg),
     )
 
     if args.obj_key:
@@ -114,15 +116,17 @@ def main() -> None:
     env = MjHO(
         {"name": obj_name, "xml_abs": info["mjcf_abs"]},
         hand_xml,
-        anchor_params=anchor_params_from_config(cfg),
-        hand_profile=hand_profile_from_config(cfg),
-        object_profile=object_profile_from_config(cfg),
+        anchor_params=hand_anchor_params_cfg(cfg),
+        hand_profile=hand_profile_cfg(cfg),
+        object_profile=object_profile_cfg(cfg),
         object_fixed=False,
     )
-    qpos_prepared, transforms_np = _sample_qpos_prepared(cfg, ds, info["coacd_abs"])
+    qpos_prepared, transforms_np = _sample_qpos_prepared(cfg, ds, info)
     chosen_idx = int(rng.integers(0, qpos_prepared.shape[0]))
     env.set_hand_qpos(qpos_prepared[chosen_idx])
-    print(f"[vis_ho] seed={seed} sampled_prepared={qpos_prepared.shape[0]} selected={chosen_idx}")
+    print(
+        f"[vis_ho] seed={seed} sampled_prepared={qpos_prepared.shape[0]} selected={chosen_idx}"
+    )
     hand_root_pose = qpos_prepared[chosen_idx, :7].astype(np.float32, copy=False)
     grasp_pose = _transform_to_pose_wxyz(transforms_np[chosen_idx])
 
@@ -130,7 +134,7 @@ def main() -> None:
     hand_qpos = env.get_hand_qpos()
     hand_vis = rk.get_posed_meshes(hand_qpos, kind="visual")
     hand_col = rk.get_posed_meshes(hand_qpos, kind="collision")
-    obj_mesh = ds.load_mesh(info["coacd_abs"])
+    obj_mesh = ds.load_entry_mesh(info, kind="coacd", apply_scale=True)
 
     meshes_for_vis = {"object": obj_mesh}
     if hand_vis is not None:

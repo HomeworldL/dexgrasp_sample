@@ -9,13 +9,13 @@ from typing import Dict, Iterable, List
 from src.dataset_objects import DatasetObjects
 from utils.utils_file import (
     DEFAULT_RUN_CONFIG_PATH,
-    data_verbose_from_config,
-    generated_dataset_root_from_config,
-    graspdata_tag_from_config,
-    load_config,
-    objdata_tag_from_config,
-    run_scales_from_config,
-    use_native_asset_from_config,
+    data_generated_dataset_root_cfg,
+    data_run_scales_cfg,
+    data_use_native_asset_cfg,
+    data_verbose_cfg,
+    graspdata_tag_cfg,
+    load_run_config,
+    objdata_tag_cfg,
 )
 
 
@@ -48,7 +48,14 @@ def _print_entries(entries: List[Dict]) -> None:
         print("No entries matched.")
         return
 
-    headers = ["gid", "object_name", "scale_tag", "scale", "is_native", "object_scale_key"]
+    headers = [
+        "gid",
+        "object_name",
+        "scale_tag",
+        "scale",
+        "is_native",
+        "object_scale_key",
+    ]
     rows = []
     for entry in entries:
         rows.append(
@@ -79,19 +86,28 @@ def _print_entries(entries: List[Dict]) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Pretty-print DatasetObjects entries.")
     parser.add_argument("-c", "--config", type=str, default=DEFAULT_RUN_CONFIG_PATH)
-    parser.add_argument("--object-name", type=str, default=None, help="Filter exact object name.")
-    parser.add_argument("--key-substr", type=str, default=None, help="Filter object_scale_key substring.")
-    parser.add_argument("--native-only", action="store_true", help="Show only native entries.")
+    parser.add_argument(
+        "--object-name", type=str, default=None, help="Filter exact object name."
+    )
+    parser.add_argument(
+        "--key-substr",
+        type=str,
+        default=None,
+        help="Filter object_scale_key substring.",
+    )
+    parser.add_argument(
+        "--native-only", action="store_true", help="Show only native entries."
+    )
     args = parser.parse_args()
 
-    cfg = load_config(args.config)
+    cfg = load_run_config(args.config)
     ds = DatasetObjects(
-        scales=run_scales_from_config(cfg),
-        objdata_tag=objdata_tag_from_config(cfg, args.config),
-        include_native=use_native_asset_from_config(cfg),
-        graspdata_tag=graspdata_tag_from_config(cfg, args.config),
-        generated_dataset_root=generated_dataset_root_from_config(cfg),
-        verbose=data_verbose_from_config(cfg),
+        scales=data_run_scales_cfg(cfg),
+        objdata_tag=objdata_tag_cfg(cfg, args.config),
+        include_native=data_use_native_asset_cfg(cfg),
+        graspdata_tag=graspdata_tag_cfg(cfg, args.config),
+        generated_dataset_root=data_generated_dataset_root_cfg(cfg),
+        verbose=data_verbose_cfg(cfg),
     )
 
     entries = sorted(ds.get_entries(), key=lambda item: int(item["global_id"]))
@@ -103,7 +119,7 @@ def main() -> None:
     )
     print(
         f"[print_dataset_objects] entries={len(entries)} "
-        f"config={args.config} include_native={use_native_asset_from_config(cfg)}"
+        f"config={args.config} include_native={data_use_native_asset_cfg(cfg)}"
     )
     _print_entries(entries)
 

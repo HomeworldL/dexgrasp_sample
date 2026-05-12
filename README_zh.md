@@ -623,12 +623,6 @@ python vis_grasp.py -c configs/run_YCB_liberhand_right.json -i 0 --vis-ids 0,10,
 python vis_pc.py -c configs/run_YCB_liberhand_right.json -i 0 --show-cam-frames
 ```
 
-抓取姿态分布绘图：
-
-```bash
-PYTHONPATH=. python tools/visualization/plot_grasp_pose_plotly.py -c configs/run_YCB_liberhand_right.json -i 0
-```
-
 ## 主要文件详解
 
 ### 入口脚本

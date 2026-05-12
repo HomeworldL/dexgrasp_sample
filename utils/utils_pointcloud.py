@@ -14,6 +14,7 @@ def sample_surface_o3d(
     obj_path: str,
     n_points: int = 4096,
     method: str = "poisson",
+    scale: float = 1.0,
 ) -> Tuple[np.ndarray, np.ndarray]:
     """Sample surface points and normals from a mesh OBJ using Open3D."""
     if o3d is None:
@@ -24,6 +25,11 @@ def sample_surface_o3d(
     mesh_o3d = o3d.io.read_triangle_mesh(obj_path)
     if not mesh_o3d.has_triangles():
         raise RuntimeError(f"Loaded mesh has no triangles: {obj_path}")
+    scale_value = float(scale)
+    if not np.isfinite(scale_value) or scale_value <= 0.0:
+        raise ValueError(f"scale must be finite and > 0, got {scale}.")
+    if abs(scale_value - 1.0) > 1e-12:
+        mesh_o3d.scale(scale_value, center=(0.0, 0.0, 0.0))
 
     if not mesh_o3d.has_vertex_normals():
         mesh_o3d.compute_vertex_normals()

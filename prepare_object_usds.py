@@ -16,16 +16,17 @@ from prepare_object_assets import _load_existing_entries
 from utils.utils_file import (
     DEFAULT_ASSET_CONFIG_PATH,
     load_asset_config,
-    objdata_tag_from_config,
-    usd_convert_cfg_from_config,
+    objdata_tag_cfg,
+    usd_convert_cfg,
 )
-
 
 parser = argparse.ArgumentParser(
     description="Convert prepared object-scale assets into USD beside each object asset directory."
 )
 parser.add_argument("-c", "--config", type=str, default=DEFAULT_ASSET_CONFIG_PATH)
-parser.add_argument("--force", action="store_true", help="Override usd_convert.force from config.")
+parser.add_argument(
+    "--force", action="store_true", help="Override usd_convert.force from config."
+)
 
 AppLauncher.add_app_launcher_args(parser)
 parser.set_defaults(headless=True)
@@ -36,18 +37,27 @@ simulation_app = app_launcher.app
 
 
 import isaaclab.sim as sim_utils
-from isaaclab.sim.converters import MjcfConverter, MjcfConverterCfg, UrdfConverter, UrdfConverterCfg
+from isaaclab.sim.converters import (
+    MjcfConverter,
+    MjcfConverterCfg,
+    UrdfConverter,
+    UrdfConverterCfg,
+)
 from pxr import Sdf, Usd, UsdPhysics
 
 
 def _resolve_entries(cfg: dict, config_path: str) -> list[dict]:
+    """Reuse the objdata entry scan so USD conversion follows the same asset set."""
     entries = _load_existing_entries(cfg, config_path)
     if not entries:
-        raise ValueError("No matching prepared objdata assets found for USD conversion.")
+        raise ValueError(
+            "No matching prepared objdata assets found for USD conversion."
+        )
     return entries
 
 
 def _remove_existing_usd_outputs(asset_dir: Path) -> None:
+    """Delete previously generated USD-side outputs before a forced reconvert."""
     for rel_path in ["object.usd", "config.yaml", ".asset_hash"]:
         path = asset_dir / rel_path
         if path.exists():
@@ -58,6 +68,7 @@ def _remove_existing_usd_outputs(asset_dir: Path) -> None:
 
 
 def _usd_outputs_ready(asset_dir: Path) -> bool:
+    """Check whether the expected USD payload already exists in place."""
     return (
         (asset_dir / "object.usd").exists()
         and (asset_dir / "config.yaml").exists()
@@ -74,6 +85,7 @@ def _convert_asset_mjcf(
     import_sites: bool,
     force_usd_conversion: bool,
 ) -> Path:
+    """Run IsaacLab's MJCF converter for one prepared asset directory."""
     sim_utils.create_new_stage()
     converter_cfg = MjcfConverterCfg(
         asset_path=str(xml_path),
@@ -98,6 +110,7 @@ def _convert_asset_urdf(
     convex_decompose_mesh: bool,
     force_usd_conversion: bool,
 ) -> Path:
+    """Run IsaacLab's URDF converter for one prepared asset directory."""
     sim_utils.create_new_stage()
     collider_type = "convex_decomposition" if convex_decompose_mesh else "convex_hull"
     converter_cfg = UrdfConverterCfg(
@@ -117,6 +130,7 @@ def _convert_asset_urdf(
 
 
 def _read_mjcf_inertial(xml_path: Path) -> dict:
+    """Read the expected mass and diagonal inertia directly from prepared MJCF."""
     root = ET.fromstring(xml_path.read_text(encoding="utf-8"))
     body = root.find("./worldbody/body")
     if body is None:
@@ -131,6 +145,7 @@ def _read_mjcf_inertial(xml_path: Path) -> dict:
 
 
 def _read_urdf_inertial(urdf_path: Path) -> dict:
+    """Read the expected mass and diagonal inertia directly from prepared URDF."""
     root = ET.fromstring(urdf_path.read_text(encoding="utf-8"))
     link = root.find("./link[@name='base_link']")
     if link is None:
@@ -153,6 +168,7 @@ def _read_urdf_inertial(urdf_path: Path) -> dict:
 
 
 def _read_usd_inertial(usd_path: Path) -> dict:
+    """Extract the single physics mass payload authored into the converted USD."""
     stage = Usd.Stage.Open(str(usd_path))
     if stage is None:
         raise RuntimeError(f"Failed to open USD stage: {usd_path}")
@@ -175,15 +191,19 @@ def _read_usd_inertial(usd_path: Path) -> dict:
                 }
             )
     if len(matches) != 1:
-        raise RuntimeError(f"Expected exactly one MassAPI prim in {usd_path}, got {len(matches)}")
+        raise RuntimeError(
+            f"Expected exactly one MassAPI prim in {usd_path}, got {len(matches)}"
+        )
     return matches[0]
 
 
 def _close(a: float, b: float, atol: float = 1e-8, rtol: float = 1e-5) -> bool:
+    """Small helper for inertial-value comparisons across source and USD."""
     return abs(a - b) <= (atol + rtol * abs(a))
 
 
 def _verify_inertial(expected: dict, usd_path: Path) -> dict:
+    """Compare converted USD inertials against the prepared source asset."""
     usd = _read_usd_inertial(usd_path)
     ok_mass = _close(expected["mass"], usd["mass"])
     ok_diag = all(_close(a, b) for a, b in zip(expected["diag"], usd["diag"]))
@@ -197,10 +217,18 @@ def _verify_inertial(expected: dict, usd_path: Path) -> dict:
 
 
 def main() -> None:
+    """Convert every prepared objdata entry into in-place USD outputs.
+
+    High-level flow:
+    1. load the asset config and select the backend-specific converter policy
+    2. scan prepared objdata entries from the existing manifest
+    3. convert each entry in place, optionally reusing or replacing prior outputs
+    4. optionally verify USD inertials against the prepared MJCF/URDF source
+    """
     start = time.perf_counter()
     cfg = load_asset_config(args_cli.config)
-    usd_cfg = usd_convert_cfg_from_config(cfg)
-    objdata_tag = objdata_tag_from_config(cfg, args_cli.config)
+    usd_cfg = usd_convert_cfg(cfg)
+    objdata_tag = objdata_tag_cfg(cfg, args_cli.config)
     entries = _resolve_entries(cfg, args_cli.config)
 
     force = bool(args_cli.force or usd_cfg["force"])
@@ -238,6 +266,8 @@ def main() -> None:
             if backend == "mjcf" and (not xml_path.exists()):
                 raise FileNotFoundError(f"Missing MJCF asset: {xml_path}")
 
+            # Conversion can either start clean or reuse an existing output tree,
+            # depending on the force/ready state computed above.
             if force:
                 _remove_existing_usd_outputs(asset_dir)
             if force or (not _usd_outputs_ready(asset_dir)):
@@ -262,9 +292,13 @@ def main() -> None:
             else:
                 usd_path = (asset_dir / "object.usd").resolve()
 
+            # Inertial verification is a post-convert consistency check. It does
+            # not affect converter selection, only whether the result is accepted.
             if verify_inertial:
                 expected = (
-                    _read_urdf_inertial(urdf_path) if backend == "urdf" else _read_mjcf_inertial(xml_path)
+                    _read_urdf_inertial(urdf_path)
+                    if backend == "urdf"
+                    else _read_mjcf_inertial(xml_path)
                 )
                 check = _verify_inertial(expected=expected, usd_path=usd_path)
                 if not check["ok"]:

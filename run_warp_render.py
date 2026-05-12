@@ -13,11 +13,11 @@ import torch
 from src.dataset_objects import DatasetObjects
 from utils.utils_file import (
     DEFAULT_ASSET_CONFIG_PATH,
-    asset_scales_from_config,
-    data_verbose_from_config,
-    generated_dataset_root_from_config,
+    data_asset_scales_cfg,
+    data_generated_dataset_root_cfg,
+    data_verbose_cfg,
     load_asset_config,
-    objdata_tag_from_config,
+    objdata_tag_cfg,
 )
 from utils.utils_seed import set_seed, stable_seed
 from utils.utils_sample import parse_object_scale_key
@@ -31,6 +31,7 @@ from utils.utils_warp_render import (
 
 
 def _require(cfg: Dict, path: str):
+    """Read a nested config field and fail fast when any key is missing."""
     cur = cfg
     for key in path.split("."):
         if not isinstance(cur, dict) or key not in cur:
@@ -40,6 +41,7 @@ def _require(cfg: Dict, path: str):
 
 
 def _validate_render_config(cfg: Dict) -> Dict:
+    """Validate and return the warp_render config subtree used by the renderer."""
     wr = _require(cfg, "warp_render")
     for path in [
         "gpu_lst",
@@ -81,6 +83,7 @@ def _validate_render_config(cfg: Dict) -> Dict:
 
 
 def _parse_device_token(token: Union[str, int]) -> Union[str, int]:
+    """Normalize CLI/config device tokens into Warp-friendly cpu/int values."""
     if isinstance(token, int):
         return token
     s = str(token).strip().lower()
@@ -90,6 +93,7 @@ def _parse_device_token(token: Union[str, int]) -> Union[str, int]:
 
 
 def _parse_device_list(values: Sequence[Union[str, int]]) -> List[Union[str, int]]:
+    """Parse a heterogeneous device list from config or CLI override."""
     out: List[Union[str, int]] = []
     for value in values:
         out.append(_parse_device_token(value))
@@ -97,12 +101,14 @@ def _parse_device_list(values: Sequence[Union[str, int]]) -> List[Union[str, int
 
 
 def _device_alias(device_token: Union[str, int]) -> str:
+    """Convert a normalized device token into Warp's device alias string."""
     if device_token == "cpu":
         return "cpu"
     return f"cuda:{int(device_token)}"
 
 
 def _ensure_devices_available(device_tokens: Sequence[Union[str, int]]) -> None:
+    """Fail early if any requested Warp device is unavailable at runtime."""
     if wp is None:
         raise RuntimeError("warp-lang is not available. Install warp-lang first.")
     wp.init()
@@ -118,6 +124,7 @@ def _ensure_devices_available(device_tokens: Sequence[Union[str, int]]) -> None:
 
 
 def _all_pc_exist(folder: Path, batch: int) -> bool:
+    """Check whether all expected partial point-cloud files already exist."""
     for b in range(batch):
         world_path = folder / f"partial_pc_{str(b).zfill(2)}.npy"
         cam_path = folder / f"partial_pc_cam_{str(b).zfill(2)}.npy"
@@ -133,10 +140,22 @@ def _all_pc_exist(folder: Path, batch: int) -> bool:
 
 
 def _all_cam_ex_exist(folder: Path, batch: int) -> bool:
+    """Check whether all expected camera extrinsic files already exist."""
     for b in range(batch):
         if not (folder / f"cam_ex_{str(b).zfill(2)}.npy").exists():
             return False
     return True
+
+
+def _render_outputs_ready(folder: Path, batch: int, save_pc: bool) -> bool:
+    """Check whether a skipped render already has every file needed downstream."""
+    if not (folder / "cam_in.npy").exists():
+        return False
+    if not _all_cam_ex_exist(folder, batch):
+        return False
+    if not save_pc:
+        return True
+    return _all_pc_exist(folder, batch)
 
 
 def _render_entry(
@@ -145,22 +164,14 @@ def _render_entry(
     render_cfg: Dict,
     seed: int,
 ) -> Dict[str, Union[str, float, int]]:
+    """Render one object-scale entry and write its per-view outputs."""
     entry_start = time.perf_counter()
     out_dir = Path(entry["asset_dir_abs"]).resolve() / str(render_cfg["output_subdir"])
     out_dir.mkdir(parents=True, exist_ok=True)
 
     batch = renderer.num_tiles
     if bool(render_cfg["skip_existing"]):
-        if bool(render_cfg["save_pc"]) and _all_pc_exist(out_dir, batch):
-            return {
-                "object_scale_key": str(entry["object_scale_key"]),
-                "status": "skip",
-                "mesh_sec": 0.0,
-                "render_sec": 0.0,
-                "save_sec": 0.0,
-                "total_sec": float(time.perf_counter() - entry_start),
-            }
-        if (not bool(render_cfg["save_pc"])) and _all_cam_ex_exist(out_dir, batch):
+        if _render_outputs_ready(out_dir, batch, save_pc=bool(render_cfg["save_pc"])):
             return {
                 "object_scale_key": str(entry["object_scale_key"]),
                 "status": "skip",
@@ -170,9 +181,17 @@ def _render_entry(
                 "total_sec": float(time.perf_counter() - entry_start),
             }
 
+    # Mesh loading is split out so the profiling output can separate geometry
+    # preparation from rendering and file I/O.
     mesh_start = time.perf_counter()
     mesh = mesh_from_path(str(entry["coacd_abs"]))
-    mesh_radius = float(np.max(np.linalg.norm(np.asarray(mesh.vertices, dtype=np.float64), axis=1)))
+    if (not bool(entry.get("is_native", False))) and entry.get("scale") is not None:
+        mesh.vertices = np.asarray(mesh.vertices, dtype=np.float64) * float(
+            entry["scale"]
+        )
+    mesh_radius = float(
+        np.max(np.linalg.norm(np.asarray(mesh.vertices, dtype=np.float64), axis=1))
+    )
     mesh_sec = float(time.perf_counter() - mesh_start)
 
     render_start = time.perf_counter()
@@ -209,6 +228,8 @@ def _render_entry(
         )
     render_sec = float(time.perf_counter() - render_start)
 
+    # Save camera poses first, then the optional rgb/depth/point-cloud products
+    # for each tile in the rendered multi-view batch.
     save_start = time.perf_counter()
     cam_in_path = out_dir / "cam_in.npy"
     if not cam_in_path.exists():
@@ -224,21 +245,40 @@ def _render_entry(
         np.save(out_dir / f"cam_ex_{data_id}.npy", cam_ex_h)
 
         if rgb is not None:
-            np.save(out_dir / f"rgb_{data_id}.npy", rgb[b].detach().cpu().numpy().astype(np.float32))
+            np.save(
+                out_dir / f"rgb_{data_id}.npy",
+                rgb[b].detach().cpu().numpy().astype(np.float32),
+            )
 
         if bool(render_cfg["save_depth"]) and depth is not None:
-            np.save(out_dir / f"depth_{data_id}.npy", depth[b].detach().cpu().numpy().astype(np.float32))
+            np.save(
+                out_dir / f"depth_{data_id}.npy",
+                depth[b].detach().cpu().numpy().astype(np.float32),
+            )
 
-        if bool(render_cfg["save_pc"]) and all_pc_world is not None and all_pc_cam is not None and depth_mask is not None:
+        if (
+            bool(render_cfg["save_pc"])
+            and all_pc_world is not None
+            and all_pc_cam is not None
+            and depth_mask is not None
+        ):
             pc_world = all_pc_world[b, depth_mask[b]]
             pc_cam = all_pc_cam[b, depth_mask[b]]
             if pc_world.shape[0] > int(render_cfg["max_point_num"]):
-                idx_np = rng.permutation(pc_world.shape[0])[: int(render_cfg["max_point_num"])]
+                idx_np = rng.permutation(pc_world.shape[0])[
+                    : int(render_cfg["max_point_num"])
+                ]
                 idx = torch.from_numpy(idx_np).to(device=pc_world.device)
                 pc_world = pc_world[idx]
                 pc_cam = pc_cam[idx]
-            np.save(out_dir / f"partial_pc_{data_id}.npy", pc_world.detach().cpu().numpy().astype(np.float16))
-            np.save(out_dir / f"partial_pc_cam_{data_id}.npy", pc_cam.detach().cpu().numpy().astype(np.float16))
+            np.save(
+                out_dir / f"partial_pc_{data_id}.npy",
+                pc_world.detach().cpu().numpy().astype(np.float16),
+            )
+            np.save(
+                out_dir / f"partial_pc_cam_{data_id}.npy",
+                pc_cam.detach().cpu().numpy().astype(np.float16),
+            )
     save_sec = float(time.perf_counter() - save_start)
 
     return {
@@ -259,6 +299,7 @@ def _batch_worker(
     seed: int,
     verbose: bool,
 ) -> None:
+    """Render a chunk of entries on one Warp device inside one process."""
     if wp is None:
         raise RuntimeError("warp-lang is not available. Install warp-lang first.")
 
@@ -271,6 +312,8 @@ def _batch_worker(
         tile_height=int(render_cfg["tile_height"]),
     )
 
+    # Each worker owns one renderer instance on one device and reuses it across
+    # all entries in its assigned chunk.
     with wp.ScopedDevice(device):
         try:
             renderer = WarpPointCloudRenderer(
@@ -290,10 +333,13 @@ def _batch_worker(
             ) from exc
 
         for entry in entries:
-            _render_entry(renderer=renderer, entry=entry, render_cfg=render_cfg, seed=seed)
+            _render_entry(
+                renderer=renderer, entry=entry, render_cfg=render_cfg, seed=seed
+            )
 
 
 def _split_entries(entries: List[Dict], parts: int) -> List[List[Dict]]:
+    """Distribute entries round-robin so worker chunks stay roughly balanced."""
     if parts <= 1:
         return [entries]
     chunks = [[] for _ in range(parts)]
@@ -303,14 +349,36 @@ def _split_entries(entries: List[Dict], parts: int) -> List[List[Dict]]:
 
 
 def main() -> None:
+    """Render partial point clouds for selected objdata entries with Warp.
+
+    High-level flow:
+    1. load and validate the asset config plus warp_render subtree
+    2. build the filtered DatasetObjects view used as the render worklist
+    3. expand configured devices into worker slots and split entries by worker
+    4. spawn one process per worker and render each chunk in parallel
+    """
     total_start = time.perf_counter()
-    parser = argparse.ArgumentParser(description="Render partial point clouds with NVIDIA Warp for each object-scale entry.")
+    parser = argparse.ArgumentParser(
+        description="Render partial point clouds with NVIDIA Warp for each object-scale entry."
+    )
     parser.add_argument("-c", "--config", type=str, default=DEFAULT_ASSET_CONFIG_PATH)
     parser.add_argument("-i", "--obj-id", type=int, default=None)
     parser.add_argument("-k", "--obj-key", type=str, default=None)
-    parser.add_argument("-j", "--max-parallel", type=int, default=None, help="Limit worker process count.")
-    parser.add_argument("--gpu-lst", type=str, default=None, help="Override gpu list, e.g. '0,1'.")
-    parser.add_argument("--force", action="store_true", help="Disable skip_existing and re-render outputs.")
+    parser.add_argument(
+        "-j",
+        "--max-parallel",
+        type=int,
+        default=None,
+        help="Limit worker process count.",
+    )
+    parser.add_argument(
+        "--gpu-lst", type=str, default=None, help="Override gpu list, e.g. '0,1'."
+    )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Disable skip_existing and re-render outputs.",
+    )
     parser.add_argument("-v", "--verbose", action="store_true")
     args = parser.parse_args()
 
@@ -323,11 +391,13 @@ def main() -> None:
 
     if args.gpu_lst:
         render_cfg = dict(render_cfg)
-        render_cfg["gpu_lst"] = [_parse_device_token(x) for x in args.gpu_lst.split(",") if x.strip()]
+        render_cfg["gpu_lst"] = [
+            _parse_device_token(x) for x in args.gpu_lst.split(",") if x.strip()
+        ]
 
-    objdata_tag = objdata_tag_from_config(cfg, args.config)
+    objdata_tag = objdata_tag_cfg(cfg, args.config)
     selected_object_names = None
-    selected_scales = asset_scales_from_config(cfg)
+    selected_scales = data_asset_scales_cfg(cfg)
     if args.obj_key:
         object_name, parsed_scale = parse_object_scale_key(args.obj_key)
         selected_object_names = [object_name]
@@ -340,8 +410,8 @@ def main() -> None:
             scales=selected_scales,
             object_names=selected_object_names,
             objdata_tag=objdata_tag,
-            generated_dataset_root=generated_dataset_root_from_config(cfg),
-            verbose=data_verbose_from_config(cfg),
+            generated_dataset_root=data_generated_dataset_root_cfg(cfg),
+            verbose=data_verbose_cfg(cfg),
         )
     ds_sec = float(time.perf_counter() - ds_start)
 
@@ -358,14 +428,20 @@ def main() -> None:
         print("No object-scale entries to render.")
         return
 
+    # Worker topology is determined from the configured devices and the
+    # thread-per-gpu multiplier, then optionally truncated by --max-parallel.
     configured_devices = _parse_device_list(list(render_cfg["gpu_lst"]))
     _ensure_devices_available(configured_devices)
 
-    worker_devices: List[Union[str, int]] = configured_devices * int(render_cfg["thread_per_gpu"])
+    worker_devices: List[Union[str, int]] = configured_devices * int(
+        render_cfg["thread_per_gpu"]
+    )
     if args.max_parallel is not None:
         worker_devices = worker_devices[: max(1, int(args.max_parallel))]
     if not worker_devices:
-        raise RuntimeError("No workers configured. Check warp_render.gpu_lst/thread_per_gpu.")
+        raise RuntimeError(
+            "No workers configured. Check warp_render.gpu_lst/thread_per_gpu."
+        )
 
     chunks = _split_entries(entries, len(worker_devices))
     worker_devices = worker_devices[: len(chunks)]
@@ -376,6 +452,8 @@ def main() -> None:
     processes: List[mp.Process] = []
     seed = int(cfg["seed"])
 
+    # Spawn one process per worker/device slot and let each worker handle its
+    # own renderer lifecycle and entry chunk.
     for worker_idx, (device_token, chunk) in enumerate(zip(worker_devices, chunks)):
         p = mp.Process(
             target=_batch_worker,
@@ -400,7 +478,9 @@ def main() -> None:
     if failed:
         raise RuntimeError("One or more warp rendering worker processes failed.")
 
-    print(f"[run_warp_render] all jobs finished total_sec={time.perf_counter() - total_start:.3f}")
+    print(
+        f"[run_warp_render] all jobs finished total_sec={time.perf_counter() - total_start:.3f}"
+    )
 
 
 if __name__ == "__main__":

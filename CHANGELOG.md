@@ -1,5 +1,19 @@
 # CHANGELOG
 
+## 2026-05-12
+
+### Changed
+- Refactored objdata preparation to use object-level shared `meshes/` and `meshes_normalized/` directories with thin per-scale asset directories, and updated downstream sampling, rendering, USD conversion, and visualization entrypoints to follow the shared-mesh layout.
+- Simplified `DatasetObjects` around the shared-mesh objdata format, removed stale per-scale mesh assumptions, and tightened helper naming and indexing behavior for current asset consumers.
+- Standardized config-access helpers in `utils/utils_file.py` around explicit `*_cfg` naming and updated run/asset/sweep entrypoints plus config files to match the new helper and `data.run_scales` conventions.
+- Expanded command/documentation coverage with `cmd.md`, refreshed README/AGENTS pipeline examples, and removed stale references to deleted visualization tooling.
+- Cleaned unused dataset helper APIs and removed dead code such as the unused `src/fc_metric.py` module.
+
+### Fixed
+- Restored `usd_convert` config loading for USD conversion entrypoints.
+- Tightened Warp render resume checks so missing camera extrinsics no longer cause false `skip_existing` hits.
+- Relaxed objdata indexing so non-USD workflows no longer require `object.urdf` to be present.
+
 ## 2026-05-03
 
 ### Added

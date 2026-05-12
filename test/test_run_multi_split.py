@@ -13,10 +13,10 @@ def _touch(path: Path) -> None:
 
 def _make_entry(dataset_dir: Path, global_id: int, object_name: str, scale_tag: str, scale: float):
     output_dir = dataset_dir / object_name / scale_tag
-    asset_dir = dataset_dir.parent / "objdata_YCB" / object_name / scale_tag
-    _touch(asset_dir / "coacd.obj")
+    object_root = dataset_dir.parent / "objdata_YCB" / object_name
+    asset_dir = object_root / scale_tag
+    _touch(object_root / "meshes_normalized" / "coacd.obj")
     _touch(asset_dir / "object.xml")
-    _touch(asset_dir / "convex_parts" / "part_000.obj")
     _touch(output_dir / "grasp.h5")
     _touch(output_dir / "grasp.npy")
     _touch(output_dir / "grasp_fail.h5")
@@ -33,8 +33,7 @@ def _make_entry(dataset_dir: Path, global_id: int, object_name: str, scale_tag: 
         "object_name": object_name,
         "asset_dir_abs": str(asset_dir),
         "output_dir_abs": str(output_dir),
-        "coacd_abs": str(asset_dir / "coacd.obj"),
-        "convex_parts_abs": [str(asset_dir / "convex_parts" / "part_000.obj")],
+        "coacd_abs": str(object_root / "meshes_normalized" / "coacd.obj"),
         "mjcf_abs": str(asset_dir / "object.xml"),
         "scale": scale,
     }
@@ -130,10 +129,10 @@ def test_empty_grasp_h5_is_filtered_after_split(tmp_path: Path):
 def test_build_split_records_respects_configured_grasp_filenames(tmp_path: Path):
     dataset_dir = tmp_path / "datasets" / "graspdata_YCB_liberhand"
     output_dir = dataset_dir / "obj_cfg" / "scale080"
-    asset_dir = dataset_dir.parent / "objdata_YCB" / "obj_cfg" / "scale080"
-    _touch(asset_dir / "coacd.obj")
+    object_root = dataset_dir.parent / "objdata_YCB" / "obj_cfg"
+    asset_dir = object_root / "scale080"
+    _touch(object_root / "meshes_normalized" / "coacd.obj")
     _touch(asset_dir / "object.xml")
-    _touch(asset_dir / "convex_parts" / "part_000.obj")
     _touch(output_dir / "custom_grasp.h5")
     _touch(output_dir / "custom_grasp.npy")
     _touch(output_dir / "custom_fail.h5")
@@ -151,8 +150,7 @@ def test_build_split_records_respects_configured_grasp_filenames(tmp_path: Path)
         "object_name": "obj_cfg",
         "asset_dir_abs": str(asset_dir),
         "output_dir_abs": str(output_dir),
-        "coacd_abs": str(asset_dir / "coacd.obj"),
-        "convex_parts_abs": [str(asset_dir / "convex_parts" / "part_000.obj")],
+        "coacd_abs": str(object_root / "meshes_normalized" / "coacd.obj"),
         "mjcf_abs": str(asset_dir / "object.xml"),
         "scale": 0.08,
     }

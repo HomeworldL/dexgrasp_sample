@@ -23,11 +23,11 @@ if str(REPO_ROOT) not in sys.path:
 from src.mj_ho import MjHO
 from src.sample import downsample_fps
 from utils.utils_file import (
-    anchor_params_from_config,
-    hand_profile_from_config,
-    hand_root_stabilization_from_config,
-    load_config,
-    object_profile_from_config,
+    hand_anchor_params_cfg,
+    hand_profile_cfg,
+    hand_root_stabilization_cfg,
+    load_run_config,
+    object_profile_cfg,
 )
 from utils.utils_sample import (
     build_pose_candidates,
@@ -36,7 +36,6 @@ from utils.utils_sample import (
     sample_frames_from_points,
 )
 from utils.utils_seed import set_seed, stable_seed
-
 
 DEFAULT_CONFIG = "configs/run_YCB_inspire_right.json"
 DEFAULT_OBJECT_SCALE_KEY = "YCB_001_chips_can__scale080"
@@ -134,7 +133,9 @@ def build_case_specs(selected_groups: list[str] | None) -> list[dict[str, Any]]:
     return specs
 
 
-def build_case_cfg(base_cfg: dict[str, Any], case_spec: dict[str, Any]) -> dict[str, Any]:
+def build_case_cfg(
+    base_cfg: dict[str, Any], case_spec: dict[str, Any]
+) -> dict[str, Any]:
     cfg = copy.deepcopy(base_cfg)
     cfg["sim_grasp"][str(case_spec["param_name"])] = case_spec["param_value"]
     cfg["sim_grasp"]["target_point_method"] = 2
@@ -171,13 +172,15 @@ def run_case_diagnostics(
     object_scale_key: str,
     candidate_limit: int,
 ) -> dict[str, Any]:
-    cfg = load_config(str(cfg_path))
+    cfg = load_run_config(str(cfg_path))
     object_name, scale = parse_object_scale_key(object_scale_key)
     hand_xml_path = cfg["hand"]["xml_path"]
     if not os.path.isabs(hand_xml_path):
         hand_xml_path = str((REPO_ROOT / hand_xml_path).resolve())
 
-    points, normals = load_global_pc_and_normals(str(asset_dir), str(cfg["sampling"]["pc_subdir"]))
+    points, normals = load_global_pc_and_normals(
+        str(asset_dir), str(cfg["sampling"]["pc_subdir"])
+    )
     set_seed(int(cfg["seed"]))
     pts_for_sim, norms_for_sim, _ = downsample_fps(
         points,
@@ -193,10 +196,10 @@ def run_case_diagnostics(
     common = dict(
         obj_info=obj_info,
         hand_xml_path=hand_xml_path,
-        anchor_params=anchor_params_from_config(cfg),
-        hand_profile=hand_profile_from_config(cfg),
-        object_profile=object_profile_from_config(cfg),
-        root_stabilization=hand_root_stabilization_from_config(cfg),
+        anchor_params=hand_anchor_params_cfg(cfg),
+        hand_profile=hand_profile_cfg(cfg),
+        object_profile=object_profile_cfg(cfg),
+        root_stabilization=hand_root_stabilization_cfg(cfg),
     )
     mjho = MjHO(**common)
     mjho._set_obj_pts_norms(pts_for_sim, norms_for_sim)
@@ -242,7 +245,9 @@ def run_case_diagnostics(
             continue
 
         qpos_squeeze = mjho_valid.build_squeeze_qpos(qpos_grasp, grip_delta=grip_delta)
-        qpos_prepared_valid = mjho_valid.build_pregrasp_qpos(qpos_squeeze, qpos_prepared[i][7:])
+        qpos_prepared_valid = mjho_valid.build_pregrasp_qpos(
+            qpos_squeeze, qpos_prepared[i][7:]
+        )
         is_valid, _, _ = mjho_valid.sim_under_extforce(
             np.asarray(qpos_squeeze, dtype=np.float32).copy(),
             np.asarray(qpos_prepared_valid, dtype=np.float32).copy(),
@@ -270,8 +275,12 @@ def run_case_diagnostics(
         "insufficient_contact": int(counts.get("insufficient_contact", 0)),
         "extforce_failure": int(counts.get("extforce_failure", 0)),
         "valid": int(counts.get("valid", 0)),
-        "valid_rate": float(counts.get("valid", 0)) / float(checked) if checked else None,
-        "no_col_rate": float(counts.get("no_collision", 0)) / float(checked) if checked else None,
+        "valid_rate": (
+            float(counts.get("valid", 0)) / float(checked) if checked else None
+        ),
+        "no_col_rate": (
+            float(counts.get("no_collision", 0)) / float(checked) if checked else None
+        ),
         "contact_mean": float(np.mean(contact_values)) if contact_values else None,
         "contact_median": float(np.median(contact_values)) if contact_values else None,
         "contact_max": int(max(contact_hist)) if contact_hist else None,
@@ -282,7 +291,12 @@ def run_case_diagnostics(
     return result
 
 
-def run_worker(args: argparse.Namespace, case_spec: dict[str, Any], cfg_path: Path, output_json: Path) -> dict[str, Any]:
+def run_worker(
+    args: argparse.Namespace,
+    case_spec: dict[str, Any],
+    cfg_path: Path,
+    output_json: Path,
+) -> dict[str, Any]:
     log_dir = Path(args.work_dir) / "logs"
     log_dir.mkdir(parents=True, exist_ok=True)
     log_path = log_dir / f"{case_spec['case']}.log"
@@ -307,7 +321,9 @@ def run_worker(args: argparse.Namespace, case_spec: dict[str, Any], cfg_path: Pa
         str(output_json),
     ]
     t0 = time.perf_counter()
-    proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    proc = subprocess.run(
+        cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True
+    )
     wall_time_sec = time.perf_counter() - t0
     log_path.write_text(proc.stdout, encoding="utf-8")
     if proc.returncode != 0:
@@ -320,7 +336,9 @@ def run_worker(args: argparse.Namespace, case_spec: dict[str, Any], cfg_path: Pa
     return record
 
 
-def load_existing_record(case_spec: dict[str, Any], output_json: Path, cfg_path: Path, work_dir: Path) -> dict[str, Any]:
+def load_existing_record(
+    case_spec: dict[str, Any], output_json: Path, cfg_path: Path, work_dir: Path
+) -> dict[str, Any]:
     if not output_json.exists():
         raise FileNotFoundError(f"Missing output json for --skip-run: {output_json}")
     record = json.loads(output_json.read_text(encoding="utf-8"))
@@ -371,7 +389,7 @@ def write_summary(work_dir: Path, records: list[dict[str, Any]]) -> None:
 
 
 def run_orchestrator(args: argparse.Namespace) -> None:
-    base_cfg = load_config(str(args.config))
+    base_cfg = load_run_config(str(args.config))
     work_dir = Path(args.work_dir).resolve()
     config_dir = work_dir / "configs"
     output_dir = work_dir / "outputs"
@@ -385,7 +403,9 @@ def run_orchestrator(args: argparse.Namespace) -> None:
         cfg_path = config_dir / f"{case_spec['case']}.json"
         save_json(cfg_path, cfg)
         case_cfg_paths[str(case_spec["case"])] = cfg_path
-        case_output_paths[str(case_spec["case"])] = output_dir / f"{case_spec['case']}.json"
+        case_output_paths[str(case_spec["case"])] = (
+            output_dir / f"{case_spec['case']}.json"
+        )
 
     records: list[dict[str, Any]] = []
     if args.skip_run:
@@ -433,7 +453,9 @@ def run_orchestrator(args: argparse.Namespace) -> None:
 
 def run_case_entry(args: argparse.Namespace) -> None:
     if not args.run_case_config or not args.output_json:
-        raise ValueError("--run-case-config and --output-json are required in worker mode.")
+        raise ValueError(
+            "--run-case-config and --output-json are required in worker mode."
+        )
     cfg_path = Path(args.run_case_config).resolve()
     asset_dir = Path(args.asset_dir).resolve()
     result = run_case_diagnostics(
@@ -442,7 +464,7 @@ def run_case_entry(args: argparse.Namespace) -> None:
         object_scale_key=str(args.object_scale_key),
         candidate_limit=int(args.candidate_limit),
     )
-    cfg = load_config(str(cfg_path))
+    cfg = load_run_config(str(cfg_path))
     case_name = cfg_path.stem
     param_name = param_name_from_case_name(case_name)
     result.update(

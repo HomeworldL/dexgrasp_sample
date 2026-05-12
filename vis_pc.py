@@ -14,13 +14,13 @@ from scipy.spatial.transform import Rotation as R
 from src.dataset_objects import DatasetObjects
 from utils.utils_file import (
     DEFAULT_RUN_CONFIG_PATH,
-    data_verbose_from_config,
-    generated_dataset_root_from_config,
-    graspdata_tag_from_config,
-    load_config,
-    objdata_tag_from_config,
-    run_scales_from_config,
-    use_native_asset_from_config,
+    data_generated_dataset_root_cfg,
+    data_run_scales_cfg,
+    data_use_native_asset_cfg,
+    data_verbose_cfg,
+    graspdata_tag_cfg,
+    load_run_config,
+    objdata_tag_cfg,
 )
 from utils.utils_vis import generate_ncolors, visualize_with_viser
 
@@ -57,7 +57,9 @@ def _cam_ex_to_wxyz_pose(cam_ex: np.ndarray) -> np.ndarray:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Visualize saved Warp partial point clouds for one object-scale entry.")
+    parser = argparse.ArgumentParser(
+        description="Visualize saved Warp partial point clouds for one object-scale entry."
+    )
     parser.add_argument("-c", "--config", type=str, default=DEFAULT_RUN_CONFIG_PATH)
     parser.add_argument("-i", "--obj-id", type=int, default=None)
     parser.add_argument("-k", "--obj-key", type=str, default=None)
@@ -92,14 +94,14 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    cfg = load_config(args.config)
+    cfg = load_run_config(args.config)
     ds = DatasetObjects(
-        scales=run_scales_from_config(cfg),
-        objdata_tag=objdata_tag_from_config(cfg, args.config),
-        include_native=use_native_asset_from_config(cfg),
-        graspdata_tag=graspdata_tag_from_config(cfg, args.config),
-        generated_dataset_root=generated_dataset_root_from_config(cfg),
-        verbose=data_verbose_from_config(cfg),
+        scales=data_run_scales_cfg(cfg),
+        objdata_tag=objdata_tag_cfg(cfg, args.config),
+        include_native=data_use_native_asset_cfg(cfg),
+        graspdata_tag=graspdata_tag_cfg(cfg, args.config),
+        generated_dataset_root=data_generated_dataset_root_cfg(cfg),
+        verbose=data_verbose_cfg(cfg),
     )
 
     if args.obj_key:
@@ -119,7 +121,9 @@ def main() -> None:
         raise FileNotFoundError(f"Global point cloud not found: {global_pc_path}")
     global_pc = np.asarray(np.load(global_pc_path, allow_pickle=True), dtype=np.float32)
     if global_pc.ndim != 2 or global_pc.shape[1] != 3:
-        raise ValueError(f"Invalid global point cloud shape in {global_pc_path}: {global_pc.shape}")
+        raise ValueError(
+            f"Invalid global point cloud shape in {global_pc_path}: {global_pc.shape}"
+        )
 
     prefix = "partial_pc_cam_" if args.coord == "cam" else "partial_pc_"
     pc_files = sorted(
@@ -138,7 +142,9 @@ def main() -> None:
 
     colors = generate_ncolors(len(selected))
     pointclouds: Dict[str, tuple] = {}
-    global_cols = np.tile(np.array([[180, 180, 180]], dtype=np.uint8), (global_pc.shape[0], 1))
+    global_cols = np.tile(
+        np.array([[180, 180, 180]], dtype=np.uint8), (global_pc.shape[0], 1)
+    )
     pointclouds["global_pc"] = {
         "points": global_pc,
         "colors": global_cols,
@@ -148,14 +154,16 @@ def main() -> None:
     for i, vid in enumerate(selected):
         pts = np.asarray(np.load(pc_files[vid], allow_pickle=True), dtype=np.float32)
         if pts.ndim != 2 or pts.shape[1] != 3:
-            raise ValueError(f"Invalid point cloud shape in {pc_files[vid]}: {pts.shape}")
+            raise ValueError(
+                f"Invalid point cloud shape in {pc_files[vid]}: {pts.shape}"
+            )
         print(f"[vis_pc] view={vid:02d} shape={pts.shape} file={pc_files[vid].name}")
         cols = np.tile(colors[i : i + 1], (pts.shape[0], 1))
         pointclouds[f"partial_pc_{vid:02d}"] = (pts, cols)
 
     meshes = {}
     if not args.hide_mesh:
-        meshes["obj_coacd"] = ds.load_mesh(info["coacd_abs"])
+        meshes["obj_coacd"] = ds.load_entry_mesh(info, kind="coacd", apply_scale=True)
 
     frames = None
     if args.show_cam_frames:
@@ -163,7 +171,9 @@ def main() -> None:
         for vid in selected:
             cam_path = pc_dir / f"cam_ex_{vid:02d}.npy"
             if cam_path.exists():
-                frame_list.append(_cam_ex_to_wxyz_pose(np.load(cam_path, allow_pickle=True)))
+                frame_list.append(
+                    _cam_ex_to_wxyz_pose(np.load(cam_path, allow_pickle=True))
+                )
         if frame_list:
             frames = np.stack(frame_list, axis=0)
 
@@ -172,7 +182,9 @@ def main() -> None:
         f"pc_dir={pc_dir} coord={args.coord} views={selected} "
         f"global_frame=world"
     )
-    visualize_with_viser(meshes=meshes, pointclouds=pointclouds, frames=frames, blocking=True)
+    visualize_with_viser(
+        meshes=meshes, pointclouds=pointclouds, frames=frames, blocking=True
+    )
 
 
 if __name__ == "__main__":

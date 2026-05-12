@@ -15,14 +15,14 @@ from src.dataset_objects import DatasetObjects
 from utils.utils_file import (
     DEFAULT_RUN_CONFIG_PATH,
     build_logs_dir,
-    data_verbose_from_config,
-    generated_dataset_root_from_config,
-    graspdata_tag_from_config,
-    load_config,
-    objdata_tag_from_config,
-    run_scales_from_config,
+    data_generated_dataset_root_cfg,
+    data_run_scales_cfg,
+    data_use_native_asset_cfg,
+    data_verbose_cfg,
+    graspdata_tag_cfg,
+    load_run_config,
+    objdata_tag_cfg,
     safe_filename,
-    use_native_asset_from_config,
 )
 from utils.utils_sample import global_pc_exists, grasp_outputs_exist
 
@@ -31,9 +31,18 @@ _RUN_PROCS_LOCK = threading.Lock()
 
 
 def parse_args():
-    p = argparse.ArgumentParser(description="Run run_mjw.py for all object-scale entries in parallel.")
-    p.add_argument("-j", "--max-parallel", type=int, default=4, help="最大并行进程数（默认 4）")
-    p.add_argument("--script", type=str, default="run_mjw.py", help="要调用的脚本（默认 run_mjw.py）")
+    p = argparse.ArgumentParser(
+        description="Run run_mjw.py for all object-scale entries in parallel."
+    )
+    p.add_argument(
+        "-j", "--max-parallel", type=int, default=4, help="最大并行进程数（默认 4）"
+    )
+    p.add_argument(
+        "--script",
+        type=str,
+        default="run_mjw.py",
+        help="要调用的脚本（默认 run_mjw.py）",
+    )
     p.add_argument(
         "-c",
         "--config",
@@ -41,8 +50,12 @@ def parse_args():
         default=DEFAULT_RUN_CONFIG_PATH,
         help="运行配置 JSON（默认 configs/run_YCB_liberhand_right.json）",
     )
-    p.add_argument("--force", action="store_true", help="即使已存在配置指定的抓取输出也强制重跑")
-    p.add_argument("-v", "--verbose", action="store_true", help="仅透传详细日志给子进程 run_mjw.py")
+    p.add_argument(
+        "--force", action="store_true", help="即使已存在配置指定的抓取输出也强制重跑"
+    )
+    p.add_argument(
+        "-v", "--verbose", action="store_true", help="仅透传详细日志给子进程 run_mjw.py"
+    )
     p.add_argument("--batch-size", type=int, default=512)
     p.add_argument("--device", type=str, default="cuda:0")
     p.add_argument("--nconmax", type=int, default=32)
@@ -50,6 +63,7 @@ def parse_args():
     p.add_argument("--njmax", type=int, default=None)
     p.add_argument("--ccd-iterations", type=int, default=200)
     return p.parse_args()
+
 
 def run_one(
     entry: Dict,
@@ -130,18 +144,18 @@ def main():
     print(f"Time Stamp: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}")
     print("Discovering dataset object-scale entries...")
 
-    cfg = load_config(args.config)
-    objdata_tag = objdata_tag_from_config(cfg, args.config)
-    graspdata_tag = graspdata_tag_from_config(cfg, args.config)
+    cfg = load_run_config(args.config)
+    objdata_tag = objdata_tag_cfg(cfg, args.config)
+    graspdata_tag = graspdata_tag_cfg(cfg, args.config)
     logs_dir = build_logs_dir(args.script, graspdata_tag)
     logs_dir.mkdir(parents=True, exist_ok=True)
     ds = DatasetObjects(
-        scales=run_scales_from_config(cfg),
+        scales=data_run_scales_cfg(cfg),
         objdata_tag=objdata_tag,
-        include_native=use_native_asset_from_config(cfg),
+        include_native=data_use_native_asset_cfg(cfg),
         graspdata_tag=graspdata_tag,
-        generated_dataset_root=generated_dataset_root_from_config(cfg),
-        verbose=data_verbose_from_config(cfg),
+        generated_dataset_root=data_generated_dataset_root_cfg(cfg),
+        verbose=data_verbose_cfg(cfg),
     )
     entries = sorted(ds.get_entries(), key=lambda it: int(it["global_id"]))
     if not entries:

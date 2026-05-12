@@ -28,6 +28,7 @@ except Exception as exc:  # pragma: no cover - depends on runtime install.
     ) from exc
 
 
+from src.mj_ho import _normalize_friction_coef
 from utils.utils_file import resolve_object_asset_name
 
 
@@ -97,6 +98,7 @@ class MjWarpHO:
             raise ValueError("object_profile must be provided explicitly.")
         self.hand_profile = dict(hand_profile)
         self.object_profile = dict(object_profile)
+        self.hand_actuation_profile = self._read_hand_actuation_profile(self.hand_profile)
 
         self.spec = self._add_hand(self.hand_xml_path)
         self._add_object(self.obj_info, fixed=self.object_fixed)
@@ -115,7 +117,7 @@ class MjWarpHO:
         self.nq_hand = self.nq - 7 if not self.object_fixed else self.nq
         ctrl_joint_indices = np.asarray(
             self.hand_profile["ctrl_joint_indices"],
-            dtype=np.int32,
+            dtype=int,
         ).reshape(-1)
         if ctrl_joint_indices.size <= 0:
             raise ValueError("hand.profile.ctrl_joint_indices must be non-empty.")
@@ -175,26 +177,44 @@ class MjWarpHO:
         self._reset_mask_host = np.zeros((self.nworld,), dtype=bool)
 
         self.anchor_body_ids = []
-        self.anchor_weights = np.zeros((0,), dtype=np.float32)
+        self.anchor_weights = np.zeros((0,), dtype=float)
+        self.anchor_plane_axes = np.zeros((0, 3), dtype=float)
+        self.n_anchors = 0
         if self.anchor_params:
             anchor_body_names = list(self.anchor_params.keys())
+            weights: List[float] = []
+            axes: List[np.ndarray] = []
+            axis_table = {
+                "X": np.array([1.0, 0.0, 0.0], dtype=float),
+                "-X": np.array([-1.0, 0.0, 0.0], dtype=float),
+                "Y": np.array([0.0, 1.0, 0.0], dtype=float),
+                "-Y": np.array([0.0, -1.0, 0.0], dtype=float),
+                "Z": np.array([0.0, 0.0, 1.0], dtype=float),
+                "-Z": np.array([0.0, 0.0, -1.0], dtype=float),
+            }
+            for body_name in anchor_body_names:
+                value = self.anchor_params[body_name]
+                if isinstance(value, dict):
+                    weight = float(value["weight"])
+                    axis_key = str(value["axis"]).strip().upper()
+                else:
+                    weight = float(value)
+                    axis_key = "Z"
+                if axis_key not in axis_table:
+                    raise ValueError(
+                        f"hand.anchor_params['{body_name}'].axis must be one of "
+                        f"{sorted(axis_table.keys())}, got '{axis_key}'."
+                    )
+                weights.append(weight)
+                axes.append(axis_table[axis_key].copy())
+            self.anchor_weights = np.asarray(weights, dtype=float)
+            self.anchor_plane_axes = np.asarray(axes, dtype=float)
             for body_name in anchor_body_names:
                 if body_name not in self.body_name_to_id:
                     raise ValueError(f"Body name '{body_name}' not found in MJWarp model.")
                 self.anchor_body_ids.append(int(self.body_name_to_id[body_name]))
-            anchor_weights: List[float] = []
-            for name in anchor_body_names:
-                value = self.anchor_params[name]
-                if isinstance(value, dict):
-                    anchor_weights.append(float(value["weight"]))
-                else:
-                    anchor_weights.append(float(value))
-            self.anchor_weights = np.asarray(
-                anchor_weights,
-                dtype=np.float32,
-            )
+            self.n_anchors = len(self.anchor_body_ids)
         self.anchor_body_ids = np.asarray(self.anchor_body_ids, dtype=np.int32)
-        self.n_anchors = int(self.anchor_body_ids.shape[0])
 
         self.obj_pts = None
         self.obj_norms = None
@@ -215,20 +235,62 @@ class MjWarpHO:
     def _add_hand(self, hand_xml_path: str) -> mujoco.MjSpec:
         hand_spec = mujoco.MjSpec.from_file(hand_xml_path)
         hand_spec.meshdir = os.path.dirname(hand_xml_path)
+        self._apply_hand_actuation_profile(hand_spec)
         hand_spec.option.cone = mujoco.mjtCone.mjCONE_ELLIPTIC
         hand_spec.option.impratio = 10
         for geom in hand_spec.geoms:
             self._apply_geom_profile(geom, self.hand_profile)
         return hand_spec
 
+    @staticmethod
+    def _read_hand_actuation_profile(profile: Dict) -> Dict[str, Optional[float]]:
+        out: Dict[str, Optional[float]] = {
+            "kp": None,
+            "forcerange": None,
+            "actuatorfrcrange": None,
+        }
+        for key in out.keys():
+            if key not in profile:
+                continue
+            value = float(profile[key])
+            if (not np.isfinite(value)) or value <= 0.0:
+                raise ValueError(f"hand.profile.{key} must be finite and > 0 when provided.")
+            out[key] = value
+        return out
+
+    def _apply_hand_actuation_profile(self, hand_spec: mujoco.MjSpec) -> None:
+        kp = self.hand_actuation_profile["kp"]
+        actuator_force_abs = self.hand_actuation_profile["forcerange"]
+        joint_actuator_force_abs = self.hand_actuation_profile["actuatorfrcrange"]
+
+        if kp is not None or actuator_force_abs is not None:
+            for actuator in hand_spec.actuators:
+                if kp is not None:
+                    actuator.gainprm[0] = float(kp)
+                    actuator.biasprm[1] = -float(kp)
+                if actuator_force_abs is not None:
+                    actuator.forcerange[:] = np.asarray(
+                        [-float(actuator_force_abs), float(actuator_force_abs)],
+                        dtype=float,
+                    )
+                    actuator.forcelimited = mujoco.mjtLimited.mjLIMITED_TRUE
+
+        if joint_actuator_force_abs is not None:
+            force_range = np.asarray(
+                [-float(joint_actuator_force_abs), float(joint_actuator_force_abs)],
+                dtype=float,
+            )
+            for joint in hand_spec.joints:
+                joint_name = str(getattr(joint, "name", "") or "")
+                if not joint_name or joint_name == "world_to_hand":
+                    continue
+                joint.actfrcrange[:] = force_range
+                joint.actfrclimited = mujoco.mjtLimited.mjLIMITED_TRUE
+
     def _apply_geom_profile(self, geom, profile: Dict) -> None:
-        friction = np.asarray(profile["friction_coef"], dtype=float).reshape(-1)
-        if friction.size not in {1, 2, 3}:
-            raise ValueError(f"friction_coef must have length 1, 2, or 3, got {friction.size}.")
-        if friction.size == 1:
-            friction = np.asarray([float(friction[0]), float(friction[0])], dtype=float)
+        friction, condim = _normalize_friction_coef(profile["friction_coef"])
         geom.friction[: friction.shape[0]] = friction
-        geom.condim = 6 if friction.shape[0] == 3 else 4
+        geom.condim = condim
         geom.solimp[:5] = np.asarray(profile["solimp"], dtype=float)
         geom.solref[:2] = np.asarray(profile["solref"], dtype=float)
 

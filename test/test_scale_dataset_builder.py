@@ -32,7 +32,10 @@ def test_build_scale_assets(tmp_path: Path):
     assert rec["scale_tag"] == "scale080"
     assert Path(rec["coacd_abs"]).exists()
     assert Path(rec["xml_abs"]).exists()
-    assert len(rec["convex_parts_abs"]) == 1
+    shared_root = Path(rec["xml_abs"]).resolve().parent.parent / "meshes_normalized"
+    assert (shared_root / "coacd.obj").exists()
+    assert (shared_root / "manifold.obj").exists()
+    assert len(list((shared_root / "convex_parts").glob("*.obj"))) == 1
 
     txt = Path(rec["xml_abs"]).read_text(encoding="utf-8")
     assert "<freejoint" in txt
@@ -40,6 +43,7 @@ def test_build_scale_assets(tmp_path: Path):
     assert 'model="obj_a_scale080"' in txt
     assert 'body name="obj_a_scale080"' in txt
     assert 'mesh name="obj_a_scale080_convex_0"' in txt
+    assert 'scale="0.0800000000 0.0800000000 0.0800000000"' in txt
     assert 'name="obj_a_scale080_joint"' in txt
 
 

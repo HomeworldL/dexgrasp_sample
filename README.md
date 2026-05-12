@@ -623,12 +623,6 @@ Saved partial point clouds:
 python vis_pc.py -c configs/run_YCB_liberhand_right.json -i 0 --show-cam-frames
 ```
 
-Plot grasp pose distributions:
-
-```bash
-PYTHONPATH=. python tools/visualization/plot_grasp_pose_plotly.py -c configs/run_YCB_liberhand_right.json -i 0
-```
-
 ## Main Files
 
 ### Entrypoints

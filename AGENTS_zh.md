@@ -67,7 +67,7 @@
 - `print_dataset_objects.py` 应作为检查索引结果和 scale/native 包含情况的首选工具。
 
 ## 缩放策略
-- 所有数据集统一使用配置中的固定 scale 列表（`data.scales`）。
+- 所有数据集统一使用配置中的固定 scale 列表（`data.run_scales`）。
 - 当前主线中 liberhand 配置的默认列表为：
   - `[0.08, 0.10, 0.12, 0.14, 0.16]`
 - scale 粒度为 object-scale 扁平索引（每个物体的每个 scale 各对应一项）。

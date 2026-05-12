@@ -1,9 +1,9 @@
 import pytest
 
-from utils.utils_file import hand_root_stabilization_from_config
+from utils.utils_file import hand_root_stabilization_cfg
 
 
-def test_hand_root_stabilization_from_config_parses_valid_block():
+def test_hand_root_stabilization_parses_valid_block():
     cfg = {
         "hand": {
             "root_stabilization": {
@@ -12,19 +12,19 @@ def test_hand_root_stabilization_from_config_parses_valid_block():
             }
         }
     }
-    out = hand_root_stabilization_from_config(cfg)
+    out = hand_root_stabilization_cfg(cfg)
     assert out == {
         "root_body_name": "hand_right_palm",
         "root_scale": 1e9,
     }
 
 
-def test_hand_root_stabilization_from_config_returns_none_when_absent():
+def test_hand_root_stabilization_returns_none_when_absent():
     cfg = {"hand": {}}
-    assert hand_root_stabilization_from_config(cfg) is None
+    assert hand_root_stabilization_cfg(cfg) is None
 
 
-def test_hand_root_stabilization_from_config_rejects_invalid_values():
+def test_hand_root_stabilization_rejects_invalid_values():
     cfg_bad_scale = {
         "hand": {
             "root_stabilization": {
@@ -34,7 +34,7 @@ def test_hand_root_stabilization_from_config_rejects_invalid_values():
         }
     }
     with pytest.raises(ValueError):
-        hand_root_stabilization_from_config(cfg_bad_scale)
+        hand_root_stabilization_cfg(cfg_bad_scale)
 
     cfg_bad_name = {
         "hand": {
@@ -45,4 +45,4 @@ def test_hand_root_stabilization_from_config_rejects_invalid_values():
         }
     }
     with pytest.raises(ValueError):
-        hand_root_stabilization_from_config(cfg_bad_name)
+        hand_root_stabilization_cfg(cfg_bad_name)

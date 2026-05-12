@@ -21,7 +21,7 @@ if str(REPO_ROOT) not in sys.path:
 from scripts.sweep_utils import SUMMARY_RE, load_cfg, parse_summary, save_cfg
 
 from src.mj_ho import MjHO
-from utils.utils_file import hand_root_stabilization_from_config
+from utils.utils_file import hand_root_stabilization_cfg
 
 BASE_CFG = "configs/run_YCB_liberhand_right.json"
 OBJECT_SCALE_KEY = "YCB_013_apple__scale080"
@@ -45,10 +45,19 @@ FRICTION_CASES = {
     "fric_0.7": [0.7, 0.01],
 }
 
+
 def parse_args() -> argparse.Namespace:
-    p = argparse.ArgumentParser(description="Sweep friction_coef with fixed solimp/solref.")
-    p.add_argument("--skip-run", action="store_true", help="Skip run.py and only recompute summary from existing logs/outputs.")
-    p.add_argument("--no-depth", action="store_true", help="Disable penetration depth stats.")
+    p = argparse.ArgumentParser(
+        description="Sweep friction_coef with fixed solimp/solref."
+    )
+    p.add_argument(
+        "--skip-run",
+        action="store_true",
+        help="Skip run.py and only recompute summary from existing logs/outputs.",
+    )
+    p.add_argument(
+        "--no-depth", action="store_true", help="Disable penetration depth stats."
+    )
     p.add_argument("--max-workers", type=int, default=5, help="Parallel case workers.")
     return p.parse_args()
 
@@ -97,7 +106,9 @@ def _summarize_depths(all_depths: list[np.ndarray], per_grasp_max: list[float]) 
     return out
 
 
-def compute_depth_metrics(cfg_path: Path, output_dir: Path, object_name: str, object_xml: Path) -> dict:
+def compute_depth_metrics(
+    cfg_path: Path, output_dir: Path, object_name: str, object_xml: Path
+) -> dict:
     grasp_h5 = output_dir / "grasp.h5"
     if not grasp_h5.exists():
         return {
@@ -129,7 +140,7 @@ def compute_depth_metrics(cfg_path: Path, output_dir: Path, object_name: str, ob
         anchor_params=dict(cfg["hand"]["anchor_params"]),
         hand_profile=dict(cfg["hand"]["profile"]),
         object_profile=dict(cfg["profile_object"]),
-        root_stabilization=hand_root_stabilization_from_config(cfg),
+        root_stabilization=hand_root_stabilization_cfg(cfg),
         object_fixed=True,
     )
 
@@ -185,7 +196,9 @@ def run_case(case_name: str, cfg_path: Path) -> dict:
     ]
 
     t0 = time.perf_counter()
-    proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    proc = subprocess.run(
+        cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True
+    )
     wall = time.perf_counter() - t0
     log_path.write_text(proc.stdout, encoding="utf-8")
 
@@ -253,7 +266,10 @@ def main() -> None:
     else:
         workers = max(1, min(int(args.max_workers), len(cfg_paths)))
         with ThreadPoolExecutor(max_workers=workers) as ex:
-            futs = {ex.submit(run_case, name, path): name for name, path in cfg_paths.items()}
+            futs = {
+                ex.submit(run_case, name, path): name
+                for name, path in cfg_paths.items()
+            }
             for fut in as_completed(futs):
                 rec = fut.result()
                 print(
@@ -279,7 +295,9 @@ def main() -> None:
 
     summary_json = WORK_DIR / "summary.json"
     summary_csv = WORK_DIR / "summary.csv"
-    summary_json.write_text(json.dumps(records, ensure_ascii=False, indent=2), encoding="utf-8")
+    summary_json.write_text(
+        json.dumps(records, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
 
     fields = [
         "case",

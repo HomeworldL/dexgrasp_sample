@@ -54,7 +54,7 @@ def _build_objdata_assets(tmp_path: Path, dataset_name: str, obj_name: str, scal
                 "object_id": obj_name,
                 "name": obj_name,
                 "process_status": "success",
-                "assets": assets,
+                "scales_available": [asset["scale_tag"] for asset in assets],
             }
         ],
     }
@@ -93,7 +93,7 @@ def test_sample_surface_mesh_with_coacd_path(tmp_path: Path):
     )
     info = ds.get_obj_info_by_index(0)
 
-    pts, norms = ds.sample_surface_o3d(info["coacd_abs"], n_points=128, method="poisson")
+    pts, norms = ds.sample_surface_for_entry(info, n_points=128, method="poisson")
     assert pts.shape == (128, 3)
     assert norms.shape == (128, 3)
 

@@ -5,28 +5,31 @@ from typing import Dict, Optional
 
 import numpy as np
 import torch
+from scipy.spatial.transform import Rotation as R
 
 from src.dataset_objects import DatasetObjects
 from src.mjw_ho import MjWarpHO
 from src.sample import sample_grasp_frames
 from utils.utils_file import (
     DEFAULT_RUN_CONFIG_PATH,
-    data_verbose_from_config,
-    generated_dataset_root_from_config,
-    graspdata_tag_from_config,
-    hand_profile_from_config,
-    load_config,
-    object_profile_from_config,
-    objdata_tag_from_config,
-    run_scales_from_config,
-    anchor_params_from_config,
-    use_native_asset_from_config,
+    data_generated_dataset_root_cfg,
+    data_run_scales_cfg,
+    data_use_native_asset_cfg,
+    data_verbose_cfg,
+    graspdata_tag_cfg,
+    hand_anchor_params_cfg,
+    hand_profile_cfg,
+    load_run_config,
+    object_profile_cfg,
+    objdata_tag_cfg,
 )
 from utils.utils_sample import build_pose_candidates
 from utils.utils_seed import set_seed
 
 
-def sample_frames_from_points(cfg: Dict, pts: np.ndarray, norms: np.ndarray) -> np.ndarray:
+def sample_frames_from_points(
+    cfg: Dict, pts: np.ndarray, norms: np.ndarray
+) -> np.ndarray:
     sampling_cfg = cfg["sampling"]
     transforms = sample_grasp_frames(
         pts,
@@ -69,7 +72,9 @@ def make_qpos_triplets(cfg: Dict, pose: np.ndarray):
     return qpos_init_sample, qpos_approach_sample, qpos_prepared_sample
 
 
-def resolve_object_info(ds: DatasetObjects, obj_id: Optional[int], obj_key: Optional[str]) -> Dict:
+def resolve_object_info(
+    ds: DatasetObjects, obj_id: Optional[int], obj_key: Optional[str]
+) -> Dict:
     if obj_key:
         return ds.get_obj_info_by_scale_key(obj_key)
     if obj_id is not None:
@@ -95,26 +100,30 @@ def main() -> None:
     parser.add_argument("-v", "--verbose", action="store_true")
     args = parser.parse_args()
 
-    cfg = load_config(args.config)
+    cfg = load_run_config(args.config)
     set_seed(int(cfg["seed"]))
 
     ds = DatasetObjects(
-        scales=run_scales_from_config(cfg),
-        objdata_tag=objdata_tag_from_config(cfg, args.config),
-        include_native=use_native_asset_from_config(cfg),
-        graspdata_tag=graspdata_tag_from_config(cfg, args.config),
-        generated_dataset_root=generated_dataset_root_from_config(cfg),
-        verbose=data_verbose_from_config(cfg),
+        scales=data_run_scales_cfg(cfg),
+        objdata_tag=objdata_tag_cfg(cfg, args.config),
+        include_native=data_use_native_asset_cfg(cfg),
+        graspdata_tag=graspdata_tag_cfg(cfg, args.config),
+        generated_dataset_root=data_generated_dataset_root_cfg(cfg),
+        verbose=data_verbose_cfg(cfg),
     )
     info = resolve_object_info(ds, args.obj_id, args.obj_key)
+    scale_text = "native" if info["scale"] is None else f"{float(info['scale']):.3f}"
     print(
         f"[run_collision] object={info['object_name']} global_id={info['global_id']} "
-        f"scale={info['scale']:.3f}"
+        f"scale={scale_text}"
     )
 
-    pts, norms = ds.sample_surface_o3d(
-        info["coacd_abs"],
-        n_points=min(int(args.n_points), int(cfg.get("sampling", {}).get("n_points", args.n_points))),
+    pts, norms = ds.sample_surface_for_entry(
+        info,
+        n_points=min(
+            int(args.n_points),
+            int(cfg.get("sampling", {}).get("n_points", args.n_points)),
+        ),
         method="poisson",
     )
     transforms_np = sample_frames_from_points(cfg, pts, norms)
@@ -130,14 +139,18 @@ def main() -> None:
     qpos_init = qpos_init[:max_candidates]
 
     hand_xml_path = os.path.abspath(cfg["hand"]["xml_path"])
-    obj_info = {"name": info["object_name"], "xml_abs": info["mjcf_abs"], "scale": float(info["scale"])}
+    obj_info = {
+        "name": info["object_name"],
+        "xml_abs": info["mjcf_abs"],
+        "scale_tag": info["scale_tag"],
+    }
     ts_backend = time.perf_counter()
     mjw_ho = MjWarpHO(
         obj_info=obj_info,
         hand_xml_path=hand_xml_path,
-        anchor_params=anchor_params_from_config(cfg),
-        hand_profile=hand_profile_from_config(cfg),
-        object_profile=object_profile_from_config(cfg),
+        anchor_params=hand_anchor_params_cfg(cfg),
+        hand_profile=hand_profile_cfg(cfg),
+        object_profile=object_profile_cfg(cfg),
         object_fixed=True,
         nworld=int(args.batch_size),
         device=str(args.device),
@@ -174,11 +187,15 @@ def main() -> None:
         batch_init = qpos_init[start:end]
 
         ts = time.perf_counter()
-        prepared_result = mjw_ho.check_contact_batch(batch_prepared, valid_count=valid_count)
+        prepared_result = mjw_ho.check_contact_batch(
+            batch_prepared, valid_count=valid_count
+        )
         t_prepared = time.perf_counter() - ts
 
         ts = time.perf_counter()
-        approach_result = mjw_ho.check_contact_batch(batch_approach, valid_count=valid_count)
+        approach_result = mjw_ho.check_contact_batch(
+            batch_approach, valid_count=valid_count
+        )
         t_approach = time.perf_counter() - ts
 
         ts = time.perf_counter()
@@ -188,7 +205,11 @@ def main() -> None:
         prepared_hits += int(prepared_result.has_contact.sum())
         approach_hits += int(approach_result.has_contact.sum())
         init_hits += int(init_result.has_contact.sum())
-        stage_clear = ~(prepared_result.has_contact | approach_result.has_contact | init_result.has_contact)
+        stage_clear = ~(
+            prepared_result.has_contact
+            | approach_result.has_contact
+            | init_result.has_contact
+        )
         fully_clear += int(stage_clear.sum())
         steady_stage_time += t_prepared + t_approach + t_init
 

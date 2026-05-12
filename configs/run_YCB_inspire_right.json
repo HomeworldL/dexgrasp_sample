@@ -6,7 +6,7 @@
     "generated_dataset_root": "datasets",
     "objdata_tag": "objdata_YCB",
     "graspdata_tag": "graspdata_YCB_inspire_right",
-    "scales": [
+    "run_scales": [
       0.08,
       0.1,
       0.12,

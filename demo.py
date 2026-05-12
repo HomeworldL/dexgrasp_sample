@@ -10,11 +10,11 @@ from src.mj_ho import MjHO
 from src.sample import downsample_fps
 from utils.utils_file import (
     DEFAULT_RUN_CONFIG_PATH,
-    hand_profile_from_config,
-    hand_root_stabilization_from_config,
-    load_config,
-    object_profile_from_config,
-    anchor_params_from_config,
+    hand_anchor_params_cfg,
+    hand_profile_cfg,
+    hand_root_stabilization_cfg,
+    load_run_config,
+    object_profile_cfg,
 )
 from utils.utils_pointcloud import sample_surface_o3d
 from utils.utils_sample import (
@@ -46,10 +46,10 @@ def run_demo(
 ) -> bool:
     object_name, _ = parse_object_scale_key(object_scale_key)
     obj_info = {"name": object_name, "xml_abs": object_mjcf_path}
-    anchor_params = anchor_params_from_config(cfg)
-    hand_profile = hand_profile_from_config(cfg)
-    object_profile = object_profile_from_config(cfg)
-    root_stabilization = hand_root_stabilization_from_config(cfg)
+    anchor_params = hand_anchor_params_cfg(cfg)
+    hand_profile = hand_profile_cfg(cfg)
+    object_profile = object_profile_cfg(cfg)
+    root_stabilization = hand_root_stabilization_cfg(cfg)
 
     mjho = MjHO(
         obj_info,
@@ -214,7 +214,7 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    cfg = load_config(args.config)
+    cfg = load_run_config(args.config)
     set_seed(int(cfg["seed"]))
     verbose = bool(args.verbose)
     total_stage_start = time.perf_counter()
@@ -225,7 +225,14 @@ def main() -> None:
     hand_xml_path = os.path.abspath(cfg["hand"]["xml_path"])
     hand_name = Path(hand_xml_path).stem
     n_points = int(cfg["sampling"]["n_points"])
-    pts, norms = sample_surface_o3d(args.coacd_path, n_points=n_points, method="poisson")
+    _, parsed_scale = parse_object_scale_key(args.object_scale_key)
+    mesh_scale = 1.0 if parsed_scale is None else float(parsed_scale)
+    pts, norms = sample_surface_o3d(
+        args.coacd_path,
+        n_points=n_points,
+        method="poisson",
+        scale=mesh_scale,
+    )
     run_demo(
         cfg=cfg,
         object_scale_key=args.object_scale_key,

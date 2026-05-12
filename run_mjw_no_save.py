@@ -5,6 +5,7 @@ from typing import Dict, Optional
 
 import numpy as np
 import torch
+from scipy.spatial.transform import Rotation as R
 from tqdm import tqdm
 
 from src.dataset_objects import DatasetObjects
@@ -12,22 +13,24 @@ from src.mjw_ho import MjWarpHO
 from src.sample import downsample_fps, sample_grasp_frames
 from utils.utils_file import (
     DEFAULT_RUN_CONFIG_PATH,
-    data_verbose_from_config,
-    generated_dataset_root_from_config,
-    graspdata_tag_from_config,
-    hand_profile_from_config,
-    load_config,
-    object_profile_from_config,
-    objdata_tag_from_config,
-    run_scales_from_config,
-    anchor_params_from_config,
-    use_native_asset_from_config,
+    data_generated_dataset_root_cfg,
+    data_run_scales_cfg,
+    data_use_native_asset_cfg,
+    data_verbose_cfg,
+    graspdata_tag_cfg,
+    hand_anchor_params_cfg,
+    hand_profile_cfg,
+    load_run_config,
+    object_profile_cfg,
+    objdata_tag_cfg,
 )
 from utils.utils_sample import build_pose_candidates
 from utils.utils_seed import set_seed
 
 
-def sample_frames_from_points(cfg: Dict, pts: np.ndarray, norms: np.ndarray) -> np.ndarray:
+def sample_frames_from_points(
+    cfg: Dict, pts: np.ndarray, norms: np.ndarray
+) -> np.ndarray:
     sampling_cfg = cfg["sampling"]
     transforms = sample_grasp_frames(
         pts,
@@ -69,7 +72,9 @@ def make_qpos_triplets(cfg: Dict, pose: np.ndarray):
     return qpos_init_sample, qpos_approach_sample, qpos_prepared_sample
 
 
-def resolve_object_info(ds: DatasetObjects, obj_id: Optional[int], obj_key: Optional[str]) -> Dict:
+def resolve_object_info(
+    ds: DatasetObjects, obj_id: Optional[int], obj_key: Optional[str]
+) -> Dict:
     if obj_key:
         return ds.get_obj_info_by_scale_key(obj_key)
     if obj_id is not None:
@@ -89,9 +94,9 @@ def build_valid_backend(
     backend = MjWarpHO(
         obj_info=obj_info,
         hand_xml_path=hand_xml_path,
-        anchor_params=anchor_params_from_config(cfg),
-        hand_profile=hand_profile_from_config(cfg),
-        object_profile=object_profile_from_config(cfg),
+        anchor_params=hand_anchor_params_cfg(cfg),
+        hand_profile=hand_profile_cfg(cfg),
+        object_profile=object_profile_cfg(cfg),
         object_fixed=False,
         nworld=int(nworld),
         device=str(args.device),
@@ -119,7 +124,16 @@ def shrink_tail_pool(
     args: argparse.Namespace,
     pts_for_sim: np.ndarray,
     norms_for_sim: np.ndarray,
-) -> tuple[MjWarpHO, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, int]:
+) -> tuple[
+    MjWarpHO,
+    np.ndarray,
+    np.ndarray,
+    np.ndarray,
+    np.ndarray,
+    np.ndarray,
+    np.ndarray,
+    int,
+]:
     new_pool_size = int(active_world_ids.size)
     next_backend = build_valid_backend(
         obj_info=obj_info,
@@ -162,7 +176,9 @@ def shrink_tail_pool(
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Run MJWarp end-to-end grasp validation without saving outputs.")
+    parser = argparse.ArgumentParser(
+        description="Run MJWarp end-to-end grasp validation without saving outputs."
+    )
     parser.add_argument("-c", "--config", type=str, default=DEFAULT_RUN_CONFIG_PATH)
     parser.add_argument("-i", "--obj-id", type=int, default=None)
     parser.add_argument("-k", "--obj-key", type=str, default=None)
@@ -176,22 +192,25 @@ def main() -> None:
     parser.add_argument("--ccd-iterations", type=int, default=200)
     args = parser.parse_args()
 
-    cfg = load_config(args.config)
+    cfg = load_run_config(args.config)
     set_seed(int(cfg["seed"]))
 
     ds = DatasetObjects(
-        scales=run_scales_from_config(cfg),
-        objdata_tag=objdata_tag_from_config(cfg, args.config),
-        include_native=use_native_asset_from_config(cfg),
-        graspdata_tag=graspdata_tag_from_config(cfg, args.config),
-        generated_dataset_root=generated_dataset_root_from_config(cfg),
-        verbose=data_verbose_from_config(cfg),
+        scales=data_run_scales_cfg(cfg),
+        objdata_tag=objdata_tag_cfg(cfg, args.config),
+        include_native=data_use_native_asset_cfg(cfg),
+        graspdata_tag=graspdata_tag_cfg(cfg, args.config),
+        generated_dataset_root=data_generated_dataset_root_cfg(cfg),
+        verbose=data_verbose_cfg(cfg),
     )
     info = resolve_object_info(ds, args.obj_id, args.obj_key)
 
-    pts, norms = ds.sample_surface_o3d(
-        info["coacd_abs"],
-        n_points=min(int(args.n_points), int(cfg.get("sampling", {}).get("n_points", args.n_points))),
+    pts, norms = ds.sample_surface_for_entry(
+        info,
+        n_points=min(
+            int(args.n_points),
+            int(cfg.get("sampling", {}).get("n_points", args.n_points)),
+        ),
         method="poisson",
     )
     # print(f"Sampled {pts.shape[0]} points and normals from object surface.")
@@ -208,7 +227,11 @@ def main() -> None:
     qpos_init = qpos_init[:max_candidates]
 
     hand_xml_path = os.path.abspath(cfg["hand"]["xml_path"])
-    obj_info = {"name": info["object_name"], "xml_abs": info["mjcf_abs"], "scale": float(info["scale"])}
+    obj_info = {
+        "name": info["object_name"],
+        "xml_abs": info["mjcf_abs"],
+        "scale_tag": info["scale_tag"],
+    }
     batch_size = int(args.batch_size)
     sim_grasp_cfg = dict(cfg.get("sim_grasp", {}))
     extforce_cfg = dict(cfg.get("extforce", {}))
@@ -233,9 +256,9 @@ def main() -> None:
     mjw_grasp = MjWarpHO(
         obj_info=obj_info,
         hand_xml_path=hand_xml_path,
-        anchor_params=anchor_params_from_config(cfg),
-        hand_profile=hand_profile_from_config(cfg),
-        object_profile=object_profile_from_config(cfg),
+        anchor_params=hand_anchor_params_cfg(cfg),
+        hand_profile=hand_profile_cfg(cfg),
+        object_profile=object_profile_cfg(cfg),
         object_fixed=True,
         nworld=batch_size,
         device=str(args.device),
@@ -269,7 +292,9 @@ def main() -> None:
     extforce_time = 0.0
 
     collision_mask = np.zeros((max_candidates,), dtype=bool)
-    pbar = tqdm(total=max_candidates, desc=f"collision-{info['object_scale_key']}", miniters=1)
+    pbar = tqdm(
+        total=max_candidates, desc=f"collision-{info['object_scale_key']}", miniters=1
+    )
     for start in range(0, max_candidates, batch_size):
         end = min(start + batch_size, max_candidates)
         valid_count = end - start
@@ -278,13 +303,21 @@ def main() -> None:
         batch_init = qpos_init[start:end]
 
         ts = time.perf_counter()
-        prepared_result = mjw_grasp.check_contact_batch(batch_prepared, valid_count=valid_count)
-        approach_result = mjw_grasp.check_contact_batch(batch_approach, valid_count=valid_count)
+        prepared_result = mjw_grasp.check_contact_batch(
+            batch_prepared, valid_count=valid_count
+        )
+        approach_result = mjw_grasp.check_contact_batch(
+            batch_approach, valid_count=valid_count
+        )
         init_result = mjw_grasp.check_contact_batch(batch_init, valid_count=valid_count)
         collision_time += time.perf_counter() - ts
         collision_batches += 1
 
-        no_col_mask = ~(prepared_result.has_contact | approach_result.has_contact | init_result.has_contact)
+        no_col_mask = ~(
+            prepared_result.has_contact
+            | approach_result.has_contact
+            | init_result.has_contact
+        )
         collision_mask[start:end] = no_col_mask
         num_no_col += int(no_col_mask.sum())
 
@@ -316,7 +349,9 @@ def main() -> None:
             )
             sim_grasp_time += time.perf_counter() - ts
             grasp_results.append(grasp_result.qpos_grasp[:valid_count].copy())
-            grasp_contact_counts.append(grasp_result.ho_contact_counts[:valid_count].copy())
+            grasp_contact_counts.append(
+                grasp_result.ho_contact_counts[:valid_count].copy()
+            )
             pbar.update(valid_count)
         pbar.close()
 
@@ -402,7 +437,9 @@ def main() -> None:
         initial_fill = min(current_pool_size, contact_ok_count)
         initial_world_ids = np.arange(initial_fill, dtype=np.int32)
         initial_candidate_ids = np.arange(initial_fill, dtype=np.int32)
-        load_candidates_into_worlds(initial_world_ids, initial_candidate_ids, reset_metrics=True)
+        load_candidates_into_worlds(
+            initial_world_ids, initial_candidate_ids, reset_metrics=True
+        )
         next_candidate = initial_fill
 
         pbar = tqdm(
@@ -447,7 +484,9 @@ def main() -> None:
                 active_world_ids = np.arange(current_pool_size, dtype=np.int32)
 
             active_force = np.zeros((active_world_ids.size, 6), dtype=np.float32)
-            active_force[:, :3] = force_dirs[world_dir_idx[active_world_ids], :3] * force_mag
+            active_force[:, :3] = (
+                force_dirs[world_dir_idx[active_world_ids], :3] * force_mag
+            )
             mjw_valid.set_object_force_to_worlds(active_world_ids, active_force)
 
             ts = time.perf_counter()
@@ -467,7 +506,11 @@ def main() -> None:
                 world_angle_delta[active_world_ids], dir_angle_delta
             )
 
-            failed_mask = (~has_contact) | (dir_pos_delta >= trans_thresh) | (dir_angle_delta >= angle_thresh)
+            failed_mask = (
+                (~has_contact)
+                | (dir_pos_delta >= trans_thresh)
+                | (dir_angle_delta >= angle_thresh)
+            )
             failed_worlds = active_world_ids[failed_mask]
             alive_worlds = active_world_ids[~failed_mask]
 
@@ -476,8 +519,12 @@ def main() -> None:
             still_running_worlds = alive_worlds[~advance_mask]
             world_chunk_idx[still_running_worlds] += 1
 
-            final_valid_worlds = dir_complete_worlds[world_dir_idx[dir_complete_worlds] >= 5]
-            next_dir_worlds = dir_complete_worlds[world_dir_idx[dir_complete_worlds] < 5]
+            final_valid_worlds = dir_complete_worlds[
+                world_dir_idx[dir_complete_worlds] >= 5
+            ]
+            next_dir_worlds = dir_complete_worlds[
+                world_dir_idx[dir_complete_worlds] < 5
+            ]
 
             if next_dir_worlds.size > 0:
                 world_dir_idx[next_dir_worlds] += 1
@@ -506,13 +553,19 @@ def main() -> None:
 
                 refill_count = 0
                 if not reached_cap:
-                    refill_count = min(int(done_worlds.size), contact_ok_count - next_candidate)
+                    refill_count = min(
+                        int(done_worlds.size), contact_ok_count - next_candidate
+                    )
                     if refill_count > 0:
                         refill_worlds = done_worlds[:refill_count]
                         refill_candidate_ids = np.arange(
-                            next_candidate, next_candidate + refill_count, dtype=np.int32
+                            next_candidate,
+                            next_candidate + refill_count,
+                            dtype=np.int32,
                         )
-                        load_candidates_into_worlds(refill_worlds, refill_candidate_ids, reset_metrics=True)
+                        load_candidates_into_worlds(
+                            refill_worlds, refill_candidate_ids, reset_metrics=True
+                        )
                         next_candidate += refill_count
 
                 free_worlds = done_worlds[refill_count:]

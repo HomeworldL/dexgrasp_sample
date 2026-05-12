@@ -67,7 +67,7 @@ Current mainline work is split into:
 - `print_dataset_objects.py` should be the first-line inspection tool for validating indexed entries and scale/native inclusion.
 
 ## Scale Policy
-- All datasets use the unified fixed scale list from config (`data.scales`).
+- All datasets use the unified fixed scale list from config (`data.run_scales`).
 - Current mainline default list for liberhand configs:
   - `[0.08, 0.10, 0.12, 0.14, 0.16]`
 - Scale granularity is object-scale flattened indexing (one entry per object per scale).

@@ -16,13 +16,14 @@ from tqdm import tqdm
 from src.scale_dataset_builder import ScaleDatasetBuilder
 from utils.utils_file import (
     DEFAULT_ASSET_CONFIG_PATH,
-    asset_scales_from_config,
-    build_native_asset_from_config,
-    generated_dataset_root_from_config,
+    data_asset_scales_cfg,
+    data_build_native_asset_cfg,
+    data_generated_dataset_root_cfg,
+    data_raw_dataset_name_cfg,
+    data_raw_dataset_root_cfg,
     load_asset_config,
-    objdata_tag_from_config,
-    raw_dataset_name_from_config,
-    raw_dataset_root_from_config,
+    objdata_tag_cfg,
+    parse_scale_tag,
 )
 from utils.utils_pointcloud import sample_surface_o3d
 from utils.utils_sample import (
@@ -36,6 +37,7 @@ from utils.utils_seed import set_seed, stable_seed
 
 
 def _to_abs_path(path_str: str) -> Path:
+    """Resolve a manifest path to an absolute filesystem path."""
     path = Path(path_str)
     if path.is_absolute():
         return path
@@ -43,6 +45,7 @@ def _to_abs_path(path_str: str) -> Path:
 
 
 def _global_pc_ready(asset_dir: str, render_subdir: str, n_points: int) -> bool:
+    """Check whether the cached global point cloud pair is complete and usable."""
     pc_path = global_pc_path(asset_dir, render_subdir)
     normals_path = global_normals_path(asset_dir, render_subdir)
     if not pc_path.exists() or not normals_path.exists():
@@ -60,8 +63,9 @@ def _global_pc_ready(asset_dir: str, render_subdir: str, n_points: int) -> bool:
 
 
 def _load_source_manifest(cfg: dict) -> tuple[Path, dict]:
-    raw_dataset_root = Path(raw_dataset_root_from_config(cfg)).resolve()
-    raw_dataset_name = raw_dataset_name_from_config(cfg)
+    """Load the raw mesh-process manifest that gates which objects are eligible."""
+    raw_dataset_root = Path(data_raw_dataset_root_cfg(cfg)).resolve()
+    raw_dataset_name = data_raw_dataset_name_cfg(cfg)
     manifest_path = raw_dataset_root / raw_dataset_name / "manifest.process_meshes.json"
     if not manifest_path.exists():
         raise FileNotFoundError(f"Manifest not found: {manifest_path}")
@@ -73,14 +77,19 @@ def _load_source_manifest(cfg: dict) -> tuple[Path, dict]:
 
 
 def _load_rebuild_tasks(cfg: dict, config_path: str) -> list[dict]:
+    """Expand the raw manifest into per-object rebuild tasks.
+
+    Each task carries the shared source mesh paths plus the scale/native policy
+    needed by the downstream asset builder.
+    """
     _, source_manifest = _load_source_manifest(cfg)
     objects = source_manifest["objects"]
 
     default_mass = float(source_manifest.get("summary", {}).get("default_mass_kg", 0.1))
-    generated_root = generated_dataset_root_from_config(cfg)
-    objdata_tag = objdata_tag_from_config(cfg, config_path)
-    scales = asset_scales_from_config(cfg)
-    build_native = build_native_asset_from_config(cfg)
+    generated_root = data_generated_dataset_root_cfg(cfg)
+    objdata_tag = objdata_tag_cfg(cfg, config_path)
+    scales = data_asset_scales_cfg(cfg)
+    build_native = data_build_native_asset_cfg(cfg)
 
     tasks: list[dict] = []
     for obj in objects:
@@ -122,23 +131,27 @@ def _load_rebuild_tasks(cfg: dict, config_path: str) -> list[dict]:
 
 
 def _asset_complete(asset_dir: Path) -> bool:
-    convex_dir = asset_dir / "convex_parts"
-    if not convex_dir.is_dir():
-        return False
-    convex_parts = [p for p in sorted(convex_dir.glob("*.obj")) if p.is_file()]
-    if not convex_parts:
-        return False
-    required = ["coacd.obj", "manifold.obj", "object.xml", "object.urdf"]
+    """Validate the minimum scale/native asset payload expected by objdata."""
+    required = ["object.xml", "object.urdf"]
     return all((asset_dir / rel).exists() for rel in required)
 
 
-def _delete_object_assets(generated_root: str, objdata_tag: str, object_name: str) -> None:
+def _delete_object_assets(
+    generated_root: str, objdata_tag: str, object_name: str
+) -> None:
+    """Remove one object's prepared assets so a rebuild starts from a clean root."""
     object_root = Path(generated_root).resolve() / objdata_tag / object_name
     if object_root.exists():
         shutil.rmtree(object_root)
 
 
 def _rebuild_object_assets_task(task: dict) -> dict:
+    """Rebuild one object's shared meshes and all requested scale/native assets.
+
+    Failure policy is intentionally asymmetric:
+    - missing shared sources skip the whole object
+    - a bad scale/native build only drops that specific asset
+    """
     generated_root = str(task["generated_dataset_root"])
     objdata_tag = str(task["objdata_tag"])
     object_name = str(task["object_name"])
@@ -174,7 +187,31 @@ def _rebuild_object_assets_task(task: dict) -> dict:
     entries: list[dict] = []
     skip_reasons: list[dict] = []
 
-    # scale-level build: errors skip only this scale
+    # First build the object-level shared mesh roots. If this fails there is no
+    # point attempting any scale-specific MJCF/URDF assets for the object.
+    try:
+        builder.build_shared_mesh_assets(
+            config_stem=objdata_tag,
+            object_info=object_info,
+            overwrite=False,
+        )
+    except Exception as exc:
+        _delete_object_assets(generated_root, objdata_tag, object_name)
+        return {
+            "object_name": object_name,
+            "entries": [],
+            "status": "skipped_object_shared_build_failed",
+            "skip_reasons": [
+                {
+                    "scope": "object",
+                    "reason": "shared_build_exception",
+                    "error": f"{type(exc).__name__}: {exc}",
+                }
+            ],
+        }
+
+    # Then build per-scale assets. These are thin directories that reference the
+    # shared meshes, so one failed scale should not poison the whole object.
     for scale in task["scales"]:
         scale_value = float(scale)
         scale_tag = builder.scale_tag(scale_value)
@@ -205,6 +242,7 @@ def _rebuild_object_assets_task(task: dict) -> dict:
                     "object_scale_key": f"{object_name}__{scale_tag}",
                     "asset_dir_abs": str(asset_dir),
                     "coacd_abs": str(rec["coacd_abs"]),
+                    "urdf_abs": str(rec["urdf_abs"]),
                     "scale_tag": scale_tag,
                     "is_native": False,
                     "scale": scale_value,
@@ -219,10 +257,14 @@ def _rebuild_object_assets_task(task: dict) -> dict:
                     "error": f"{type(exc).__name__}: {exc}",
                 }
             )
-            scale_dir = Path(generated_root).resolve() / objdata_tag / object_name / scale_tag
+            scale_dir = (
+                Path(generated_root).resolve() / objdata_tag / object_name / scale_tag
+            )
             if scale_dir.exists():
                 shutil.rmtree(scale_dir)
 
+    # Native uses the raw shared meshes rather than the normalized shared meshes,
+    # but its lifecycle is otherwise the same as a scale-specific asset.
     if bool(task["build_native"]):
         native_tag = builder.native_tag()
         try:
@@ -251,6 +293,7 @@ def _rebuild_object_assets_task(task: dict) -> dict:
                         "object_scale_key": f"{object_name}__{native_tag}",
                         "asset_dir_abs": str(asset_dir),
                         "coacd_abs": str(rec["coacd_abs"]),
+                        "urdf_abs": str(rec["urdf_abs"]),
                         "scale_tag": native_tag,
                         "is_native": True,
                         "scale": None,
@@ -265,7 +308,9 @@ def _rebuild_object_assets_task(task: dict) -> dict:
                     "error": f"{type(exc).__name__}: {exc}",
                 }
             )
-            native_dir = Path(generated_root).resolve() / objdata_tag / object_name / native_tag
+            native_dir = (
+                Path(generated_root).resolve() / objdata_tag / object_name / native_tag
+            )
             if native_dir.exists():
                 shutil.rmtree(native_dir)
 
@@ -292,6 +337,11 @@ def _write_objdata_manifest(
     scales: list[float],
     build_native: bool,
 ) -> Path:
+    """Write the compact objdata manifest consumed by DatasetObjects.
+
+    The manifest records only object-level availability. Per-entry file paths
+    remain implicit from the directory layout.
+    """
     dataset_dir = Path(generated_root).resolve() / objdata_tag
     dataset_dir.mkdir(parents=True, exist_ok=True)
 
@@ -319,14 +369,22 @@ def _write_objdata_manifest(
         "objects": objects,
     }
     manifest_path = dataset_dir / "manifest.process_meshes.json"
-    manifest_path.write_text(json.dumps(out_manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+    manifest_path.write_text(
+        json.dumps(out_manifest, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
     return manifest_path
 
 
 def _load_existing_entries(cfg: dict, config_path: str) -> list[dict]:
-    generated_root = generated_dataset_root_from_config(cfg)
-    objdata_tag = objdata_tag_from_config(cfg, config_path)
-    manifest_path = Path(generated_root).resolve() / objdata_tag / "manifest.process_meshes.json"
+    """Scan an existing objdata directory back into flat object-scale entries.
+
+    This is the validate-only path used when `--force` is not requested.
+    """
+    generated_root = data_generated_dataset_root_cfg(cfg)
+    objdata_tag = objdata_tag_cfg(cfg, config_path)
+    manifest_path = (
+        Path(generated_root).resolve() / objdata_tag / "manifest.process_meshes.json"
+    )
     if not manifest_path.exists():
         raise FileNotFoundError(
             f"Objdata manifest not found: {manifest_path}. Run prepare_object_assets.py --force first."
@@ -351,28 +409,56 @@ def _load_existing_entries(cfg: dict, config_path: str) -> list[dict]:
             scale_tag = str(scale_tag_raw).strip()
             if not scale_tag:
                 continue
-            asset_dir = (Path(generated_root).resolve() / objdata_tag / object_name / scale_tag).resolve()
+
+            # Reconstruct the entry from the new shared-mesh layout instead of
+            # relying on per-scale mesh copies.
+            asset_dir = (
+                Path(generated_root).resolve() / objdata_tag / object_name / scale_tag
+            ).resolve()
             if not _asset_complete(asset_dir):
                 continue
-            coacd_path = asset_dir / "coacd.obj"
+            object_root = asset_dir.parent
+            if scale_tag == ScaleDatasetBuilder.native_tag():
+                shared_root = object_root / ScaleDatasetBuilder.RAW_MESH_SUBDIR
+            else:
+                shared_root = object_root / ScaleDatasetBuilder.NORMALIZED_MESH_SUBDIR
+            coacd_path = shared_root / "coacd.obj"
+            manifold_path = shared_root / "manifold.obj"
+            convex_dir = shared_root / "convex_parts"
+            if (
+                (not coacd_path.exists())
+                or (not manifold_path.exists())
+                or (not convex_dir.is_dir())
+                or (not any(path.is_file() for path in convex_dir.glob("*.obj")))
+            ):
+                continue
             entries.append(
                 {
                     "object_name": object_name,
                     "object_scale_key": f"{object_name}__{scale_tag}",
                     "asset_dir_abs": str(asset_dir),
                     "coacd_abs": str(coacd_path.resolve()),
+                    "urdf_abs": str((asset_dir / "object.urdf").resolve()),
+                    "scale_tag": scale_tag,
+                    "scale": parse_scale_tag(scale_tag),
+                    "is_native": scale_tag == ScaleDatasetBuilder.native_tag(),
                 }
             )
     if not entries:
-        raise RuntimeError(f"No valid entries found from objdata manifest: {manifest_path}")
+        raise RuntimeError(
+            f"No valid entries found from objdata manifest: {manifest_path}"
+        )
     return sorted(entries, key=lambda item: item["object_scale_key"])
 
 
 def _prepare_global_pc_task(task: dict) -> str:
+    """Build or skip one asset's deterministic global point cloud cache."""
     asset_dir = str(task["asset_dir_abs"])
     render_subdir = str(task["render_subdir"])
     n_points = int(task["n_points"])
-    if (not bool(task["force"])) and _global_pc_ready(asset_dir, render_subdir, n_points):
+    if (not bool(task["force"])) and _global_pc_ready(
+        asset_dir, render_subdir, n_points
+    ):
         return "skipped"
 
     set_seed(int(task["seed"]))
@@ -380,6 +466,7 @@ def _prepare_global_pc_task(task: dict) -> str:
         str(task["coacd_abs"]),
         n_points=n_points,
         method="poisson",
+        scale=float(task["mesh_scale"]),
     )
     write_global_pc(points, asset_dir, render_subdir)
     write_global_normals(normals, asset_dir, render_subdir)
@@ -387,6 +474,13 @@ def _prepare_global_pc_task(task: dict) -> str:
 
 
 def main() -> None:
+    """Entry point for objdata preparation.
+
+    High-level flow:
+    1. load and validate the asset config
+    2. rebuild objdata assets when `--force` is set, otherwise only validate
+    3. ensure every discovered asset has its global point cloud cache
+    """
     parser = argparse.ArgumentParser(
         description=(
             "Validate or rebuild hand-independent objdata assets, then prepare "
@@ -406,28 +500,37 @@ def main() -> None:
     base_seed = int(cfg["seed"])
     set_seed(base_seed)
 
-    generated_root = generated_dataset_root_from_config(cfg)
-    objdata_tag = objdata_tag_from_config(cfg, args.config)
-    scales = asset_scales_from_config(cfg)
-    build_native = build_native_asset_from_config(cfg)
+    generated_root = data_generated_dataset_root_cfg(cfg)
+    objdata_tag = objdata_tag_cfg(cfg, args.config)
+    scales = data_asset_scales_cfg(cfg)
+    build_native = data_build_native_asset_cfg(cfg)
 
     render_subdir = str(cfg["warp_render"]["output_subdir"])
     n_points = int(cfg["sampling"]["n_points"])
 
+    # Phase 1: materialize objdata assets from the raw processed-mesh manifest,
+    # or just rescan the existing objdata tree when running in validate mode.
     if args.force:
         source_manifest_path, _ = _load_source_manifest(cfg)
         object_tasks = _load_rebuild_tasks(cfg, args.config)
 
         object_results: list[dict] = []
         if args.jobs == 1:
-            iterator = tqdm(object_tasks, desc=f"rebuild:{objdata_tag}", total=len(object_tasks), leave=True)
+            iterator = tqdm(
+                object_tasks,
+                desc=f"rebuild:{objdata_tag}",
+                total=len(object_tasks),
+                leave=True,
+            )
             for task in iterator:
                 object_results.append(_rebuild_object_assets_task(task))
         else:
             ctx = mp.get_context("spawn")
             with ctx.Pool(processes=args.jobs) as pool:
                 iterator = tqdm(
-                    pool.imap_unordered(_rebuild_object_assets_task, object_tasks, chunksize=1),
+                    pool.imap_unordered(
+                        _rebuild_object_assets_task, object_tasks, chunksize=1
+                    ),
                     desc=f"rebuild:{objdata_tag}",
                     total=len(object_tasks),
                     leave=True,
@@ -460,8 +563,13 @@ def main() -> None:
         )
     else:
         entries = _load_existing_entries(cfg, args.config)
-        print(f"[prepare_object_assets] validate entries={len(entries)} objdata_tag={objdata_tag}")
+        print(
+            f"[prepare_object_assets] validate entries={len(entries)} objdata_tag={objdata_tag}"
+        )
 
+    # Phase 2: build deterministic global point clouds from the entry-resolved
+    # COACD mesh. This runs after the asset scan so both rebuild and validate
+    # modes share the same point-cloud preparation path.
     prepared = 0
     skipped = 0
     pc_tasks = [
@@ -469,6 +577,9 @@ def main() -> None:
             "asset_dir_abs": str(entry["asset_dir_abs"]),
             "object_scale_key": str(entry["object_scale_key"]),
             "coacd_abs": str(entry["coacd_abs"]),
+            "mesh_scale": (
+                1.0 if bool(entry.get("is_native", False)) else float(entry["scale"])
+            ),
             "render_subdir": render_subdir,
             "n_points": n_points,
             "seed": stable_seed(base_seed, str(entry["object_scale_key"]), "global_pc"),
@@ -478,7 +589,9 @@ def main() -> None:
     ]
 
     if args.jobs == 1:
-        iterator = tqdm(pc_tasks, desc=f"prepare:{objdata_tag}", total=len(pc_tasks), leave=True)
+        iterator = tqdm(
+            pc_tasks, desc=f"prepare:{objdata_tag}", total=len(pc_tasks), leave=True
+        )
         for task in iterator:
             status = _prepare_global_pc_task(task)
             if status == "prepared":

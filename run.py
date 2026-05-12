@@ -12,11 +12,11 @@ from src.mj_ho import MjHO
 from src.sample import downsample_fps
 from utils.utils_file import (
     DEFAULT_RUN_CONFIG_PATH,
-    hand_profile_from_config,
-    hand_root_stabilization_from_config,
-    load_config,
-    object_profile_from_config,
-    anchor_params_from_config,
+    hand_anchor_params_cfg,
+    hand_profile_cfg,
+    hand_root_stabilization_cfg,
+    load_run_config,
+    object_profile_cfg,
 )
 from utils.utils_sample import (
     ARRAY_DTYPE,
@@ -50,7 +50,9 @@ def _select_fail_samples(
     )
     if keep_count <= 0:
         return [], []
-    indices = np.random.default_rng(int(seed)).permutation(len(fail_qpos_rows))[:keep_count]
+    indices = np.random.default_rng(int(seed)).permutation(len(fail_qpos_rows))[
+        :keep_count
+    ]
     selected_qpos = [fail_qpos_rows[int(idx)] for idx in indices]
     selected_stages = [fail_stages[int(idx)] for idx in indices]
     return selected_qpos, selected_stages
@@ -74,7 +76,9 @@ def _write_fail_h5(
     failure_stage_dtype = h5py.string_dtype(encoding="utf-8")
     with h5py.File(fail_h5_path, "w") as hf:
         hf.create_dataset("object_name", data=encode_h5_str(object_name))
-        hf.create_dataset("scale", data=np.float32(scale if scale is not None else np.nan))
+        hf.create_dataset(
+            "scale", data=np.float32(scale if scale is not None else np.nan)
+        )
         hf.create_dataset("hand_name", data=encode_h5_str(hand_name))
         hf.create_dataset("rot_repr", data=encode_h5_str("wxyz+qpos"))
         hf.create_dataset("qpos_fail", data=qpos_fail_np, dtype=H5_DTYPE)
@@ -100,10 +104,10 @@ def run_sampling(
     object_name, parsed_scale = parse_object_scale_key(object_scale_key)
     scale = parsed_scale
     obj_info = {"name": object_name, "xml_abs": object_mjcf_path}
-    anchor_params = anchor_params_from_config(cfg)
-    hand_profile = hand_profile_from_config(cfg)
-    object_profile = object_profile_from_config(cfg)
-    root_stabilization = hand_root_stabilization_from_config(cfg)
+    anchor_params = hand_anchor_params_cfg(cfg)
+    hand_profile = hand_profile_cfg(cfg)
+    object_profile = object_profile_cfg(cfg)
+    root_stabilization = hand_root_stabilization_cfg(cfg)
 
     mjho = MjHO(
         obj_info,
@@ -136,7 +140,9 @@ def run_sampling(
     set_seed(stable_seed(int(cfg["seed"]), object_scale_key, "sample_frames"))
     transforms_np = sample_frames_from_points(cfg, points, normals)
     if verbose:
-        print(f"[{object_scale_key}] frame sampling time: {time.time() - ts:.3f}s, N={len(transforms_np)}")
+        print(
+            f"[{object_scale_key}] frame sampling time: {time.time() - ts:.3f}s, N={len(transforms_np)}"
+        )
 
     pose = build_pose_candidates(cfg, transforms_np)
     qpos_init, qpos_approach, qpos_prepared = make_qpos_triplets(cfg, pose)
@@ -173,15 +179,27 @@ def run_sampling(
 
     with h5py.File(h5_path, "w") as hf:
         hf.create_dataset("object_name", data=encode_h5_str(object_name))
-        hf.create_dataset("scale", data=np.float32(scale if scale is not None else np.nan))
+        hf.create_dataset(
+            "scale", data=np.float32(scale if scale is not None else np.nan)
+        )
         hf.create_dataset("hand_name", data=encode_h5_str(hand_name))
         hf.create_dataset("rot_repr", data=encode_h5_str("wxyz+qpos"))
 
-        ds_init = hf.create_dataset("qpos_init", shape=(max_cap, d), maxshape=(None, d), dtype=H5_DTYPE)
-        ds_approach = hf.create_dataset("qpos_approach", shape=(max_cap, d), maxshape=(None, d), dtype=H5_DTYPE)
-        ds_prepared = hf.create_dataset("qpos_prepared", shape=(max_cap, d), maxshape=(None, d), dtype=H5_DTYPE)
-        ds_grasp = hf.create_dataset("qpos_grasp", shape=(max_cap, d), maxshape=(None, d), dtype=H5_DTYPE)
-        ds_squeeze = hf.create_dataset("qpos_squeeze", shape=(max_cap, d), maxshape=(None, d), dtype=H5_DTYPE)
+        ds_init = hf.create_dataset(
+            "qpos_init", shape=(max_cap, d), maxshape=(None, d), dtype=H5_DTYPE
+        )
+        ds_approach = hf.create_dataset(
+            "qpos_approach", shape=(max_cap, d), maxshape=(None, d), dtype=H5_DTYPE
+        )
+        ds_prepared = hf.create_dataset(
+            "qpos_prepared", shape=(max_cap, d), maxshape=(None, d), dtype=H5_DTYPE
+        )
+        ds_grasp = hf.create_dataset(
+            "qpos_grasp", shape=(max_cap, d), maxshape=(None, d), dtype=H5_DTYPE
+        )
+        ds_squeeze = hf.create_dataset(
+            "qpos_squeeze", shape=(max_cap, d), maxshape=(None, d), dtype=H5_DTYPE
+        )
 
         for i in tqdm(
             range(qpos_prepared.shape[0]),
@@ -235,8 +253,12 @@ def run_sampling(
                 )
                 if is_valid:
                     ds_init[num_valid] = qpos_init[i].astype(ARRAY_DTYPE, copy=False)
-                    ds_approach[num_valid] = qpos_approach[i].astype(ARRAY_DTYPE, copy=False)
-                    ds_prepared[num_valid] = qpos_prepared[i].astype(ARRAY_DTYPE, copy=False)
+                    ds_approach[num_valid] = qpos_approach[i].astype(
+                        ARRAY_DTYPE, copy=False
+                    )
+                    ds_prepared[num_valid] = qpos_prepared[i].astype(
+                        ARRAY_DTYPE, copy=False
+                    )
                     ds_grasp[num_valid] = qpos_grasp.astype(ARRAY_DTYPE, copy=False)
                     ds_squeeze[num_valid] = qpos_squeeze.astype(ARRAY_DTYPE, copy=False)
                     num_valid += 1
@@ -293,17 +315,46 @@ def run_sampling(
 
 def main():
     p = argparse.ArgumentParser(description="Sample grasps for one object-scale entry.")
-    p.add_argument("--object-scale-key", type=str, required=True, help="Unique object-scale key.")
-    p.add_argument("--mjcf-path", type=str, required=True, help="Path to scaled object MJCF.")
-    p.add_argument("--global-pc-path", type=str, required=True, help="Path to global_pc.npy prepared by prepare_object_assets.py.")
-    p.add_argument("--global-normals-path", type=str, required=True, help="Path to global_normals.npy prepared by prepare_object_assets.py.")
-    p.add_argument("--output-dir", type=str, required=True, help="Output directory for grasp artifacts.")
-    p.add_argument("--force", action="store_true", help="Re-run even if configured grasp outputs already exist.")
+    p.add_argument(
+        "--object-scale-key", type=str, required=True, help="Unique object-scale key."
+    )
+    p.add_argument(
+        "--mjcf-path", type=str, required=True, help="Path to scaled object MJCF."
+    )
+    p.add_argument(
+        "--global-pc-path",
+        type=str,
+        required=True,
+        help="Path to global_pc.npy prepared by prepare_object_assets.py.",
+    )
+    p.add_argument(
+        "--global-normals-path",
+        type=str,
+        required=True,
+        help="Path to global_normals.npy prepared by prepare_object_assets.py.",
+    )
+    p.add_argument(
+        "--output-dir",
+        type=str,
+        required=True,
+        help="Output directory for grasp artifacts.",
+    )
+    p.add_argument(
+        "--force",
+        action="store_true",
+        help="Re-run even if configured grasp outputs already exist.",
+    )
     p.add_argument("-v", "--verbose", action="store_true", help="Enable verbose logs.")
-    p.add_argument("-c", "--config", type=str, default=DEFAULT_RUN_CONFIG_PATH, help="JSON config path.")
+    p.add_argument(
+        "-c",
+        "--config",
+        type=str,
+        default=DEFAULT_RUN_CONFIG_PATH,
+        help="JSON config path.",
+    )
     args = p.parse_args()
 
-    cfg = load_config(args.config)
+    cfg = load_run_config(args.config)
     set_seed(int(cfg["seed"]))
     verbose = bool(args.verbose)
     total_stage_start = time.perf_counter()
@@ -311,7 +362,9 @@ def main():
         print(f"Using object-scale key: {args.object_scale_key}")
     h5_name = str(cfg["data"]["h5_name"])
     npy_name = str(cfg["data"]["npy_name"])
-    has_grasp_outputs = grasp_outputs_exist(args.output_dir, h5_name=h5_name, npy_name=npy_name)
+    has_grasp_outputs = grasp_outputs_exist(
+        args.output_dir, h5_name=h5_name, npy_name=npy_name
+    )
     if (not args.force) and has_grasp_outputs:
         if verbose:
             print(
@@ -323,9 +376,13 @@ def main():
     hand_xml_path = os.path.abspath(cfg["hand"]["xml_path"])
     hand_name = Path(hand_xml_path).stem
     pts = np.asarray(np.load(args.global_pc_path, allow_pickle=False), dtype=np.float32)
-    norms = np.asarray(np.load(args.global_normals_path, allow_pickle=False), dtype=np.float32)
+    norms = np.asarray(
+        np.load(args.global_normals_path, allow_pickle=False), dtype=np.float32
+    )
     if verbose:
-        print(f"[{args.object_scale_key}] loaded global_pc/global_normals from {args.global_pc_path}")
+        print(
+            f"[{args.object_scale_key}] loaded global_pc/global_normals from {args.global_pc_path}"
+        )
     run_sampling(
         cfg=cfg,
         object_scale_key=args.object_scale_key,

@@ -13,15 +13,14 @@ import numpy as np
 from src.mj_ho import MjHO
 from utils.utils_file import (
     DEFAULT_RUN_CONFIG_PATH,
-    hand_profile_from_config,
-    hand_root_stabilization_from_config,
-    load_config,
-    object_profile_from_config,
-    resolve_split_manifest_path,
-    anchor_params_from_config,
+    hand_anchor_params_cfg,
+    hand_profile_cfg,
+    hand_root_stabilization_cfg,
+    load_run_config,
+    object_profile_cfg,
+    resolve_split_manifest_path_cfg,
 )
 from utils.utils_seed import set_seed
-
 
 LOGGER = logging.getLogger(__name__)
 
@@ -35,10 +34,14 @@ def _resolve_qpos_dtype(dtype_name: str) -> np.dtype:
         return np.dtype(np.float32)
     if dtype_name == "float64":
         return np.dtype(np.float64)
-    raise ValueError(f"Unsupported qpos dtype '{dtype_name}'. Expected 'float32' or 'float64'.")
+    raise ValueError(
+        f"Unsupported qpos dtype '{dtype_name}'. Expected 'float32' or 'float64'."
+    )
 
 
-def _load_qpos_grasp(grasp_h5_path: Path, qpos_dtype: np.dtype) -> Dict[str, np.ndarray]:
+def _load_qpos_grasp(
+    grasp_h5_path: Path, qpos_dtype: np.dtype
+) -> Dict[str, np.ndarray]:
     if not grasp_h5_path.exists():
         raise FileNotFoundError(f"Configured grasp HDF5 not found: {grasp_h5_path}")
     with h5py.File(grasp_h5_path, "r") as handle:
@@ -49,9 +52,13 @@ def _load_qpos_grasp(grasp_h5_path: Path, qpos_dtype: np.dtype) -> Dict[str, np.
         arrays = {key: np.asarray(handle[key][:], dtype=qpos_dtype) for key in required}
     sizes = {key: int(value.shape[0]) for key, value in arrays.items()}
     if min(sizes.values()) <= 0:
-        raise ValueError(f"One or more grasp datasets are empty in {grasp_h5_path}: {sizes}")
+        raise ValueError(
+            f"One or more grasp datasets are empty in {grasp_h5_path}: {sizes}"
+        )
     if len(set(sizes.values())) != 1:
-        raise ValueError(f"Mismatched grasp dataset lengths in {grasp_h5_path}: {sizes}")
+        raise ValueError(
+            f"Mismatched grasp dataset lengths in {grasp_h5_path}: {sizes}"
+        )
     return arrays
 
 
@@ -62,12 +69,12 @@ def evaluate_dataset_manifest(
     qpos_dtype_name: str = "float32",
     visualize: bool = False,
 ) -> Dict:
-    cfg = load_config(run_config_path)
+    cfg = load_run_config(run_config_path)
     eval_seed = int(cfg["seed"] if seed is None else seed)
     set_seed(eval_seed)
     qpos_dtype = _resolve_qpos_dtype(qpos_dtype_name)
 
-    manifest_file = resolve_split_manifest_path(cfg, run_config_path, split)
+    manifest_file = resolve_split_manifest_path_cfg(cfg, run_config_path, split)
     if not manifest_file.exists():
         raise FileNotFoundError(f"Split manifest not found: {manifest_file}")
 
@@ -78,10 +85,10 @@ def evaluate_dataset_manifest(
     extforce_cfg.pop("visualize", None)
     extforce_sim_cfg.pop("visualize", None)
     extforce_sim_cfg.pop("grip_delta", None)
-    anchor_params = anchor_params_from_config(cfg)
-    hand_profile = hand_profile_from_config(cfg)
-    object_profile = object_profile_from_config(cfg)
-    root_stabilization = hand_root_stabilization_from_config(cfg)
+    anchor_params = hand_anchor_params_cfg(cfg)
+    hand_profile = hand_profile_cfg(cfg)
+    object_profile = object_profile_cfg(cfg)
+    root_stabilization = hand_root_stabilization_cfg(cfg)
 
     summary_items: List[Dict] = []
     skipped_items: List[Dict] = []
@@ -185,7 +192,12 @@ def evaluate_dataset_manifest(
                         "error": str(exc),
                     }
                 )
-                LOGGER.warning("Grasp eval failed for %s idx=%d: %s", object_scale_key, grasp_idx, exc)
+                LOGGER.warning(
+                    "Grasp eval failed for %s idx=%d: %s",
+                    object_scale_key,
+                    grasp_idx,
+                    exc,
+                )
 
         item_summary = {
             "object_scale_key": object_scale_key,

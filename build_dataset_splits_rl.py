@@ -13,11 +13,11 @@ from src.dataset_objects import DatasetObjects
 from src.shape_cluster import build_cluster_tag
 from utils.utils_file import (
     DEFAULT_ASSET_CONFIG_PATH,
-    asset_scales_from_config,
-    data_verbose_from_config,
-    generated_dataset_root_from_config,
+    data_asset_scales_cfg,
+    data_generated_dataset_root_cfg,
+    data_verbose_cfg,
     load_asset_config,
-    objdata_tag_from_config,
+    objdata_tag_cfg,
     relpath_str,
 )
 
@@ -75,9 +75,15 @@ def load_object_cluster_payload(cluster_dir: Path) -> Dict:
 
     object_labels_payload = json.loads(object_labels_path.read_text(encoding="utf-8"))
     cluster_labels_payload = json.loads(cluster_labels_path.read_text(encoding="utf-8"))
-    if not isinstance(object_labels_payload, dict) or "objects" not in object_labels_payload:
+    if (
+        not isinstance(object_labels_payload, dict)
+        or "objects" not in object_labels_payload
+    ):
         raise ValueError(f"Invalid object_labels.json payload: {object_labels_path}")
-    if not isinstance(cluster_labels_payload, dict) or "clusters" not in cluster_labels_payload:
+    if (
+        not isinstance(cluster_labels_payload, dict)
+        or "clusters" not in cluster_labels_payload
+    ):
         raise ValueError(f"Invalid cluster_labels.json payload: {cluster_labels_path}")
     return {
         "cluster_tag": str(object_labels_payload.get("cluster_tag", "")),
@@ -85,6 +91,7 @@ def load_object_cluster_payload(cluster_dir: Path) -> Dict:
         "objects": dict(object_labels_payload["objects"]),
         "clusters": dict(cluster_labels_payload["clusters"]),
     }
+
 
 def build_scale_record(
     entry: Dict,
@@ -129,7 +136,9 @@ def build_rl_object_record(
         "cluster_id": int(object_cluster_info["cluster_id"]),
         "cluster_rank": int(object_cluster_info["rank_in_cluster"]),
         "cluster_distance": float(object_cluster_info["distance_to_center"]),
-        "distance_to_global_center": float(object_cluster_info["distance_to_global_center"]),
+        "distance_to_global_center": float(
+            object_cluster_info["distance_to_global_center"]
+        ),
         "num_scales": len(ordered_scales),
         "scale_tags": [str(item["scale_tag"]) for item in ordered_scales],
         "scales": list(ordered_scales),
@@ -166,7 +175,9 @@ def split_records_by_object(
     return train_records, test_records
 
 
-def build_split_cluster_index(records: Dict[str, Dict], cluster_labels_map: Dict[str, Dict]) -> Dict:
+def build_split_cluster_index(
+    records: Dict[str, Dict], cluster_labels_map: Dict[str, Dict]
+) -> Dict:
     grouped: Dict[str, List[Dict]] = {}
     for record in records.values():
         grouped.setdefault(str(record["cluster_id"]), []).append(record)
@@ -186,8 +197,12 @@ def build_split_cluster_index(records: Dict[str, Dict], cluster_labels_map: Dict
             "cluster_id": int(cluster_id),
             "member_count": len(members),
             "total_scale_count": sum(int(member["num_scales"]) for member in members),
-            "distance_to_global_center": float(cluster_labels_map[cluster_id]["distance_to_global_center"]),
-            "split_center_object_name": None if split_center is None else split_center["object_name"],
+            "distance_to_global_center": float(
+                cluster_labels_map[cluster_id]["distance_to_global_center"]
+            ),
+            "split_center_object_name": (
+                None if split_center is None else split_center["object_name"]
+            ),
             "members": list(members),
         }
     return {"clusters": clusters}
@@ -225,7 +240,9 @@ def collect_rl_records(
 
 def prepare_output_dir(output_dir: Path, force: bool) -> None:
     if output_dir.exists() and not force:
-        raise FileExistsError(f"Output already exists: {output_dir}. Use --force to overwrite.")
+        raise FileExistsError(
+            f"Output already exists: {output_dir}. Use --force to overwrite."
+        )
     if output_dir.exists() and force:
         for child in output_dir.iterdir():
             if child.is_file():
@@ -267,8 +284,12 @@ def write_split_outputs(
             "num_train_objects": len(train_records),
             "num_test_objects": len(test_records),
             "num_scales": sum(int(record["num_scales"]) for record in records.values()),
-            "num_train_scales": sum(int(record["num_scales"]) for record in train_records.values()),
-            "num_test_scales": sum(int(record["num_scales"]) for record in test_records.values()),
+            "num_train_scales": sum(
+                int(record["num_scales"]) for record in train_records.values()
+            ),
+            "num_test_scales": sum(
+                int(record["num_scales"]) for record in test_records.values()
+            ),
             "include_native": False,
             "files": {
                 "train_object": "train_object.json",
@@ -282,7 +303,9 @@ def write_split_outputs(
 
 def write_json(path: Path, payload: Dict | List) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    path.write_text(
+        json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
+    )
 
 
 def main() -> None:
@@ -293,8 +316,8 @@ def main() -> None:
     cluster_tag = resolve_cluster_tag(cfg, args.cluster_tag)
     cluster_cfg = resolve_shape_cluster_cfg(cfg)
 
-    generated_root = Path(generated_dataset_root_from_config(cfg)).resolve()
-    objdata_tag = objdata_tag_from_config(cfg, args.config)
+    generated_root = Path(data_generated_dataset_root_cfg(cfg)).resolve()
+    objdata_tag = objdata_tag_cfg(cfg, args.config)
     objdata_root = generated_root / objdata_tag
     if not objdata_root.is_dir():
         raise FileNotFoundError(f"objdata root not found: {objdata_root}")
@@ -305,12 +328,12 @@ def main() -> None:
     cluster_scale_tag = str(cluster_payload["scale_tag"])
 
     ds = DatasetObjects(
-        scales=asset_scales_from_config(cfg),
+        scales=data_asset_scales_cfg(cfg),
         objdata_tag=objdata_tag,
         include_native=False,
         graspdata_tag=objdata_tag,
-        generated_dataset_root=generated_dataset_root_from_config(cfg),
-        verbose=data_verbose_from_config(cfg),
+        generated_dataset_root=data_generated_dataset_root_cfg(cfg),
+        verbose=data_verbose_cfg(cfg),
     )
 
     records = collect_rl_records(
@@ -326,8 +349,12 @@ def main() -> None:
         seed=split_seed,
         test_ratio=float(args.test_ratio),
     )
-    train_cluster_index = build_split_cluster_index(train_records, cluster_payload["clusters"])
-    test_cluster_index = build_split_cluster_index(test_records, cluster_payload["clusters"])
+    train_cluster_index = build_split_cluster_index(
+        train_records, cluster_payload["clusters"]
+    )
+    test_cluster_index = build_split_cluster_index(
+        test_records, cluster_payload["clusters"]
+    )
 
     split_tag = build_rl_split_tag(
         cluster_tag=cluster_tag,

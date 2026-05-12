@@ -148,7 +148,7 @@ def test_simulate_dataset_manifest_counts_successes(tmp_path: Path, monkeypatch)
                     "objdata_tag": "objdata_YCB",
                     "graspdata_tag": "graspdata_YCB_liberhand",
                     "verbose": False,
-                    "scales": [0.08],
+                    "run_scales": [0.08],
                     "max_cap": 10,
                     "max_time_sec": 90.0,
                     "h5_name": "grasp.h5",
@@ -157,7 +157,7 @@ def test_simulate_dataset_manifest_counts_successes(tmp_path: Path, monkeypatch)
                     "fail_npy_name": "grasp_fail.npy",
                     "flush_every": 1,
                     "fail_keep_ratio": 1.0,
-                    "min_valid_count": 1
+                    "min_valid_count": 1,
                 },
                 "object": {"id": 0},
                 "hand": {
@@ -172,10 +172,25 @@ def test_simulate_dataset_manifest_counts_successes(tmp_path: Path, monkeypatch)
                         "quat_wxyz": [1.0, 0.0, 0.0, 0.0],
                     },
                 },
-                "sampling": {"n_points": 1, "downsample_for_sim": 1, "Nd": 1, "rot_n": 1, "d_min": 0.01, "d_max": 0.02, "pc_subdir": "pc_warp"},
+                "sampling": {
+                    "n_points": 1,
+                    "downsample_for_sim": 1,
+                    "Nd": 1,
+                    "rot_n": 1,
+                    "d_min": 0.01,
+                    "d_max": 0.02,
+                    "pc_subdir": "pc_warp",
+                },
                 "profile_object": TEST_OBJECT_PROFILE,
                 "sim_grasp": {"contact_min_count": 4, "target_point_method": 2},
-                "extforce": {"duration": 0.5, "trans_thresh": 0.05, "angle_thresh": 10.0, "grip_delta": 0.05, "force_mag": 1.0, "check_steps": 50},
+                "extforce": {
+                    "duration": 0.5,
+                    "trans_thresh": 0.05,
+                    "angle_thresh": 10.0,
+                    "grip_delta": 0.05,
+                    "force_mag": 1.0,
+                    "check_steps": 50,
+                },
             }
         ),
         encoding="utf-8",
@@ -201,7 +216,9 @@ def test_simulate_dataset_manifest_counts_successes(tmp_path: Path, monkeypatch)
     assert summary["qpos_dtype"] == "float32"
 
 
-def test_simulate_dataset_manifest_allows_explicit_float64_cast(tmp_path: Path, monkeypatch):
+def test_simulate_dataset_manifest_allows_explicit_float64_cast(
+    tmp_path: Path, monkeypatch
+):
     dataset_dir = tmp_path / "datasets" / "graspdata_YCB_liberhand"
     item_dir = dataset_dir / "obj_b" / "scale080"
     grasp_h5_path = item_dir / "grasp.h5"
@@ -249,7 +266,7 @@ def test_simulate_dataset_manifest_allows_explicit_float64_cast(tmp_path: Path, 
                     "objdata_tag": "objdata_YCB",
                     "graspdata_tag": "graspdata_YCB_liberhand",
                     "verbose": False,
-                    "scales": [0.08],
+                    "run_scales": [0.08],
                     "max_cap": 10,
                     "max_time_sec": 90.0,
                     "h5_name": "grasp.h5",
@@ -258,7 +275,7 @@ def test_simulate_dataset_manifest_allows_explicit_float64_cast(tmp_path: Path, 
                     "fail_npy_name": "grasp_fail.npy",
                     "flush_every": 1,
                     "fail_keep_ratio": 1.0,
-                    "min_valid_count": 1
+                    "min_valid_count": 1,
                 },
                 "object": {"id": 0},
                 "hand": {
@@ -273,10 +290,25 @@ def test_simulate_dataset_manifest_allows_explicit_float64_cast(tmp_path: Path, 
                         "quat_wxyz": [1.0, 0.0, 0.0, 0.0],
                     },
                 },
-                "sampling": {"n_points": 1, "downsample_for_sim": 1, "Nd": 1, "rot_n": 1, "d_min": 0.01, "d_max": 0.02, "pc_subdir": "pc_warp"},
+                "sampling": {
+                    "n_points": 1,
+                    "downsample_for_sim": 1,
+                    "Nd": 1,
+                    "rot_n": 1,
+                    "d_min": 0.01,
+                    "d_max": 0.02,
+                    "pc_subdir": "pc_warp",
+                },
                 "profile_object": TEST_OBJECT_PROFILE,
                 "sim_grasp": {"contact_min_count": 4, "target_point_method": 2},
-                "extforce": {"duration": 0.5, "trans_thresh": 0.05, "angle_thresh": 10.0, "grip_delta": 0.05, "force_mag": 1.0, "check_steps": 50},
+                "extforce": {
+                    "duration": 0.5,
+                    "trans_thresh": 0.05,
+                    "angle_thresh": 10.0,
+                    "grip_delta": 0.05,
+                    "force_mag": 1.0,
+                    "check_steps": 50,
+                },
             }
         ),
         encoding="utf-8",
@@ -341,7 +373,7 @@ def test_simulate_dataset_manifest_requires_qpos_squeeze(tmp_path: Path, monkeyp
                     "objdata_tag": "objdata_YCB",
                     "graspdata_tag": "graspdata_YCB_liberhand",
                     "verbose": False,
-                    "scales": [0.08],
+                    "run_scales": [0.08],
                     "max_cap": 10,
                     "max_time_sec": 90.0,
                     "h5_name": "grasp.h5",
@@ -350,7 +382,7 @@ def test_simulate_dataset_manifest_requires_qpos_squeeze(tmp_path: Path, monkeyp
                     "fail_npy_name": "grasp_fail.npy",
                     "flush_every": 1,
                     "fail_keep_ratio": 1.0,
-                    "min_valid_count": 1
+                    "min_valid_count": 1,
                 },
                 "object": {"id": 0},
                 "hand": {

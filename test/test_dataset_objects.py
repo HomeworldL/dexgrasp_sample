@@ -14,7 +14,9 @@ def _make_mesh(path: Path):
     m.export(path)
 
 
-def _make_dataset_with_manifest(tmp_path: Path, dataset_name: str, obj_name: str) -> Path:
+def _make_dataset_with_manifest(
+    tmp_path: Path, dataset_name: str, obj_name: str
+) -> Path:
     obj_dir = tmp_path / dataset_name / obj_name
     _make_mesh(obj_dir / "coacd.obj")
     _make_mesh(obj_dir / "manifold.obj")
@@ -67,14 +69,19 @@ def _build_objdata_assets(
     if manifest_path.exists():
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     else:
-        manifest = {"dataset": objdata_tag, "summary": {"object_count": 0}, "objects": []}
+        manifest = {
+            "dataset": objdata_tag,
+            "summary": {"object_count": 0},
+            "objects": [],
+        }
     objects = manifest.get("objects", [])
     if not isinstance(objects, list):
         objects = []
     objects = [
         obj
         for obj in objects
-        if str((obj or {}).get("name") or (obj or {}).get("object_id") or "") != obj_name
+        if str((obj or {}).get("name") or (obj or {}).get("object_id") or "")
+        != obj_name
     ]
     objects.append({"name": obj_name, "scales_available": scales_available})
     manifest["objects"] = sorted(objects, key=lambda item: str(item.get("name", "")))
@@ -121,7 +128,7 @@ def test_dataset_missing_dir_raises(tmp_path: Path):
         pass
 
 
-def test_get_point_cloud_uses_coacd(tmp_path: Path):
+def test_sample_surface_for_entry_uses_coacd(tmp_path: Path):
     pytest.importorskip("open3d")
     _make_dataset_with_manifest(tmp_path, "YCB", "YCB_001_obj")
     _build_objdata_assets(tmp_path, "YCB", "YCB_001_obj", scales=[0.06])
@@ -133,7 +140,8 @@ def test_get_point_cloud_uses_coacd(tmp_path: Path):
         verbose=False,
     )
 
-    pts, norms = ds.get_point_cloud(0, n_points=128, method="poisson")
+    info = ds.get_obj_info_by_index(0)
+    pts, norms = ds.sample_surface_for_entry(info, n_points=128, method="poisson")
     assert pts.shape[1] == 3
     assert norms.shape[1] == 3
 
@@ -187,7 +195,35 @@ def test_existing_assets_preserve_scale_dir_contents(tmp_path: Path):
     assert indexed_asset_dir == asset_dir
     assert stale_path.exists()
     assert (indexed_asset_dir / "object.xml").exists()
-    assert (indexed_asset_dir / "coacd.obj").exists()
+    assert Path(indexed.get_entries()[0]["coacd_abs"]).exists()
+
+
+def test_existing_assets_do_not_require_urdf_for_indexing(tmp_path: Path):
+    _make_dataset_with_manifest(tmp_path, "YCB", "YCB_001_obj")
+    _build_objdata_assets(tmp_path, "YCB", "YCB_001_obj", scales=[0.06])
+
+    ds = DatasetObjects(
+        scales=[0.06],
+        objdata_tag="objdata_YCB",
+        graspdata_tag="graspdata_YCB_liberhand",
+        generated_dataset_root=str(tmp_path / "datasets"),
+        verbose=False,
+    )
+    asset_dir = Path(ds.get_entries()[0]["asset_dir_abs"])
+    urdf_path = asset_dir / "object.urdf"
+    urdf_path.unlink()
+
+    indexed = DatasetObjects(
+        scales=[0.06],
+        objdata_tag="objdata_YCB",
+        graspdata_tag="graspdata_YCB_liberhand",
+        generated_dataset_root=str(tmp_path / "datasets"),
+        verbose=False,
+    )
+
+    entry = indexed.get_entries()[0]
+    assert entry["object_name"] == "YCB_001_obj"
+    assert Path(entry["mjcf_abs"]).exists()
 
 
 def test_missing_objdata_asset_raises_without_rebuild(tmp_path: Path):

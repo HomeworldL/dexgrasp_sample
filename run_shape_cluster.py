@@ -21,15 +21,17 @@ from src.shape_cluster import (
 )
 from utils.utils_file import (
     DEFAULT_ASSET_CONFIG_PATH,
-    generated_dataset_root_from_config,
+    data_generated_dataset_root_cfg,
     load_asset_config,
-    objdata_tag_from_config,
+    objdata_tag_cfg,
 )
 from utils.utils_seed import set_seed
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Train shape autoencoder and cluster objdata objects.")
+    parser = argparse.ArgumentParser(
+        description="Train shape autoencoder and cluster objdata objects."
+    )
     parser.add_argument("-c", "--config", type=str, default=DEFAULT_ASSET_CONFIG_PATH)
     parser.add_argument("--scale-tag", type=str, default=None)
     parser.add_argument("--fps-points", type=int, default=None)
@@ -97,8 +99,8 @@ def main() -> None:
     seed = int(cfg["seed"])
     set_seed(seed)
 
-    generated_root = Path(generated_dataset_root_from_config(cfg)).resolve()
-    objdata_tag = objdata_tag_from_config(cfg, args.config)
+    generated_root = Path(data_generated_dataset_root_cfg(cfg)).resolve()
+    objdata_tag = objdata_tag_cfg(cfg, args.config)
     objdata_root = generated_root / objdata_tag
     if not objdata_root.is_dir():
         raise FileNotFoundError(f"objdata root not found: {objdata_root}")
@@ -113,7 +115,9 @@ def main() -> None:
     )
     output_dir = objdata_root / "_meta" / "shape_cluster" / cluster_tag
     if output_dir.exists() and not args.force:
-        raise FileExistsError(f"Output already exists: {output_dir}. Use --force to overwrite.")
+        raise FileExistsError(
+            f"Output already exists: {output_dir}. Use --force to overwrite."
+        )
     if output_dir.exists() and args.force:
         shutil.rmtree(output_dir)
 

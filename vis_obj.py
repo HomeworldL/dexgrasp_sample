@@ -15,21 +15,23 @@ from src.dataset_objects import DatasetObjects
 from src.mj_ho import MjHO
 from utils.utils_file import (
     DEFAULT_RUN_CONFIG_PATH,
-    data_verbose_from_config,
-    generated_dataset_root_from_config,
-    graspdata_tag_from_config,
-    hand_profile_from_config,
-    load_config,
-    object_profile_from_config,
-    objdata_tag_from_config,
-    run_scales_from_config,
-    use_native_asset_from_config,
+    data_generated_dataset_root_cfg,
+    data_run_scales_cfg,
+    data_use_native_asset_cfg,
+    data_verbose_cfg,
+    graspdata_tag_cfg,
+    hand_profile_cfg,
+    load_run_config,
+    object_profile_cfg,
+    objdata_tag_cfg,
 )
 from utils.utils_vis import visualize_with_viser
 
 
 def main():
-    p = argparse.ArgumentParser(description="Visualize one object-scale entry by global id or key.")
+    p = argparse.ArgumentParser(
+        description="Visualize one object-scale entry by global id or key."
+    )
     p.add_argument("-c", "--config", type=str, default=DEFAULT_RUN_CONFIG_PATH)
     p.add_argument("-i", "--obj-id", type=int, default=None)
     p.add_argument(
@@ -41,14 +43,14 @@ def main():
     )
     args = p.parse_args()
 
-    cfg = load_config(args.config)
+    cfg = load_run_config(args.config)
     ds = DatasetObjects(
-        scales=run_scales_from_config(cfg),
-        objdata_tag=objdata_tag_from_config(cfg, args.config),
-        include_native=use_native_asset_from_config(cfg),
-        graspdata_tag=graspdata_tag_from_config(cfg, args.config),
-        generated_dataset_root=generated_dataset_root_from_config(cfg),
-        verbose=data_verbose_from_config(cfg),
+        scales=data_run_scales_cfg(cfg),
+        objdata_tag=objdata_tag_cfg(cfg, args.config),
+        include_native=data_use_native_asset_cfg(cfg),
+        graspdata_tag=graspdata_tag_cfg(cfg, args.config),
+        generated_dataset_root=data_generated_dataset_root_cfg(cfg),
+        verbose=data_verbose_cfg(cfg),
     )
 
     if args.obj_key:
@@ -59,24 +61,26 @@ def main():
         raise ValueError("vis_obj requires either --obj-id or --obj-key.")
     obj_name = info["object_name"]
     print(f"[vis_obj] id={info['global_id']} name={obj_name} scale={info['scale']}")
-    print(f"[vis_obj] convex_parts_abs={info['convex_parts_abs']}")
     print(f"[vis_obj] coacd_abs={info['coacd_abs']}")
     print(f"[vis_obj] mjcf_abs={info['mjcf_abs']}")
 
-    parts = [ds.load_mesh(p) for p in info["convex_parts_abs"]]
     meshes_for_vis = {
-        "obj_coacd": ds.load_mesh(info["coacd_abs"]),
-        "obj_convex_parts": trimesh.util.concatenate(parts),
+        "obj_coacd": ds.load_entry_mesh(info, kind="coacd", apply_scale=True),
+        "obj_convex_parts": ds.load_entry_mesh(
+            info, kind="convex_parts", apply_scale=True
+        ),
     }
 
-    pts, _ = ds.sample_surface_o3d(
-        info["coacd_abs"],
+    pts, _ = ds.sample_surface_for_entry(
+        info,
         n_points=min(2048, int(cfg.get("sampling", {}).get("n_points", 2048))),
         method="poisson",
     )
     cols = np.tile(np.array([[90, 160, 255]], dtype=np.uint8), (pts.shape[0], 1))
 
-    _server = visualize_with_viser(meshes=meshes_for_vis, pointclouds={"obj_pointcloud": (pts, cols)})
+    _server = visualize_with_viser(
+        meshes=meshes_for_vis, pointclouds={"obj_pointcloud": (pts, cols)}
+    )
     print("[vis_obj] Viser started. Press Enter to open MuJoCo paused view...")
     input()
 
@@ -84,8 +88,8 @@ def main():
     env = MjHO(
         {"name": obj_name, "xml_abs": info["mjcf_abs"], "scale": 1.0},
         hand_xml,
-        hand_profile=hand_profile_from_config(cfg),
-        object_profile=object_profile_from_config(cfg),
+        hand_profile=hand_profile_cfg(cfg),
+        object_profile=object_profile_cfg(cfg),
         object_fixed=False,
         visualize=True,
     )

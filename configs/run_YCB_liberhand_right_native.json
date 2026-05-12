@@ -6,7 +6,7 @@
     "generated_dataset_root": "datasets",
     "objdata_tag": "objdata_YCB",
     "graspdata_tag": "graspdata_YCB_liberhand_right_native",
-    "scales": [],
+    "run_scales": [],
     "use_native_asset": true,
     "verbose": false,
     "max_cap": 100,

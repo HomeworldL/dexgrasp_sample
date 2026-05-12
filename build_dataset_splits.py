@@ -10,15 +10,15 @@ from typing import Dict, List, Optional, Sequence, Tuple
 from src.dataset_objects import DatasetObjects
 from utils.utils_file import (
     DEFAULT_RUN_CONFIG_PATH,
-    data_verbose_from_config,
-    generated_dataset_root_from_config,
-    graspdata_tag_from_config,
+    data_generated_dataset_root_cfg,
+    data_run_scales_cfg,
+    data_use_native_asset_cfg,
+    data_verbose_cfg,
+    graspdata_tag_cfg,
     list_existing_files,
-    load_config,
-    objdata_tag_from_config,
+    load_run_config,
+    objdata_tag_cfg,
     relpath_str,
-    run_scales_from_config,
-    use_native_asset_from_config,
 )
 from utils.utils_sample import grasp_h5_nonempty
 
@@ -71,7 +71,9 @@ def _collect_entry_record(
         return None, f"missing {render_subdir}/cam_ex_*.npy"
 
     world_suffixes = [path.stem[len("partial_pc_") :] for path in partial_pc_paths]
-    cam_suffixes = [path.stem[len("partial_pc_cam_") :] for path in partial_pc_cam_paths]
+    cam_suffixes = [
+        path.stem[len("partial_pc_cam_") :] for path in partial_pc_cam_paths
+    ]
     ex_suffixes = [path.stem[len("cam_ex_") :] for path in cam_ex_paths]
     if world_suffixes != cam_suffixes or world_suffixes != ex_suffixes:
         return None, f"mismatched render view files under {render_subdir}"
@@ -88,7 +90,9 @@ def _collect_entry_record(
         "grasp_npy_path": relpath_str(grasp_npy_path, dataset_dir),
         "grasp_h5_fail_path": relpath_str(grasp_fail_h5_path, dataset_dir),
         "grasp_fail_npy_path": relpath_str(grasp_fail_npy_path, dataset_dir),
-        "partial_pc_path": [relpath_str(path, dataset_dir) for path in partial_pc_paths],
+        "partial_pc_path": [
+            relpath_str(path, dataset_dir) for path in partial_pc_paths
+        ],
         "partial_pc_cam_path": [
             relpath_str(path, dataset_dir) for path in partial_pc_cam_paths
         ],
@@ -186,7 +190,9 @@ def write_split_jsons(
         grasp_fail_npy_name=grasp_fail_npy_name,
     )
     train_records, test_records = split_records_by_object(records, seed=split_seed)
-    train_records, empty_train = filter_nonempty_grasp_records(train_records, dataset_dir)
+    train_records, empty_train = filter_nonempty_grasp_records(
+        train_records, dataset_dir
+    )
     test_records, empty_test = filter_nonempty_grasp_records(test_records, dataset_dir)
     empty_records = empty_train + empty_test
 
@@ -220,18 +226,18 @@ def main() -> None:
     parser.add_argument("-c", "--config", type=str, default=DEFAULT_RUN_CONFIG_PATH)
     args = parser.parse_args()
 
-    cfg = load_config(args.config)
-    objdata_tag = objdata_tag_from_config(cfg, args.config)
-    graspdata_tag = graspdata_tag_from_config(cfg, args.config)
+    cfg = load_run_config(args.config)
+    objdata_tag = objdata_tag_cfg(cfg, args.config)
+    graspdata_tag = graspdata_tag_cfg(cfg, args.config)
     ds = DatasetObjects(
-        scales=run_scales_from_config(cfg),
+        scales=data_run_scales_cfg(cfg),
         objdata_tag=objdata_tag,
-        include_native=use_native_asset_from_config(cfg),
+        include_native=data_use_native_asset_cfg(cfg),
         graspdata_tag=graspdata_tag,
-        generated_dataset_root=generated_dataset_root_from_config(cfg),
-        verbose=data_verbose_from_config(cfg),
+        generated_dataset_root=data_generated_dataset_root_cfg(cfg),
+        verbose=data_verbose_cfg(cfg),
     )
-    dataset_root = Path(generated_dataset_root_from_config(cfg)).resolve()
+    dataset_root = Path(data_generated_dataset_root_cfg(cfg)).resolve()
     dataset_dir = dataset_root / graspdata_tag
     write_split_jsons(
         entries=ds.get_entries(),

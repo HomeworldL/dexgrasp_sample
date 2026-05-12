@@ -21,7 +21,7 @@ if str(REPO_ROOT) not in sys.path:
 from scripts.sweep_utils import SUMMARY_RE, load_cfg, parse_summary, save_cfg
 
 from src.mj_ho import MjHO
-from utils.utils_file import hand_root_stabilization_from_config
+from utils.utils_file import hand_root_stabilization_cfg
 
 BASE_CFG = "configs/run_YCB_liberhand_right.json"
 OBJECT_SCALE_KEY = "YCB_013_apple__scale080"
@@ -42,8 +42,11 @@ SOLIMP_CASES = {
     "solimp_soft_2": [0.50, 0.85, 0.00500, 0.5, 2.0],
 }
 
+
 def parse_args() -> argparse.Namespace:
-    p = argparse.ArgumentParser(description="Sweep solimp with fixed solref and summarize sampling stats.")
+    p = argparse.ArgumentParser(
+        description="Sweep solimp with fixed solref and summarize sampling stats."
+    )
     p.add_argument(
         "--object-scale-key",
         type=str,
@@ -127,7 +130,9 @@ def _summarize_depths(all_depths: list[np.ndarray], per_grasp_max: list[float]) 
     return out
 
 
-def compute_depth_metrics(cfg_path: Path, output_dir: Path, object_name: str, object_xml: Path) -> dict:
+def compute_depth_metrics(
+    cfg_path: Path, output_dir: Path, object_name: str, object_xml: Path
+) -> dict:
     grasp_h5 = output_dir / "grasp.h5"
     if not grasp_h5.exists():
         return {
@@ -159,7 +164,7 @@ def compute_depth_metrics(cfg_path: Path, output_dir: Path, object_name: str, ob
         anchor_params=dict(cfg["hand"]["anchor_params"]),
         hand_profile=dict(cfg["hand"]["profile"]),
         object_profile=dict(cfg["profile_object"]),
-        root_stabilization=hand_root_stabilization_from_config(cfg),
+        root_stabilization=hand_root_stabilization_cfg(cfg),
         object_fixed=True,
     )
 
@@ -190,7 +195,14 @@ def compute_depth_metrics(cfg_path: Path, output_dir: Path, object_name: str, ob
     }
 
 
-def run_case(case_name: str, cfg_path: Path, object_scale_key: str, asset_dir: Path, out_dir_root: Path, log_dir: Path) -> dict:
+def run_case(
+    case_name: str,
+    cfg_path: Path,
+    object_scale_key: str,
+    asset_dir: Path,
+    out_dir_root: Path,
+    log_dir: Path,
+) -> dict:
     out_dir = out_dir_root / case_name
     log_path = log_dir / f"{case_name}.log"
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -215,7 +227,9 @@ def run_case(case_name: str, cfg_path: Path, object_scale_key: str, asset_dir: P
     ]
 
     t0 = time.perf_counter()
-    proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    proc = subprocess.run(
+        cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True
+    )
     wall = time.perf_counter() - t0
     log_path.write_text(proc.stdout, encoding="utf-8")
 
@@ -286,7 +300,15 @@ def main() -> None:
         workers = max(1, min(int(args.max_workers), len(cfg_paths)))
         with ThreadPoolExecutor(max_workers=workers) as ex:
             futs = {
-                ex.submit(run_case, name, path, args.object_scale_key, asset_dir, out_dir_root, log_dir): name
+                ex.submit(
+                    run_case,
+                    name,
+                    path,
+                    args.object_scale_key,
+                    asset_dir,
+                    out_dir_root,
+                    log_dir,
+                ): name
                 for name, path in cfg_paths.items()
             }
             for fut in as_completed(futs):
@@ -314,7 +336,9 @@ def main() -> None:
 
     summary_json = work_dir / "summary.json"
     summary_csv = work_dir / "summary.csv"
-    summary_json.write_text(json.dumps(records, ensure_ascii=False, indent=2), encoding="utf-8")
+    summary_json.write_text(
+        json.dumps(records, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
 
     fields = [
         "case",

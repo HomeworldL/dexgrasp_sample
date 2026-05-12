@@ -15,14 +15,14 @@ from src.dataset_objects import DatasetObjects
 from utils.utils_file import (
     DEFAULT_RUN_CONFIG_PATH,
     build_logs_dir,
-    data_verbose_from_config,
-    generated_dataset_root_from_config,
-    graspdata_tag_from_config,
-    load_config,
-    objdata_tag_from_config,
-    run_scales_from_config,
+    data_generated_dataset_root_cfg,
+    data_run_scales_cfg,
+    data_use_native_asset_cfg,
+    data_verbose_cfg,
+    graspdata_tag_cfg,
+    load_run_config,
+    objdata_tag_cfg,
     safe_filename,
-    use_native_asset_from_config,
 )
 from utils.utils_sample import grasp_outputs_exist
 
@@ -32,18 +32,17 @@ _RUN_PROCS_LOCK = threading.Lock()
 
 
 def parse_args():
-    p = argparse.ArgumentParser(description="Run run.py for all objects in dataset in parallel.")
+    p = argparse.ArgumentParser(
+        description="Run run.py for all objects in dataset in parallel."
+    )
     p.add_argument(
-        "-j", "--max-parallel",
-        type=int,
-        default=4,
-        help="最大并行进程数（默认 4）"
+        "-j", "--max-parallel", type=int, default=4, help="最大并行进程数（默认 4）"
     )
     p.add_argument(
         "--script",
         type=str,
         default="run.py",
-        help="要调用的脚本（默认 run.py，相对或绝对路径）"
+        help="要调用的脚本（默认 run.py，相对或绝对路径）",
     )
     p.add_argument(
         "-c",
@@ -52,9 +51,14 @@ def parse_args():
         default=DEFAULT_RUN_CONFIG_PATH,
         help="运行配置 JSON（默认 configs/run_YCB_liberhand_right.json）",
     )
-    p.add_argument("--force", action="store_true", help="即使已存在配置指定的抓取输出也强制重跑")
-    p.add_argument("-v", "--verbose", action="store_true", help="仅透传详细日志给子进程 run.py")
+    p.add_argument(
+        "--force", action="store_true", help="即使已存在配置指定的抓取输出也强制重跑"
+    )
+    p.add_argument(
+        "-v", "--verbose", action="store_true", help="仅透传详细日志给子进程 run.py"
+    )
     return p.parse_args()
+
 
 def run_one(
     entry: Dict,
@@ -115,6 +119,7 @@ def terminate_all_running():
             pass
     # 等待短时间后强制 kill
     import time
+
     time.sleep(0.5)
     with _RUN_PROCS_LOCK:
         procs = list(_RUN_PROCS)
@@ -134,21 +139,21 @@ def main():
         "Discovering dataset object-scale entries... "
         "(manifest scan + per-scale existing-asset checks)"
     )
-    cfg = load_config(args.config)
-    objdata_tag = objdata_tag_from_config(cfg, args.config)
-    graspdata_tag = graspdata_tag_from_config(cfg, args.config)
+    cfg = load_run_config(args.config)
+    objdata_tag = objdata_tag_cfg(cfg, args.config)
+    graspdata_tag = graspdata_tag_cfg(cfg, args.config)
     logs_dir = build_logs_dir(args.script, graspdata_tag)
     logs_dir.mkdir(parents=True, exist_ok=True)
     discover_start = time.perf_counter()
     pc_subdir = str(cfg["sampling"]["pc_subdir"])
     ds = DatasetObjects(
-        scales=run_scales_from_config(cfg),
+        scales=data_run_scales_cfg(cfg),
         objdata_tag=objdata_tag,
-        include_native=use_native_asset_from_config(cfg),
+        include_native=data_use_native_asset_cfg(cfg),
         graspdata_tag=graspdata_tag,
-        generated_dataset_root=generated_dataset_root_from_config(cfg),
+        generated_dataset_root=data_generated_dataset_root_cfg(cfg),
         pc_subdir=pc_subdir,
-        verbose=bool(args.verbose or data_verbose_from_config(cfg)),
+        verbose=bool(args.verbose or data_verbose_cfg(cfg)),
     )
     discover_elapsed = time.perf_counter() - discover_start
     print(
@@ -187,7 +192,9 @@ def main():
                 "跳过并行执行。"
             )
 
-    print(f"Found {len(entries)} object-scale entries to run. Running with max parallel = {args.max_parallel}.")
+    print(
+        f"Found {len(entries)} object-scale entries to run. Running with max parallel = {args.max_parallel}."
+    )
     print(f"Logs directory: {logs_dir}")
     for i, it in enumerate(entries):
         print(f"  [{i}] {it['object_scale_key']}")
@@ -222,7 +229,9 @@ def main():
             executor.shutdown(wait=True, cancel_futures=False)
             executor = None
         except KeyboardInterrupt:
-            print("\nKeyboardInterrupt detected — terminating running child processes...")
+            print(
+                "\nKeyboardInterrupt detected — terminating running child processes..."
+            )
             terminate_all_running()
             if executor is not None:
                 executor.shutdown(wait=False, cancel_futures=True)

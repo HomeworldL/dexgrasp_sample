@@ -13,11 +13,11 @@ from demo_grasp import DEFAULT_RUN_CONFIG_PATH
 from src.mj_ho import MjHO, RobotKinematics
 from src.sample import downsample_fps
 from utils.utils_file import (
-    anchor_params_from_config,
-    hand_profile_from_config,
-    hand_root_stabilization_from_config,
-    load_config,
-    object_profile_from_config,
+    hand_anchor_params_cfg,
+    hand_profile_cfg,
+    hand_root_stabilization_cfg,
+    load_run_config,
+    object_profile_cfg,
 )
 from utils.utils_pointcloud import sample_surface_o3d
 from utils.utils_sample import (
@@ -35,16 +35,28 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Run one sim_grasp(record_history=True) case and inspect it in viser."
     )
-    parser.add_argument("--object-scale-key", type=str, required=True, help="Unique object-scale key.")
-    parser.add_argument("--coacd-path", type=str, required=True, help="Path to scaled COACD mesh OBJ.")
-    parser.add_argument("--mjcf-path", type=str, required=True, help="Path to scaled object MJCF.")
+    parser.add_argument(
+        "--object-scale-key", type=str, required=True, help="Unique object-scale key."
+    )
+    parser.add_argument(
+        "--coacd-path", type=str, required=True, help="Path to scaled COACD mesh OBJ."
+    )
+    parser.add_argument(
+        "--mjcf-path", type=str, required=True, help="Path to scaled object MJCF."
+    )
     parser.add_argument(
         "--asset-dir",
         type=str,
         default=None,
         help="Prepared object-scale asset directory. If set and pc_warp data exists, reuse it.",
     )
-    parser.add_argument("-c", "--config", type=str, default=DEFAULT_RUN_CONFIG_PATH, help="JSON config path.")
+    parser.add_argument(
+        "-c",
+        "--config",
+        type=str,
+        default=DEFAULT_RUN_CONFIG_PATH,
+        help="JSON config path.",
+    )
     parser.add_argument(
         "--skip-candidates",
         type=int,
@@ -63,7 +75,9 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="Optional output path for the captured debug dump (.npz).",
     )
-    parser.add_argument("-v", "--verbose", action="store_true", help="Enable verbose logs.")
+    parser.add_argument(
+        "-v", "--verbose", action="store_true", help="Enable verbose logs."
+    )
     return parser.parse_args()
 
 
@@ -73,7 +87,12 @@ def _default_dump_path(object_scale_key: str, config_path: str) -> Path:
     return Path("tmp") / f"debug_viser_grasp_{cfg_stem}_{safe_key}.npz"
 
 
-def _load_points_and_normals(cfg: Dict[str, Any], asset_dir: Optional[str], coacd_path: str) -> tuple[np.ndarray, np.ndarray]:
+def _load_points_and_normals(
+    cfg: Dict[str, Any],
+    object_scale_key: str,
+    asset_dir: Optional[str],
+    coacd_path: str,
+) -> tuple[np.ndarray, np.ndarray]:
     pc_subdir = str(cfg["sampling"]["pc_subdir"])
     if asset_dir is not None:
         try:
@@ -81,7 +100,14 @@ def _load_points_and_normals(cfg: Dict[str, Any], asset_dir: Optional[str], coac
         except Exception:
             pass
     n_points = int(cfg["sampling"]["n_points"])
-    return sample_surface_o3d(coacd_path, n_points=n_points, method="poisson")
+    _, parsed_scale = parse_object_scale_key(object_scale_key)
+    mesh_scale = 1.0 if parsed_scale is None else float(parsed_scale)
+    return sample_surface_o3d(
+        coacd_path,
+        n_points=n_points,
+        method="poisson",
+        scale=mesh_scale,
+    )
 
 
 def _build_dump(
@@ -98,10 +124,10 @@ def _build_dump(
 ) -> Dict[str, Any]:
     object_name, parsed_scale = parse_object_scale_key(object_scale_key)
     obj_info = {"name": object_name, "xml_abs": object_mjcf_path}
-    anchor_params = anchor_params_from_config(cfg)
-    hand_profile = hand_profile_from_config(cfg)
-    object_profile = object_profile_from_config(cfg)
-    root_stabilization = hand_root_stabilization_from_config(cfg)
+    anchor_params = hand_anchor_params_cfg(cfg)
+    hand_profile = hand_profile_cfg(cfg)
+    object_profile = object_profile_cfg(cfg)
+    root_stabilization = hand_root_stabilization_cfg(cfg)
 
     mjho = MjHO(
         obj_info,
@@ -150,16 +176,22 @@ def _build_dump(
             break
 
         mjho.set_hand_qpos(qpos_prepared[i])
-        qpos_grasp, history = mjho.sim_grasp(visualize=False, record_history=True, **sim_grasp_cfg)
+        qpos_grasp, history = mjho.sim_grasp(
+            visualize=False, record_history=True, **sim_grasp_cfg
+        )
         qpos_grasp = np.asarray(qpos_grasp, dtype=np.float32)
 
-        anchor_positions = np.asarray(history.get("anchor_positions", []), dtype=np.float32)
+        anchor_positions = np.asarray(
+            history.get("anchor_positions", []), dtype=np.float32
+        )
         pts_target = np.asarray(history.get("pts_target", []), dtype=np.float32)
         pts_top_Mp = np.asarray(history.get("pts_top_Mp", []), dtype=np.float32)
         qpos_history = np.asarray(history.get("qpos", []), dtype=np.float32)
         v_anchors = np.asarray(history.get("v_anchors", []), dtype=np.float32)
         dq_per_anchor = np.asarray(history.get("dq_per_anchor", []), dtype=np.float32)
-        jacobian_per_anchor = np.asarray(history.get("jacobian_per_anchor", []), dtype=np.float32)
+        jacobian_per_anchor = np.asarray(
+            history.get("jacobian_per_anchor", []), dtype=np.float32
+        )
         total_dq_hand = np.asarray(history.get("total_dq_hand", []), dtype=np.float32)
         actuated_dq = np.asarray(history.get("actuated_dq", []), dtype=np.float32)
         ctrl_history = np.asarray(history.get("ctrl", []), dtype=np.float32)
@@ -184,7 +216,9 @@ def _build_dump(
                 "object_mjcf_path": object_mjcf_path,
                 "coacd_path": coacd_path,
                 "anchor_body_names": list(anchor_params.keys()),
-                "actuated_joint_indices": list(np.asarray(hand_profile["ctrl_joint_indices"], dtype=int).tolist()),
+                "actuated_joint_indices": list(
+                    np.asarray(hand_profile["ctrl_joint_indices"], dtype=int).tolist()
+                ),
                 "sim_grasp_cfg": dict(cfg["sim_grasp"]),
                 "prepared_contact_count": 0,
                 "final_contact_count": final_contact_count,
@@ -244,15 +278,21 @@ def _save_dump(path: Path, dump: Dict[str, Any]) -> None:
     )
 
 
-def _mesh_with_tint(mesh: Optional[trimesh.Trimesh], rgba: tuple[int, int, int, int]) -> Optional[trimesh.Trimesh]:
+def _mesh_with_tint(
+    mesh: Optional[trimesh.Trimesh], rgba: tuple[int, int, int, int]
+) -> Optional[trimesh.Trimesh]:
     if mesh is None:
         return None
     out = mesh.copy()
-    out.visual.vertex_colors = np.tile(np.asarray(rgba, dtype=np.uint8), (out.vertices.shape[0], 1))
+    out.visual.vertex_colors = np.tile(
+        np.asarray(rgba, dtype=np.uint8), (out.vertices.shape[0], 1)
+    )
     return out
 
 
-def _build_history_point_cloud(points_by_step: np.ndarray, start_rgb: np.ndarray, end_rgb: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+def _build_history_point_cloud(
+    points_by_step: np.ndarray, start_rgb: np.ndarray, end_rgb: np.ndarray
+) -> tuple[np.ndarray, np.ndarray]:
     if points_by_step.ndim != 3 or points_by_step.shape[0] <= 0:
         return np.zeros((0, 3), dtype=np.float32), np.zeros((0, 3), dtype=np.float32)
     n_steps, n_points, _ = points_by_step.shape
@@ -261,7 +301,9 @@ def _build_history_point_cloud(points_by_step: np.ndarray, start_rgb: np.ndarray
         colors = np.tile(start_rgb.reshape(1, 3), (flat_points.shape[0], 1))
         return flat_points, colors.astype(np.float32, copy=False)
     step_alphas = np.linspace(0.0, 1.0, n_steps, dtype=np.float32).reshape(n_steps, 1)
-    step_colors = (1.0 - step_alphas) * start_rgb.reshape(1, 3) + step_alphas * end_rgb.reshape(1, 3)
+    step_colors = (1.0 - step_alphas) * start_rgb.reshape(
+        1, 3
+    ) + step_alphas * end_rgb.reshape(1, 3)
     colors = np.repeat(step_colors, n_points, axis=0)
     return flat_points, colors.astype(np.float32, copy=False)
 
@@ -331,7 +373,9 @@ def _launch_viser(dump: Dict[str, Any]) -> None:
 
     server = viser.ViserServer()
     server.scene.set_up_direction([0.0, 0.0, 1.0])
-    server.scene.add_mesh_trimesh("/object", mesh=_mesh_with_tint(object_mesh, (170, 170, 190, 255)))
+    server.scene.add_mesh_trimesh(
+        "/object", mesh=_mesh_with_tint(object_mesh, (170, 170, 190, 255))
+    )
     if prepared_mesh is not None:
         server.scene.add_mesh_trimesh(
             "/hand_prepared",
@@ -409,14 +453,18 @@ def _launch_viser(dump: Dict[str, Any]) -> None:
 
     @step_button.on_click
     def _(_: Any) -> None:
-        step_slider.value = int((int(step_slider.value) + 1) % int(qpos_history.shape[0]))
+        step_slider.value = int(
+            (int(step_slider.value) + 1) % int(qpos_history.shape[0])
+        )
 
     refresh()
     print("viser debug viewer is running. Press Ctrl-C to stop.")
     try:
         while True:
             if bool(play_checkbox.value):
-                step_slider.value = int((int(step_slider.value) + 1) % int(qpos_history.shape[0]))
+                step_slider.value = int(
+                    (int(step_slider.value) + 1) % int(qpos_history.shape[0])
+                )
             time.sleep(0.15)
     except KeyboardInterrupt:
         print("viser debug viewer stopped.")
@@ -424,14 +472,19 @@ def _launch_viser(dump: Dict[str, Any]) -> None:
 
 def main() -> None:
     args = parse_args()
-    cfg = load_config(args.config)
+    cfg = load_run_config(args.config)
     cfg["__config_path__"] = str(Path(args.config).resolve())
     set_seed(int(cfg["seed"]))
 
     verbose = bool(args.verbose)
     hand_xml_path = os.path.abspath(cfg["hand"]["xml_path"])
     asset_dir = args.asset_dir or str(Path(args.coacd_path).resolve().parent)
-    points, normals = _load_points_and_normals(cfg, asset_dir, args.coacd_path)
+    points, normals = _load_points_and_normals(
+        cfg,
+        args.object_scale_key,
+        asset_dir,
+        args.coacd_path,
+    )
 
     dump = _build_dump(
         cfg=cfg,
@@ -446,7 +499,11 @@ def main() -> None:
         verbose=verbose,
     )
 
-    dump_path = Path(args.dump_path) if args.dump_path else _default_dump_path(args.object_scale_key, args.config)
+    dump_path = (
+        Path(args.dump_path)
+        if args.dump_path
+        else _default_dump_path(args.object_scale_key, args.config)
+    )
     _save_dump(dump_path, dump)
     print(f"debug dump saved to {dump_path.resolve()}")
     _launch_viser(dump)

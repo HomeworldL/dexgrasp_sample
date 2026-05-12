@@ -16,14 +16,16 @@ import numpy as np
 from src.mj_ho import MjHO
 from utils.utils_file import (
     DEFAULT_RUN_CONFIG_PATH,
-    hand_profile_from_config,
-    hand_root_stabilization_from_config,
-    load_config,
-    object_profile_from_config,
-    anchor_params_from_config,
+    data_generated_dataset_root_cfg,
+    graspdata_tag_cfg,
+    hand_anchor_params_cfg,
+    hand_profile_cfg,
+    hand_root_stabilization_cfg,
+    load_run_config,
+    object_profile_cfg,
+    objdata_tag_cfg,
 )
 from utils.utils_seed import set_seed
-
 
 LOGGER = logging.getLogger(__name__)
 
@@ -45,13 +47,13 @@ def _resolve_qpos_dtype(dtype_name: str) -> np.dtype:
 
 
 def _load_grasp_arrays(
-    object_scale_dir: Path,
+    grasp_dir: Path,
     qpos_dtype: np.dtype,
     grasp_h5_name: str,
     grasp_npy_name: str,
 ) -> Dict[str, np.ndarray]:
-    grasp_npy_path = object_scale_dir / str(grasp_npy_name)
-    grasp_h5_path = object_scale_dir / str(grasp_h5_name)
+    grasp_npy_path = grasp_dir / str(grasp_npy_name)
+    grasp_h5_path = grasp_dir / str(grasp_h5_name)
     required_keys = ("qpos_prepared", "qpos_squeeze")
 
     if grasp_npy_path.exists():
@@ -59,8 +61,7 @@ def _load_grasp_arrays(
         missing = [key for key in required_keys if key not in payload]
         if not missing:
             return {
-                key: np.asarray(payload[key], dtype=qpos_dtype)
-                for key in required_keys
+                key: np.asarray(payload[key], dtype=qpos_dtype) for key in required_keys
             }
 
     if not grasp_h5_path.exists():
@@ -72,17 +73,25 @@ def _load_grasp_arrays(
         missing = [key for key in required_keys if key not in handle]
         if missing:
             raise KeyError(f"Missing datasets {missing} in {grasp_h5_path}")
-        return {key: np.asarray(handle[key][:], dtype=qpos_dtype) for key in required_keys}
+        return {
+            key: np.asarray(handle[key][:], dtype=qpos_dtype) for key in required_keys
+        }
 
 
 def visualize_extforce_grasps(
     cfg: Dict,
+    config_path: str,
     object_scale_dir: Path,
     qpos_dtype_name: str,
 ) -> int:
     qpos_dtype = _resolve_qpos_dtype(qpos_dtype_name)
+    asset_dir, grasp_dir = _resolve_asset_and_grasp_dirs(
+        cfg=cfg,
+        config_path=config_path,
+        object_scale_dir=object_scale_dir,
+    )
     grasp_arrays = _load_grasp_arrays(
-        object_scale_dir,
+        grasp_dir,
         qpos_dtype=qpos_dtype,
         grasp_h5_name=str(cfg["data"]["h5_name"]),
         grasp_npy_name=str(cfg["data"]["npy_name"]),
@@ -91,25 +100,25 @@ def visualize_extforce_grasps(
     qpos_prepared_raw = grasp_arrays["qpos_prepared"]
 
     if qpos_squeeze.shape[0] <= 0:
-        raise ValueError(f"No grasps found in {object_scale_dir}")
+        raise ValueError(f"No grasps found in {grasp_dir}")
     if qpos_squeeze.shape[0] != qpos_prepared_raw.shape[0]:
         raise ValueError(
-            f"Mismatched grasp counts in {object_scale_dir}: "
+            f"Mismatched grasp counts in {grasp_dir}: "
             f"qpos_squeeze={qpos_squeeze.shape[0]}, qpos_prepared={qpos_prepared_raw.shape[0]}"
         )
 
-    object_name = object_scale_dir.parent.name
-    object_mjcf_path = (object_scale_dir / "object.xml").resolve()
+    object_name = asset_dir.parent.name
+    object_mjcf_path = (asset_dir / "object.xml").resolve()
     if not object_mjcf_path.exists():
         raise FileNotFoundError(f"Object MJCF not found: {object_mjcf_path}")
 
-    root_stabilization = hand_root_stabilization_from_config(cfg)
+    root_stabilization = hand_root_stabilization_cfg(cfg)
     mjho_valid = MjHO(
         {"name": object_name, "xml_abs": str(object_mjcf_path)},
         cfg["hand"]["xml_path"],
-        anchor_params=anchor_params_from_config(cfg),
-        hand_profile=hand_profile_from_config(cfg),
-        object_profile=object_profile_from_config(cfg),
+        anchor_params=hand_anchor_params_cfg(cfg),
+        hand_profile=hand_profile_cfg(cfg),
+        object_profile=object_profile_cfg(cfg),
         root_stabilization=root_stabilization,
         object_fixed=False,
         visualize=True,
@@ -133,7 +142,7 @@ def visualize_extforce_grasps(
         success_count += int(success_flag)
         LOGGER.info(
             "[%s] grasp_idx=%d success=%s pos_delta=%.6f angle_delta=%.6f",
-            object_scale_dir.name,
+            asset_dir.name,
             grasp_idx,
             success_flag,
             float(pos_delta),
@@ -142,12 +151,45 @@ def visualize_extforce_grasps(
 
     LOGGER.info(
         "[%s] extforce replay finished success=%d/%d",
-        object_scale_dir.name,
+        asset_dir.name,
         success_count,
         int(qpos_squeeze.shape[0]),
     )
     _hold_viewer(mjho_valid)
     return success_count
+
+
+def _resolve_asset_and_grasp_dirs(
+    cfg: Dict,
+    config_path: str,
+    object_scale_dir: Path,
+) -> tuple[Path, Path]:
+    object_scale_dir = object_scale_dir.resolve()
+    grasp_h5_name = str(cfg["data"]["h5_name"])
+    grasp_npy_name = str(cfg["data"]["npy_name"])
+    has_object_xml = (object_scale_dir / "object.xml").exists()
+    has_grasp = (object_scale_dir / grasp_h5_name).exists() or (
+        object_scale_dir / grasp_npy_name
+    ).exists()
+    dataset_root = Path(data_generated_dataset_root_cfg(cfg)).resolve()
+
+    if has_object_xml:
+        asset_dir = object_scale_dir
+        if has_grasp:
+            return asset_dir, asset_dir
+        object_name = asset_dir.parent.name
+        scale_tag = asset_dir.name
+        grasp_dir = (
+            dataset_root / graspdata_tag_cfg(cfg, config_path) / object_name / scale_tag
+        )
+        return asset_dir, grasp_dir
+
+    scale_tag = object_scale_dir.name
+    object_name = object_scale_dir.parent.name
+    asset_dir = (
+        dataset_root / objdata_tag_cfg(cfg, config_path) / object_name / scale_tag
+    )
+    return asset_dir, object_scale_dir
 
 
 def main() -> None:
@@ -158,7 +200,7 @@ def main() -> None:
         "--object-scale-dir",
         type=str,
         required=True,
-        help="Object-scale directory containing configured grasp outputs and object.xml.",
+        help="Object-scale asset dir under objdata_* or grasp-output dir under graspdata_*.",
     )
     parser.add_argument(
         "--dtype",
@@ -186,10 +228,11 @@ def main() -> None:
         level=logging.INFO if args.verbose else logging.WARNING,
         format="[%(levelname)s] %(message)s",
     )
-    cfg = load_config(args.config)
+    cfg = load_run_config(args.config)
     set_seed(int(cfg["seed"]))
     visualize_extforce_grasps(
         cfg=cfg,
+        config_path=args.config,
         object_scale_dir=Path(args.object_scale_dir).resolve(),
         qpos_dtype_name=args.dtype,
     )

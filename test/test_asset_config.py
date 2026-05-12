@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
 
-from utils.utils_file import load_asset_config
+from utils.utils_file import load_asset_config, usd_convert_cfg
 
 
 def test_load_asset_config_without_hand_fields(tmp_path: Path):
@@ -63,3 +63,23 @@ def test_load_asset_config_without_hand_fields(tmp_path: Path):
 
     assert cfg["data"]["objdata_tag"] == "objdata_DEMO"
     assert cfg["data"]["asset_scales"] == [0.05, 0.06]
+
+
+def test_usd_convert_cfg_reads_existing_usd_convert_block():
+    cfg = {
+        "usd_convert": {
+            "backend": "urdf",
+            "force": True,
+            "fix_base": False,
+            "import_sites": False,
+            "verify_inertial": True,
+            "merge_joints": False,
+            "make_instanceable": False,
+            "convex_decompose_mesh": True,
+        }
+    }
+
+    out = usd_convert_cfg(cfg)
+
+    assert out["backend"] == "urdf"
+    assert out["force"] is True

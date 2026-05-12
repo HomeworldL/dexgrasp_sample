@@ -38,7 +38,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from src.mj_ho import MjHO
-from utils.utils_file import load_config
+from utils.utils_file import load_run_config
 
 SUMMARY_RE = re.compile(
     r"samples=(?P<samples>\d+)\s+no_col=(?P<no_col>\d+)\s+valid=(?P<valid>\d+)\s+"
@@ -92,7 +92,7 @@ def parse_args() -> argparse.Namespace:
         "--asset-dir",
         type=str,
         default="datasets/objdata_YCB/YCB_001_chips_can/scale080",
-        help="Directory containing coacd.obj / object.xml / pc_warp.",
+        help="Object-scale asset directory containing object.xml and pc_warp.",
     )
     parser.add_argument(
         "--config-dir",
@@ -573,15 +573,13 @@ def main() -> None:
     args = parse_args()
 
     repo_root = Path.cwd()
-    base_cfg = load_config(args.base_config)
+    base_cfg = load_run_config(args.base_config)
     object_scale_key = str(args.object_scale_key)
     object_name = object_scale_key.split("__", 1)[0]
 
     asset_dir = Path(args.asset_dir).resolve()
     if not asset_dir.exists():
         raise FileNotFoundError(f"asset-dir not found: {asset_dir}")
-    if not (asset_dir / "coacd.obj").exists():
-        raise FileNotFoundError(f"Missing coacd.obj in {asset_dir}")
     if not (asset_dir / "object.xml").exists():
         raise FileNotFoundError(f"Missing object.xml in {asset_dir}")
 
@@ -652,7 +650,7 @@ def main() -> None:
         summary = _parse_summary_from_stdout(stdout)
 
         depth_metrics = _compute_depth_metrics(
-            cfg=load_config(str(cfg_path)),
+            cfg=load_run_config(str(cfg_path)),
             object_name=object_name,
             object_xml=asset_dir / "object.xml",
             grasp_h5_path=case_output_dir / "grasp.h5",

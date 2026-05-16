@@ -9,7 +9,6 @@ mujoco = pytest.importorskip("mujoco")
 from src.mj_ho import MjHO, RobotKinematics
 from src.scale_dataset_builder import ScaleDatasetBuilder
 
-
 LIBERHAND_PROFILE = {
     "ctrl_joint_indices": [0, 1, 2, 4, 5, 6, 8, 9, 12, 13, 16, 17, 18],
     "friction_coef": [0.3, 0.01],
@@ -35,13 +34,13 @@ def _make_cube_mesh(path: Path, scale: float = 1.0):
 
 
 def _build_temp_object_xml(tmp_path: Path) -> str:
+    raw_dir = tmp_path / "raw"
     raw_obj = {
         "object_name": "obj_a",
-        "coacd_abs": str((tmp_path / "raw" / "coacd.obj").resolve()),
-        "manifold_abs": str((tmp_path / "raw" / "manifold.obj").resolve()),
+        "source_dir_abs": str(raw_dir.resolve()),
     }
-    _make_cube_mesh(Path(raw_obj["coacd_abs"]))
-    _make_cube_mesh(Path(raw_obj["manifold_abs"]))
+    _make_cube_mesh(raw_dir / "coacd.obj")
+    _make_cube_mesh(raw_dir / "manifold.obj")
 
     b = ScaleDatasetBuilder(str(tmp_path / "datasets"))
     rec = b.build_scale_assets(

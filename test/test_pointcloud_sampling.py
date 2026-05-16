@@ -20,7 +20,9 @@ def _make_mesh_object(obj_dir: Path):
     m.export(obj_dir / "convex_parts" / "part_000.obj")
 
 
-def _build_objdata_assets(tmp_path: Path, dataset_name: str, obj_name: str, scales: list[float]) -> None:
+def _build_objdata_assets(
+    tmp_path: Path, dataset_name: str, obj_name: str, scales: list[float]
+) -> None:
     obj_dir = tmp_path / dataset_name / obj_name
     objdata_tag = f"objdata_{dataset_name}"
     builder = ScaleDatasetBuilder(str(tmp_path / "datasets"))
@@ -28,8 +30,7 @@ def _build_objdata_assets(tmp_path: Path, dataset_name: str, obj_name: str, scal
         config_stem=objdata_tag,
         object_info={
             "object_name": obj_name,
-            "coacd_abs": str((obj_dir / "coacd.obj").resolve()),
-            "manifold_abs": str((obj_dir / "manifold.obj").resolve()),
+            "source_dir_abs": str(obj_dir.resolve()),
         },
         scales=scales,
         mass_kg=0.1,
@@ -81,7 +82,9 @@ def test_sample_surface_mesh_with_coacd_path(tmp_path: Path):
             }
         ],
     }
-    (tmp_path / "MSO" / "manifest.process_meshes.json").write_text(json.dumps(manifest), encoding="utf-8")
+    (tmp_path / "MSO" / "manifest.process_meshes.json").write_text(
+        json.dumps(manifest), encoding="utf-8"
+    )
     _build_objdata_assets(tmp_path, "MSO", "obj_a", scales=[0.06])
 
     ds = DatasetObjects(
@@ -105,9 +108,13 @@ def test_sample_surface_o3d_is_reproducible_after_set_seed(tmp_path: Path):
     _make_mesh_object(obj_dir)
 
     set_seed(0)
-    pts1, norms1 = sample_surface_o3d(str(obj_dir / "coacd.obj"), n_points=128, method="poisson")
+    pts1, norms1 = sample_surface_o3d(
+        str(obj_dir / "coacd.obj"), n_points=128, method="poisson"
+    )
     set_seed(0)
-    pts2, norms2 = sample_surface_o3d(str(obj_dir / "coacd.obj"), n_points=128, method="poisson")
+    pts2, norms2 = sample_surface_o3d(
+        str(obj_dir / "coacd.obj"), n_points=128, method="poisson"
+    )
 
     assert np.array_equal(pts1, pts2)
     assert np.array_equal(norms1, norms2)

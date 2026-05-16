@@ -55,8 +55,7 @@ def _build_objdata_assets(
         config_stem=objdata_tag,
         object_info={
             "object_name": obj_name,
-            "coacd_abs": str((obj_dir / "coacd.obj").resolve()),
-            "manifold_abs": str((obj_dir / "manifold.obj").resolve()),
+            "source_dir_abs": str(obj_dir.resolve()),
         },
         scales=scales,
         mass_kg=0.12,

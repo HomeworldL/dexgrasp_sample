@@ -1,5 +1,12 @@
 # CHANGELOG
 
+## 2026-05-16
+
+### Changed
+- Updated objdata asset preparation to carry optional `visual.obj`, `textured_visual.mtl`, and `textured_visual.png` through shared raw and normalized mesh directories.
+- Added visual geoms to generated object MJCF assets while keeping visual meshes non-contact and collision meshes in group 3.
+- Simplified `prepare_object_assets.py` and `ScaleDatasetBuilder` around source-directory inputs, centralized asset filenames, and shared path/entry helpers.
+
 ## 2026-05-12
 
 ### Changed

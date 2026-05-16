@@ -45,7 +45,7 @@
   },
   "usd_convert": {
     "backend": "urdf",
-    "force": false,
+    "force": true,
     "merge_joints": false,
     "fix_base": false,
     "make_instanceable": false,

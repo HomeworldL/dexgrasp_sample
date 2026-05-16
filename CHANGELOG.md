@@ -9,6 +9,7 @@
 - Aligned MJWarp grasp outputs with the CPU dataset schema by writing `qpos_squeeze`, `grasp_fail.h5`, and `grasp_fail.npy`, and by applying `fail_keep_ratio` to GPU failure exports.
 - Updated MJWarp extforce validation to rebuild pregrasp from the stored squeeze pose plus prepared joints, and to apply hand root stabilization consistently with the CPU path.
 - Standardized MJWarp runtime defaults around `batch_size=256`, `nconmax=32`, `naconmax=16384`, `njmax=200`, and `ccd_iterations=200`.
+- Enabled forced USD conversion in the DGN asset config and normalized YCB liberhand-right data config ordering.
 
 ## 2026-05-16
 

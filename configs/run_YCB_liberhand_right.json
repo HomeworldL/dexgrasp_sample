@@ -13,6 +13,7 @@
       0.14,
       0.16
     ],
+    "use_native_asset": false,
     "verbose": false,
     "max_cap": 100,
     "max_time_sec": 180.0,
@@ -22,8 +23,7 @@
     "fail_h5_name": "grasp_fail.h5",
     "fail_npy_name": "grasp_fail.npy",
     "fail_keep_ratio": 1.2,
-    "min_valid_count": 5,
-    "use_native_asset": false
+    "min_valid_count": 5
   },
   "hand": {
     "xml_path": "./assets/hands/liberhand/liberhand_right.xml",

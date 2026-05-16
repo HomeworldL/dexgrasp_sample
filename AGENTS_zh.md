@@ -130,12 +130,19 @@
 
 ## 采样流水线（GPU版本）
 - 使用MJWarp
-- 对于 `run_mjw.py`，保持 `data.max_cap=100`，并使用 `data.max_time_sec` 限制 extforce 阶段墙钟时间（当前默认：`180s`）。
-- 如果目标是尽快为每个 object-scale 收集约 `100` 个有效抓取，优先将 `batch_size` 设在接近 `max_cap` 的范围，通常为 `128`、`256` 或 `512`。
-- 在小容量采集目标下，不要默认使用过大的 `batch_size`，例如 `4096`：单次 MJWarp 步骤会过重，extforce 阶段也会明显变慢。
-- `batch_size=4096` 更适合大规模抓取采集，而不适合快速达到 `max_cap=100`。
-- 由于减小 `batch_size` 也会减少流入后续阶段的候选样本总数，因此 `sampling.n_points` 也应相应控制。
-- 对于当前 `max_cap=100` 的目标，`sampling.n_points=2048` 是当前默认值；它能在候选覆盖率与碰撞过滤、`sim_grasp` 开销之间保持合理平衡。
+- YCB 的 GPU harvesting 路径使用 `configs/run_YCB_liberhand_right_gpu.json`。
+- GPU harvesting 配置目标为 `data.max_cap=2000`；GPU 路径不应使用 `data.max_time_sec` 截断 extforce 验证。
+- MJWarp 运行容量参数仍是 CLI 选项，当前默认值为：
+  - `--batch-size 256`
+  - `--nconmax 32`
+  - `--naconmax 16384`
+  - `--njmax 200`
+  - `--ccd-iterations 200`
+- 只有在确认 GPU 显存和单步耗时可接受后再增大 `batch_size`；更大的 batch 能提高占用率，但也会让每步 MJWarp 和 extforce 循环更重。
+- `batch_size=4096` 更适合大规模 harvesting 实验，不适合快速 sanity check。
+- 当前 GPU 配置使用 `sampling.n_points=4096` 来保证候选覆盖率。
+- GPU 失败样本导出会使用配置 seed 做确定性 shuffle，并截断到 `floor(data.fail_keep_ratio * valid_count)`。
+- GPU 正样本输出当前不会因为 `data.min_valid_count` 被清零；该最小数量截断逻辑仍仅用于 CPU，除非后续明确启用。
 
 ## 数据集切分策略
 - 使用 `build_dataset_splits.py` 扫描已完成的抓取/渲染输出，并生成 `datasets/<dataset_tag>/train.json` 与 `datasets/<dataset_tag>/test.json`。

@@ -24,7 +24,11 @@ from utils.utils_file import (
     objdata_tag_cfg,
     safe_filename,
 )
-from utils.utils_sample import global_pc_exists, grasp_outputs_exist
+from utils.utils_sample import (
+    global_pc_exists,
+    grasp_fail_outputs_exist,
+    grasp_outputs_exist,
+)
 
 _RUN_PROCS = []
 _RUN_PROCS_LOCK = threading.Lock()
@@ -56,11 +60,11 @@ def parse_args():
     p.add_argument(
         "-v", "--verbose", action="store_true", help="仅透传详细日志给子进程 run_mjw.py"
     )
-    p.add_argument("--batch-size", type=int, default=512)
+    p.add_argument("--batch-size", type=int, default=256)
     p.add_argument("--device", type=str, default="cuda:0")
     p.add_argument("--nconmax", type=int, default=32)
     p.add_argument("--naconmax", type=int, default=16384)
-    p.add_argument("--njmax", type=int, default=None)
+    p.add_argument("--njmax", type=int, default=200)
     p.add_argument("--ccd-iterations", type=int, default=200)
     return p.parse_args()
 
@@ -164,6 +168,8 @@ def main():
 
     h5_name = str(cfg["data"]["h5_name"])
     npy_name = str(cfg["data"]["npy_name"])
+    fail_h5_name = str(cfg["data"]["fail_h5_name"])
+    fail_npy_name = str(cfg["data"]["fail_npy_name"])
     render_subdir = str(cfg["sampling"]["pc_subdir"])
     if not args.force:
         total_entries = len(entries)
@@ -176,6 +182,11 @@ def main():
                     h5_name=h5_name,
                     npy_name=npy_name,
                 )
+                and grasp_fail_outputs_exist(
+                    str(it["output_dir_abs"]),
+                    h5_name=fail_h5_name,
+                    npy_name=fail_npy_name,
+                )
                 and global_pc_exists(
                     str(it["output_dir_abs"]),
                     render_subdir=render_subdir,
@@ -186,11 +197,13 @@ def main():
         if skipped > 0:
             print(
                 f"Pre-skip existing results: {skipped}/{total_entries} entries already have "
-                f"{h5_name}, {npy_name}, and {render_subdir}/global_pc.npy."
+                f"{h5_name}, {npy_name}, {fail_h5_name}, {fail_npy_name}, "
+                f"and {render_subdir}/global_pc.npy."
             )
         if not entries:
             print(
-                f"所有 object-scale 条目都已存在 {h5_name}、{npy_name} 和 "
+                f"所有 object-scale 条目都已存在 {h5_name}、{npy_name}、"
+                f"{fail_h5_name}、{fail_npy_name} 和 "
                 f"{render_subdir}/global_pc.npy，跳过执行。"
             )
             return

@@ -130,12 +130,19 @@ Current mainline work is split into:
 
 ## Sampling Pipeline (GPU Version)
 - Use MJWarp.
-- For `run_mjw.py`, keep `data.max_cap=100` and cap extforce wall-clock time with `data.max_time_sec` (current default: `180s`).
-- If the goal is to collect about `100` valid grasps per object-scale quickly, prefer `batch_size` near `max_cap`, typically `128`, `256`, or `512`.
-- Do not default to overly large `batch_size` such as `4096` for small-cap collection: one MJWarp step becomes too heavy and the extforce stage slows down noticeably.
-- `batch_size=4096` is more appropriate for large-scale grasp harvesting, not for quickly reaching `max_cap=100`.
-- Because reducing `batch_size` also reduces total sampled candidates flowing into later stages, `sampling.n_points` should also be moderated.
-- For the current `max_cap=100` target, `sampling.n_points=2048` is the current default; it keeps candidate coverage reasonable without making collision filtering and `sim_grasp` excessively slow.
+- Use `configs/run_YCB_liberhand_right_gpu.json` for the YCB GPU harvesting path.
+- The GPU harvesting config targets `data.max_cap=2000`; the GPU path should not stop extforce validation with `data.max_time_sec`.
+- Runtime MJWarp capacity knobs are CLI options, with current defaults:
+  - `--batch-size 256`
+  - `--nconmax 32`
+  - `--naconmax 16384`
+  - `--njmax 200`
+  - `--ccd-iterations 200`
+- Increase `batch_size` only after checking GPU memory and step time; larger values improve occupancy but make each MJWarp step and extforce loop heavier.
+- `batch_size=4096` is more appropriate for large-scale harvesting experiments than for quick sanity checks.
+- Current GPU config uses `sampling.n_points=4096` for candidate coverage.
+- GPU failure export deterministically shuffles retained failure rows with the config seed and truncates them to `floor(data.fail_keep_ratio * valid_count)`.
+- GPU positive outputs are not currently zeroed by `data.min_valid_count`; that minimum-count truncation remains CPU-only unless explicitly enabled later.
 
 ## Dataset Split Policy
 - Use `build_dataset_splits.py` to scan completed grasp/render outputs and write `datasets/<dataset_tag>/train.json` and `datasets/<dataset_tag>/test.json`.

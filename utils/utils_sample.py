@@ -39,6 +39,15 @@ def grasp_outputs_exist(
     return (out_dir / str(h5_name)).exists() and (out_dir / str(npy_name)).exists()
 
 
+def grasp_fail_outputs_exist(
+    output_dir_abs: str,
+    h5_name: str = "grasp_fail.h5",
+    npy_name: str = "grasp_fail.npy",
+) -> bool:
+    out_dir = Path(output_dir_abs)
+    return (out_dir / str(h5_name)).exists() and (out_dir / str(npy_name)).exists()
+
+
 def global_pc_path(output_dir_abs: str, render_subdir: str) -> Path:
     return Path(output_dir_abs) / str(render_subdir) / "global_pc.npy"
 
@@ -55,7 +64,9 @@ def global_pc_exists(output_dir_abs: str, render_subdir: str) -> bool:
     return arr.size > 0
 
 
-def write_global_pc(points: np.ndarray, output_dir_abs: str, render_subdir: str) -> Path:
+def write_global_pc(
+    points: np.ndarray, output_dir_abs: str, render_subdir: str
+) -> Path:
     path = global_pc_path(output_dir_abs, render_subdir)
     path.parent.mkdir(parents=True, exist_ok=True)
     np.save(path, np.asarray(points, dtype=np.float32))
@@ -113,7 +124,13 @@ def grasp_h5_nonempty(h5_path: Path) -> Tuple[bool, str]:
 def write_grasp_npy_from_h5(h5_path: Path, npy_path: Path) -> None:
     payload: Dict[str, np.ndarray] = {}
     with h5py.File(h5_path, "r") as hf:
-        for key in ("qpos_init", "qpos_approach", "qpos_prepared", "qpos_grasp", "qpos_squeeze"):
+        for key in (
+            "qpos_init",
+            "qpos_approach",
+            "qpos_prepared",
+            "qpos_grasp",
+            "qpos_squeeze",
+        ):
             if key not in hf:
                 raise KeyError(f"Missing dataset '{key}' in {h5_path}")
             payload[key] = np.asarray(hf[key][:])
@@ -147,7 +164,9 @@ def compose_palm_to_grasp(cfg: Dict) -> Tuple[np.ndarray, np.ndarray]:
         )
     quat_norm = np.linalg.norm(quat_wxyz)
     if not np.isfinite(quat_norm) or quat_norm <= 1e-12:
-        raise ValueError("hand.transform.quat_wxyz must be a finite non-zero quaternion.")
+        raise ValueError(
+            "hand.transform.quat_wxyz must be a finite non-zero quaternion."
+        )
     quat_xyzw = (quat_wxyz / quat_norm)[[1, 2, 3, 0]]
     rot = R.from_quat(quat_xyzw).as_matrix().astype(ARRAY_DTYPE, copy=False)
     return rot, pos.astype(ARRAY_DTYPE, copy=False)
@@ -161,7 +180,9 @@ def compose_grasp_to_palm(cfg: Dict) -> Tuple[np.ndarray, np.ndarray]:
     return rot_grasp_to_palm, pos_grasp_to_palm.astype(ARRAY_DTYPE, copy=False)
 
 
-def sample_frames_from_points(cfg: Dict, pts: np.ndarray, norms: np.ndarray) -> np.ndarray:
+def sample_frames_from_points(
+    cfg: Dict, pts: np.ndarray, norms: np.ndarray
+) -> np.ndarray:
     sampling_cfg = cfg["sampling"]
     transforms = sample_grasp_frames(
         pts,
@@ -193,12 +214,16 @@ def build_pose_candidates(cfg: Dict, transforms_np: np.ndarray) -> np.ndarray:
     return np.concatenate([positions, quaternions], axis=1).astype(ARRAY_DTYPE)
 
 
-def make_qpos_triplets(cfg: Dict, pose: np.ndarray) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+def make_qpos_triplets(
+    cfg: Dict, pose: np.ndarray
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     prepared_joints = np.asarray(cfg["hand"]["prepared_joints"], dtype=ARRAY_DTYPE)
     approach_joints = np.asarray(cfg["hand"]["approach_joints"], dtype=ARRAY_DTYPE)
 
     q_expanded = np.tile(prepared_joints, (pose.shape[0], 1)).astype(ARRAY_DTYPE)
-    qpos_prepared_sample = np.concatenate([pose, q_expanded], axis=1).astype(ARRAY_DTYPE)
+    qpos_prepared_sample = np.concatenate([pose, q_expanded], axis=1).astype(
+        ARRAY_DTYPE
+    )
 
     n = qpos_prepared_sample.shape[0]
     qpos_approach_sample = qpos_prepared_sample.copy()
@@ -208,7 +233,11 @@ def make_qpos_triplets(cfg: Dict, pose: np.ndarray) -> Tuple[np.ndarray, np.ndar
     positions = qpos_prepared_sample[:, :3]
     quats_wxyz = qpos_prepared_sample[:, 3:7]
     quats_xyzw = quats_wxyz[:, [1, 2, 3, 0]]
-    offset_world = R.from_quat(quats_xyzw.astype(np.float64)).apply(shift_local).astype(ARRAY_DTYPE)
+    offset_world = (
+        R.from_quat(quats_xyzw.astype(np.float64))
+        .apply(shift_local)
+        .astype(ARRAY_DTYPE)
+    )
 
     qpos_init_sample = qpos_prepared_sample.copy()
     qpos_init_sample[:, :3] = positions + offset_world

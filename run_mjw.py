@@ -3,7 +3,7 @@ import gc
 import os
 import time
 from pathlib import Path
-from typing import Dict, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import h5py
 import numpy as np
@@ -16,18 +16,24 @@ from utils.utils_file import (
     DEFAULT_RUN_CONFIG_PATH,
     hand_anchor_params_cfg,
     hand_profile_cfg,
+    hand_root_stabilization_cfg,
     load_run_config,
     object_profile_cfg,
 )
 from utils.utils_pointcloud import sample_surface_o3d
 from utils.utils_sample import (
+    ARRAY_DTYPE,
+    H5_DTYPE,
+    as_array,
     build_pose_candidates,
     encode_h5_str,
     global_pc_exists,
+    grasp_fail_outputs_exist,
     grasp_outputs_exist,
     make_qpos_triplets,
     parse_object_scale_key,
     sample_frames_from_points,
+    write_fail_npy_from_h5,
     write_global_pc,
     write_grasp_npy_from_h5,
 )
@@ -40,6 +46,7 @@ def build_valid_backend(
     anchor_params: Optional[Dict],
     hand_profile: Dict,
     object_profile: Dict,
+    root_stabilization: Optional[Dict],
     device: str,
     nworld: int,
     nconmax: int,
@@ -55,6 +62,7 @@ def build_valid_backend(
         anchor_params=anchor_params,
         hand_profile=hand_profile,
         object_profile=object_profile,
+        root_stabilization=root_stabilization,
         object_fixed=False,
         nworld=int(nworld),
         device=str(device),
@@ -65,6 +73,73 @@ def build_valid_backend(
     )
     backend._set_obj_pts_norms(pts_for_sim, norms_for_sim)
     return backend
+
+
+def append_fail_rows(
+    qpos_fail: List[np.ndarray],
+    failure_stages: List[str],
+    rows: np.ndarray,
+    stage: str,
+) -> None:
+    rows = np.asarray(rows, dtype=ARRAY_DTYPE)
+    if rows.ndim == 1:
+        rows = rows[None, :]
+    for row in rows:
+        qpos_fail.append(as_array(row))
+        failure_stages.append(str(stage))
+
+
+def select_fail_samples(
+    fail_qpos_rows: List[np.ndarray],
+    fail_stages: List[str],
+    valid_count: int,
+    fail_keep_ratio: float,
+    seed: int,
+) -> Tuple[List[np.ndarray], List[str]]:
+    keep_count = min(
+        len(fail_qpos_rows),
+        int(np.floor(float(fail_keep_ratio) * float(valid_count))),
+    )
+    if keep_count <= 0:
+        return [], []
+    indices = np.random.default_rng(int(seed)).permutation(len(fail_qpos_rows))[
+        :keep_count
+    ]
+    selected_qpos = [fail_qpos_rows[int(idx)] for idx in indices]
+    selected_stages = [fail_stages[int(idx)] for idx in indices]
+    return selected_qpos, selected_stages
+
+
+def write_fail_h5(
+    fail_h5_path: Path,
+    object_name: str,
+    scale: Optional[float],
+    hand_name: str,
+    qpos_dim: int,
+    qpos_fail: List[np.ndarray],
+    failure_stages: List[str],
+) -> None:
+    if qpos_fail:
+        qpos_fail_np = np.asarray(qpos_fail, dtype=ARRAY_DTYPE)
+        failure_stage_np = np.asarray(failure_stages, dtype=object)
+    else:
+        qpos_fail_np = np.zeros((0, qpos_dim), dtype=ARRAY_DTYPE)
+        failure_stage_np = np.asarray([], dtype=object)
+
+    failure_stage_dtype = h5py.string_dtype(encoding="utf-8")
+    with h5py.File(fail_h5_path, "w") as hf:
+        hf.create_dataset("object_name", data=encode_h5_str(object_name))
+        hf.create_dataset(
+            "scale", data=np.float32(scale if scale is not None else np.nan)
+        )
+        hf.create_dataset("hand_name", data=encode_h5_str(hand_name))
+        hf.create_dataset("rot_repr", data=encode_h5_str("wxyz+qpos"))
+        hf.create_dataset("qpos_fail", data=qpos_fail_np, dtype=H5_DTYPE)
+        hf.create_dataset(
+            "failure_stage",
+            data=failure_stage_np,
+            dtype=failure_stage_dtype,
+        )
 
 
 def shrink_tail_pool(
@@ -81,6 +156,7 @@ def shrink_tail_pool(
     anchor_params: Optional[Dict],
     hand_profile: Dict,
     object_profile: Dict,
+    root_stabilization: Optional[Dict],
     device: str,
     nconmax: int,
     naconmax: int,
@@ -105,6 +181,7 @@ def shrink_tail_pool(
         anchor_params=anchor_params,
         hand_profile=hand_profile,
         object_profile=object_profile,
+        root_stabilization=root_stabilization,
         device=device,
         nworld=new_pool_size,
         nconmax=nconmax,
@@ -162,6 +239,7 @@ def run_sampling(
     anchor_params = hand_anchor_params_cfg(cfg)
     hand_profile = hand_profile_cfg(cfg)
     object_profile = object_profile_cfg(cfg)
+    root_stabilization = hand_root_stabilization_cfg(cfg)
 
     sampling_cfg = cfg["sampling"]
     pts_for_sim, norms_for_sim, _ = downsample_fps(
@@ -187,17 +265,15 @@ def run_sampling(
     out_dir.mkdir(parents=True, exist_ok=True)
     h5_path = out_dir / str(cfg["data"]["h5_name"])
     npy_path = out_dir / str(cfg["data"]["npy_name"])
+    fail_h5_path = out_dir / str(cfg["data"]["fail_h5_name"])
+    fail_npy_path = out_dir / str(cfg["data"]["fail_npy_name"])
 
     d = qpos_prepared.shape[1]
     max_cap = int(cfg["data"]["max_cap"])
     if max_cap <= 0:
         raise ValueError(f"data.max_cap must be positive, got {max_cap}.")
-    extforce_max_time_sec = float(cfg["data"]["max_time_sec"])
-    if extforce_max_time_sec <= 0.0:
-        raise ValueError(
-            f"data.max_time_sec must be positive, got {extforce_max_time_sec}."
-        )
     flush_every = int(cfg.get("data", {}).get("flush_every", 0) or 0)
+    fail_keep_ratio = float(cfg["data"]["fail_keep_ratio"])
     contact_min_count = int(cfg["sim_grasp"]["contact_min_count"])
     sim_grasp_cfg = dict(cfg.get("sim_grasp", {}))
     extforce_cfg = dict(cfg.get("extforce", {}))
@@ -213,6 +289,7 @@ def run_sampling(
         anchor_params=anchor_params,
         hand_profile=hand_profile,
         object_profile=object_profile,
+        root_stabilization=root_stabilization,
         object_fixed=True,
         nworld=batch_size,
         device=str(device),
@@ -233,6 +310,10 @@ def run_sampling(
     extforce_time = 0.0
     num_no_col = 0
     num_grasp_contact_ok = 0
+    num_extforce_settle_fail = 0
+    num_extforce_force_fail = 0
+    fail_qpos_rows: List[np.ndarray] = []
+    fail_stages: List[str] = []
 
     collision_mask = np.zeros((max_candidates,), dtype=bool)
     pbar = tqdm(
@@ -262,6 +343,12 @@ def run_sampling(
             prepared_result.has_contact
             | approach_result.has_contact
             | init_result.has_contact
+        )
+        append_fail_rows(
+            fail_qpos_rows,
+            fail_stages,
+            qpos_prepared[start:end][prepared_result.has_contact],
+            "prepared_contact",
         )
         collision_mask[start:end] = no_col_mask
         num_no_col += int(no_col_mask.sum())
@@ -309,6 +396,12 @@ def run_sampling(
 
     contact_ok_mask = ho_contact_counts_all >= contact_min_count
     num_grasp_contact_ok = int(contact_ok_mask.sum())
+    append_fail_rows(
+        fail_qpos_rows,
+        fail_stages,
+        qpos_grasp_all[~contact_ok_mask],
+        "insufficient_contact",
+    )
     qpos_init_contact_ok = qpos_init_no_col[contact_ok_mask]
     qpos_approach_contact_ok = qpos_approach_no_col[contact_ok_mask]
     qpos_prepared_contact_ok = qpos_prepared_no_col[contact_ok_mask]
@@ -334,22 +427,25 @@ def run_sampling(
     with h5py.File(h5_path, "w") as hf:
         hf.create_dataset("object_name", data=encode_h5_str(object_name))
         hf.create_dataset(
-            "scale", data=np.float64(scale if scale is not None else np.nan)
+            "scale", data=np.float32(scale if scale is not None else np.nan)
         )
         hf.create_dataset("hand_name", data=encode_h5_str(hand_name))
         hf.create_dataset("rot_repr", data=encode_h5_str("wxyz+qpos"))
 
         ds_init = hf.create_dataset(
-            "qpos_init", shape=(max_cap, d), maxshape=(None, d), dtype="f8"
+            "qpos_init", shape=(max_cap, d), maxshape=(None, d), dtype=H5_DTYPE
         )
         ds_approach = hf.create_dataset(
-            "qpos_approach", shape=(max_cap, d), maxshape=(None, d), dtype="f8"
+            "qpos_approach", shape=(max_cap, d), maxshape=(None, d), dtype=H5_DTYPE
         )
         ds_prepared = hf.create_dataset(
-            "qpos_prepared", shape=(max_cap, d), maxshape=(None, d), dtype="f8"
+            "qpos_prepared", shape=(max_cap, d), maxshape=(None, d), dtype=H5_DTYPE
         )
         ds_grasp = hf.create_dataset(
-            "qpos_grasp", shape=(max_cap, d), maxshape=(None, d), dtype="f8"
+            "qpos_grasp", shape=(max_cap, d), maxshape=(None, d), dtype=H5_DTYPE
+        )
+        ds_squeeze = hf.create_dataset(
+            "qpos_squeeze", shape=(max_cap, d), maxshape=(None, d), dtype=H5_DTYPE
         )
 
         def write_valid_candidates(candidate_ids: np.ndarray) -> bool:
@@ -363,16 +459,19 @@ def run_sampling(
             n_write = int(write_ids.size)
             end = num_valid + n_write
             ds_init[num_valid:end] = qpos_init_contact_ok[write_ids].astype(
-                np.float64, copy=False
+                ARRAY_DTYPE, copy=False
             )
             ds_approach[num_valid:end] = qpos_approach_contact_ok[write_ids].astype(
-                np.float64, copy=False
+                ARRAY_DTYPE, copy=False
             )
             ds_prepared[num_valid:end] = qpos_prepared_contact_ok[write_ids].astype(
-                np.float64, copy=False
+                ARRAY_DTYPE, copy=False
             )
             ds_grasp[num_valid:end] = qpos_grasp_contact_ok[write_ids].astype(
-                np.float64, copy=False
+                ARRAY_DTYPE, copy=False
+            )
+            ds_squeeze[num_valid:end] = qpos_squeeze_contact_ok[write_ids].astype(
+                ARRAY_DTYPE, copy=False
             )
             num_valid = end
             if flush_every > 0 and (num_valid - flushed_valid) >= flush_every:
@@ -388,6 +487,7 @@ def run_sampling(
                 anchor_params=anchor_params,
                 hand_profile=hand_profile,
                 object_profile=object_profile,
+                root_stabilization=root_stabilization,
                 device=str(device),
                 nworld=batch_size,
                 nconmax=int(nconmax),
@@ -399,22 +499,26 @@ def run_sampling(
             )
             backend_init_time += time.perf_counter() - ts_backend
 
-            side_swing = set(mjw_valid.hand_profile["side_swing_indices"])
             grip_delta = float(extforce_cfg["grip_delta"])
-            grip_qpos_all = qpos_grasp_contact_ok.copy()
-            for idx in range(7, mjw_valid.nq_hand):
-                joint_local_idx = idx - 7
-                if joint_local_idx not in side_swing:
-                    grip_qpos_all[:, idx] += grip_delta
+            qpos_squeeze_contact_ok = mjw_valid.build_squeeze_qpos_batch(
+                qpos_grasp_contact_ok,
+                grip_delta=grip_delta,
+            )
+            qpos_prepared_valid_all = mjw_valid.build_pregrasp_qpos_batch(
+                qpos_squeeze_contact_ok,
+                qpos_prepared_contact_ok[:, 7:],
+            )
             if mjw_valid.nu > 0:
-                grip_ctrl_all = mjw_valid.qpos_to_ctrl_batch(grip_qpos_all)
+                squeeze_ctrl_all = mjw_valid.qpos_to_ctrl_batch(qpos_squeeze_contact_ok)
             else:
-                grip_ctrl_all = np.zeros((contact_ok_count, 0), dtype=np.float32)
+                squeeze_ctrl_all = np.zeros((contact_ok_count, 0), dtype=np.float32)
 
             dt = float(mjw_valid.mj_model.opt.timestep)
             n_steps = max(1, int(float(extforce_cfg["duration"]) / max(dt, 1e-8)))
             check_steps = max(int(extforce_cfg["check_steps"]), 1)
             n_chunks = max(1, int(np.ceil(n_steps / check_steps)))
+            close_steps = max(int(extforce_cfg.get("close_steps", 100)), 1)
+            settle_chunks = max(1, int(np.ceil(close_steps / check_steps)))
             trans_thresh = float(extforce_cfg["trans_thresh"])
             angle_thresh = float(extforce_cfg["angle_thresh"])
             force_mag = float(extforce_cfg["force_mag"])
@@ -450,13 +554,13 @@ def run_sampling(
                 mjw_valid.reset_worlds(world_ids)
                 mjw_valid.load_hand_qpos_to_worlds(
                     world_ids,
-                    grip_qpos_all[candidate_ids],
-                    ctrl_batch=grip_ctrl_all[candidate_ids],
+                    qpos_prepared_valid_all[candidate_ids],
+                    ctrl_batch=squeeze_ctrl_all[candidate_ids],
                     do_forward=True,
                 )
                 world_active[world_ids] = True
                 world_candidate_ids[world_ids] = candidate_ids
-                world_chunk_idx[world_ids] = -1
+                world_chunk_idx[world_ids] = -settle_chunks
                 world_initial_pose[world_ids] = mjw_valid.get_obj_pose_for_worlds(
                     world_ids
                 )
@@ -479,14 +583,7 @@ def run_sampling(
                 miniters=1,
                 disable=not verbose,
             )
-            extforce_stage_start = time.perf_counter()
             while np.any(world_active):
-                if (
-                    time.perf_counter() - extforce_stage_start
-                ) >= extforce_max_time_sec:
-                    stop_reason = "timeout"
-                    break
-
                 active_world_ids = np.flatnonzero(world_active).astype(np.int32)
                 if (
                     next_candidate >= contact_ok_count
@@ -516,6 +613,7 @@ def run_sampling(
                         anchor_params=anchor_params,
                         hand_profile=hand_profile,
                         object_profile=object_profile,
+                        root_stabilization=root_stabilization,
                         device=device,
                         nconmax=nconmax,
                         naconmax=naconmax,
@@ -543,44 +641,79 @@ def run_sampling(
                 extforce_batches += 1
 
                 settling_worlds = active_world_ids[settling_mask]
+                settling_failed_worlds = np.zeros((0,), dtype=np.int32)
                 if settling_worlds.size > 0:
-                    world_chunk_idx[settling_worlds] = 0
+                    world_chunk_idx[settling_worlds] += 1
+                    close_done_worlds = settling_worlds[
+                        world_chunk_idx[settling_worlds] >= 0
+                    ]
+                    if close_done_worlds.size > 0:
+                        has_contact = mjw_valid.read_contact_mask_for_worlds(
+                            close_done_worlds
+                        )
+                        current_obj_pose = mjw_valid.get_obj_pose_for_worlds(
+                            close_done_worlds
+                        )
+                        settle_pos_delta, settle_angle_delta = (
+                            mjw_valid._pose_delta_batch(
+                                world_initial_pose[close_done_worlds], current_obj_pose
+                            )
+                        )
+                        close_failed_mask = (
+                            (~has_contact)
+                            | (settle_pos_delta >= trans_thresh)
+                            | (settle_angle_delta >= angle_thresh)
+                        )
+                        settling_failed_worlds = close_done_worlds[close_failed_mask]
+                        close_alive_worlds = close_done_worlds[~close_failed_mask]
+                        if close_alive_worlds.size > 0:
+                            world_initial_pose[close_alive_worlds] = (
+                                mjw_valid.get_obj_pose_for_worlds(close_alive_worlds)
+                            )
 
                 eval_worlds = active_world_ids[~settling_mask]
-                if eval_worlds.size == 0:
-                    continue
+                failed_worlds = settling_failed_worlds
+                num_extforce_settle_fail += int(settling_failed_worlds.size)
+                alive_worlds = np.zeros((0,), dtype=np.int32)
+                final_valid_worlds = np.zeros((0,), dtype=np.int32)
+                next_dir_worlds = np.zeros((0,), dtype=np.int32)
 
-                has_contact = mjw_valid.read_contact_mask_for_worlds(eval_worlds)
-                current_obj_pose = mjw_valid.get_obj_pose_for_worlds(eval_worlds)
-                dir_pos_delta, dir_angle_delta = mjw_valid._pose_delta_batch(
-                    world_initial_pose[eval_worlds], current_obj_pose
-                )
-                world_pos_delta[eval_worlds] = np.maximum(
-                    world_pos_delta[eval_worlds], dir_pos_delta
-                )
-                world_angle_delta[eval_worlds] = np.maximum(
-                    world_angle_delta[eval_worlds], dir_angle_delta
-                )
+                if eval_worlds.size > 0:
+                    has_contact = mjw_valid.read_contact_mask_for_worlds(eval_worlds)
+                    current_obj_pose = mjw_valid.get_obj_pose_for_worlds(eval_worlds)
+                    dir_pos_delta, dir_angle_delta = mjw_valid._pose_delta_batch(
+                        world_initial_pose[eval_worlds], current_obj_pose
+                    )
+                    world_pos_delta[eval_worlds] = np.maximum(
+                        world_pos_delta[eval_worlds], dir_pos_delta
+                    )
+                    world_angle_delta[eval_worlds] = np.maximum(
+                        world_angle_delta[eval_worlds], dir_angle_delta
+                    )
 
-                failed_mask = (
-                    (~has_contact)
-                    | (dir_pos_delta >= trans_thresh)
-                    | (dir_angle_delta >= angle_thresh)
-                )
-                failed_worlds = eval_worlds[failed_mask]
-                alive_worlds = eval_worlds[~failed_mask]
+                    failed_mask = (
+                        (~has_contact)
+                        | (dir_pos_delta >= trans_thresh)
+                        | (dir_angle_delta >= angle_thresh)
+                    )
+                    force_failed_worlds = eval_worlds[failed_mask]
+                    num_extforce_force_fail += int(force_failed_worlds.size)
+                    alive_worlds = eval_worlds[~failed_mask]
+                    failed_worlds = np.concatenate(
+                        [failed_worlds, force_failed_worlds], axis=0
+                    )
 
-                advance_mask = (world_chunk_idx[alive_worlds] + 1) >= n_chunks
-                dir_complete_worlds = alive_worlds[advance_mask]
-                still_running_worlds = alive_worlds[~advance_mask]
-                world_chunk_idx[still_running_worlds] += 1
+                    advance_mask = (world_chunk_idx[alive_worlds] + 1) >= n_chunks
+                    dir_complete_worlds = alive_worlds[advance_mask]
+                    still_running_worlds = alive_worlds[~advance_mask]
+                    world_chunk_idx[still_running_worlds] += 1
 
-                final_valid_worlds = dir_complete_worlds[
-                    world_dir_idx[dir_complete_worlds] >= 5
-                ]
-                next_dir_worlds = dir_complete_worlds[
-                    world_dir_idx[dir_complete_worlds] < 5
-                ]
+                    final_valid_worlds = dir_complete_worlds[
+                        world_dir_idx[dir_complete_worlds] >= 5
+                    ]
+                    next_dir_worlds = dir_complete_worlds[
+                        world_dir_idx[dir_complete_worlds] < 5
+                    ]
 
                 if next_dir_worlds.size > 0:
                     world_dir_idx[next_dir_worlds] += 1
@@ -600,6 +733,14 @@ def run_sampling(
                     [failed_worlds, final_valid_worlds], axis=0
                 )
                 if done_worlds.size > 0:
+                    if failed_worlds.size > 0:
+                        failed_candidate_ids = world_candidate_ids[failed_worlds]
+                        append_fail_rows(
+                            fail_qpos_rows,
+                            fail_stages,
+                            qpos_squeeze_contact_ok[failed_candidate_ids],
+                            "extforce_failure",
+                        )
                     world_active[done_worlds] = False
                     world_candidate_ids[done_worlds] = -1
                     world_dir_idx[done_worlds] = 0
@@ -641,18 +782,31 @@ def run_sampling(
         ds_approach.resize((num_valid, d))
         ds_prepared.resize((num_valid, d))
         ds_grasp.resize((num_valid, d))
+        ds_squeeze.resize((num_valid, d))
         hf.flush()
+
+    kept_fail_qpos, kept_fail_stages = select_fail_samples(
+        fail_qpos_rows=fail_qpos_rows,
+        fail_stages=fail_stages,
+        valid_count=num_valid,
+        fail_keep_ratio=fail_keep_ratio,
+        seed=int(cfg["seed"]),
+    )
 
     duration = time.time() - start_ts
     # if verbose:
     print(
         f"[{object_scale_key}] candidates={max_candidates} no_col={num_no_col} "
-        f"contact_ok={num_grasp_contact_ok} valid={num_valid} target_valid_cap={max_cap}"
+        f"contact_ok={num_grasp_contact_ok} valid={num_valid} "
+        f"fail={len(kept_fail_qpos)} fail_collected={len(fail_qpos_rows)} "
+        f"target_valid_cap={max_cap}"
     )
     print(
         f"[{object_scale_key}] batches collision={collision_batches} "
         f"sim_grasp={sim_grasp_batches} extforce_loops={extforce_batches} "
-        f"extforce_shrinks={extforce_shrinks}"
+        f"extforce_shrinks={extforce_shrinks} "
+        f"extforce_settle_fail={num_extforce_settle_fail} "
+        f"extforce_force_fail={num_extforce_force_fail}"
     )
     print(
         f"[{object_scale_key}] time backend_init={backend_init_time:.3f}s "
@@ -662,8 +816,19 @@ def run_sampling(
     )
 
     write_grasp_npy_from_h5(h5_path, npy_path)
+    write_fail_h5(
+        fail_h5_path=fail_h5_path,
+        object_name=object_name,
+        scale=scale,
+        hand_name=hand_name,
+        qpos_dim=d,
+        qpos_fail=kept_fail_qpos,
+        failure_stages=kept_fail_stages,
+    )
+    write_fail_npy_from_h5(fail_h5_path, fail_npy_path)
     # if verbose:
     print(f"[{object_scale_key}] converted {h5_path.name} -> {npy_path.name}")
+    print(f"[{object_scale_key}] converted {fail_h5_path.name} -> {fail_npy_path.name}")
     return str(h5_path)
 
 
@@ -699,10 +864,10 @@ def main() -> None:
         default=DEFAULT_RUN_CONFIG_PATH,
         help="JSON config path.",
     )
-    p.add_argument("--batch-size", type=int, default=4096)
+    p.add_argument("--batch-size", type=int, default=256)
     p.add_argument("--device", type=str, default="cuda:0")
     p.add_argument("--nconmax", type=int, default=32)
-    p.add_argument("--naconmax", type=int, default=131072)
+    p.add_argument("--naconmax", type=int, default=16384)
     p.add_argument("--njmax", type=int, default=200)
     p.add_argument("--ccd-iterations", type=int, default=200)
     args = p.parse_args()
@@ -715,15 +880,23 @@ def main() -> None:
 
     h5_name = str(cfg["data"]["h5_name"])
     npy_name = str(cfg["data"]["npy_name"])
+    fail_h5_name = str(cfg["data"]["fail_h5_name"])
+    fail_npy_name = str(cfg["data"]["fail_npy_name"])
     render_subdir = str(cfg["sampling"]["pc_subdir"])
     has_grasp_outputs = grasp_outputs_exist(
         args.output_dir, h5_name=h5_name, npy_name=npy_name
     )
+    has_fail_outputs = grasp_fail_outputs_exist(
+        args.output_dir,
+        h5_name=fail_h5_name,
+        npy_name=fail_npy_name,
+    )
     has_global_pc = global_pc_exists(args.output_dir, render_subdir)
-    if (not args.force) and has_grasp_outputs and has_global_pc:
+    if (not args.force) and has_grasp_outputs and has_fail_outputs and has_global_pc:
         if verbose:
             print(
                 f"[{args.object_scale_key}] skip existing {h5_name}, {npy_name}, "
+                f"{fail_h5_name}, {fail_npy_name}, "
                 f"and {render_subdir}/global_pc.npy in {args.output_dir}"
             )
         return
@@ -742,10 +915,10 @@ def main() -> None:
     global_pc_path = write_global_pc(pts, args.output_dir, render_subdir)
     if verbose:
         print(f"[{args.object_scale_key}] saved global_pc to {global_pc_path}")
-    if (not args.force) and has_grasp_outputs:
+    if (not args.force) and has_grasp_outputs and has_fail_outputs:
         if verbose:
             print(
-                f"[{args.object_scale_key}] grasp outputs already exist, skip grasp sampling."
+                f"[{args.object_scale_key}] grasp/failure outputs already exist, skip grasp sampling."
             )
         return
 

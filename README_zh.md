@@ -473,7 +473,7 @@ python run_mjw.py \
   --coacd-path datasets/objdata_YCB/YCB_002_master_chef_can/scale120/coacd.obj \
   --mjcf-path datasets/objdata_YCB/YCB_002_master_chef_can/scale120/object.xml \
   --output-dir datasets/graspdata_YCB_liberhand_right/YCB_002_master_chef_can/scale120 \
-  --batch-size 512 \
+  --batch-size 256 \
   --nconmax 32 \
   --naconmax 16384 \
   --njmax 200 \
@@ -487,7 +487,7 @@ python run_mjw.py \
 python run_multi_mjw.py \
   -c configs/run_YCB_liberhand_right.json \
   -j 4 \
-  --batch-size 512 \
+  --batch-size 256 \
   --njmax 200 \
   --ccd-iterations 200 \
   --force
@@ -697,11 +697,12 @@ taskset -c 0-15 python run_multi.py -c configs/run_YCB_liberhand_right.json -j 1
 ```
 
 ### MJWarp
-- 当前 MJWarp 路线仍以 `data.max_cap = 100` 作为较实用的采样目标。
-- `run_mjw.py` 使用 `data.max_time_sec = 180.0` 作为 extforce 阶段 wall-clock 上限。
-- 如果目标是尽快拿到约 `100` 个有效抓取，`batch_size` 建议在 `128`、`256`、`512` 这类量级。
-- `4096` 这种大 batch 更适合大规模抓取收集，不适合围绕 `100` 个有效抓取做快速早停。
-- 当前主线默认 `sampling.n_points = 2048`，是 `max_cap = 100` 工作流下的折中值。
+- `configs/run_YCB_liberhand_right_gpu.json` 是 YCB 的 MJWarp harvesting 配置，使用 `data.max_cap = 2000`。
+- `run_mjw.py` 不使用 `data.max_time_sec` 截断 extforce 验证；该 wall-clock 上限仅保留给 CPU 路径。
+- 当前 MJWarp 运行参数默认值为 `--batch-size 256 --nconmax 32 --naconmax 16384 --njmax 200 --ccd-iterations 200`。
+- 只有在确认 GPU 显存和单步耗时可接受后再增大 `batch_size`；`4096` 这种大 batch 更适合大规模 harvesting 实验，不适合快速 sanity check。
+- 当前 GPU 配置使用 `sampling.n_points = 4096` 来保证候选覆盖率。
+- GPU 失败样本输出会使用配置 seed 做 shuffle，并截断到 `floor(data.fail_keep_ratio * valid_count)`。
 
 ## TODO
 

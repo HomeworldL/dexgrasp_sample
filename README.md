@@ -473,7 +473,7 @@ python run_mjw.py \
   --coacd-path datasets/objdata_YCB/YCB_002_master_chef_can/scale120/coacd.obj \
   --mjcf-path datasets/objdata_YCB/YCB_002_master_chef_can/scale120/object.xml \
   --output-dir datasets/graspdata_YCB_liberhand_right/YCB_002_master_chef_can/scale120 \
-  --batch-size 512 \
+  --batch-size 256 \
   --nconmax 32 \
   --naconmax 16384 \
   --njmax 200 \
@@ -487,7 +487,7 @@ python run_mjw.py \
 python run_multi_mjw.py \
   -c configs/run_YCB_liberhand_right.json \
   -j 4 \
-  --batch-size 512 \
+  --batch-size 256 \
   --njmax 200 \
   --ccd-iterations 200 \
   --force
@@ -697,11 +697,12 @@ taskset -c 0-15 python run_multi.py -c configs/run_YCB_liberhand_right.json -j 1
 ```
 
 ### MJWarp
-- `data.max_cap = 100` is still the practical target for the current MJWarp path.
-- `data.max_time_sec = 180.0` is the current extforce wall-clock cap in `run_mjw.py`.
-- If the goal is to reach about `100` valid grasps quickly, prefer `batch_size` near the target, typically `128`, `256`, or `512`.
-- Very large `batch_size` values such as `4096` are better suited to large-scale harvesting than to early-stop collection around `100` valid grasps.
-- Current mainline default `sampling.n_points = 2048` is the compromise point for the `max_cap = 100` workflow.
+- `configs/run_YCB_liberhand_right_gpu.json` is the YCB MJWarp harvesting config and uses `data.max_cap = 2000`.
+- `run_mjw.py` does not stop extforce validation with `data.max_time_sec`; that wall-clock cap remains CPU-only.
+- The default MJWarp runtime knobs are `--batch-size 256 --nconmax 32 --naconmax 16384 --njmax 200 --ccd-iterations 200`.
+- Increase `batch_size` only after checking GPU memory and per-step time; very large values such as `4096` are better suited to large-scale harvesting experiments than to quick sanity checks.
+- Current GPU config uses `sampling.n_points = 4096` for candidate coverage.
+- GPU failure outputs are shuffled with the config seed and truncated to `floor(data.fail_keep_ratio * valid_count)`.
 
 ## TODO
 

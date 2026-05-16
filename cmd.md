@@ -75,10 +75,10 @@ python run_mjw.py -c ${CFG_RUN} \
   --coacd-path ${OBJ_COACD_NORM} \
   --mjcf-path ${OBJ_ASSET_DIR}/object.xml \
   --output-dir ${OBJ_GRASP_DIR} \
-  --batch-size 512 \
+  --batch-size 256 \
   --device cuda:0
 
-python run_multi_mjw.py -c ${CFG_RUN} -j 4 --batch-size 512 --device cuda:0 --force
+python run_multi_mjw.py -c ${CFG_RUN} -j 4 --batch-size 256 --device cuda:0 --force
 
 python run_mjw_no_save.py -c ${CFG_RUN} \
   -k ${OBJ_KEY} \

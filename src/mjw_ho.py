@@ -14,11 +14,11 @@ import os
 import time
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Sequence, Tuple
-from scipy.spatial import cKDTree
 
 import mujoco
 import numpy as np
 import warp as wp
+from scipy.spatial import cKDTree
 
 try:
     import mujoco_warp as mjw
@@ -67,6 +67,7 @@ class MjWarpHO:
         anchor_params: Optional[Dict] = None,
         hand_profile: Optional[Dict] = None,
         object_profile: Optional[Dict] = None,
+        root_stabilization: Optional[Dict] = None,
         object_fixed: bool = True,
         nworld: int = 1,
         device: str = "cuda:0",
@@ -98,7 +99,22 @@ class MjWarpHO:
             raise ValueError("object_profile must be provided explicitly.")
         self.hand_profile = dict(hand_profile)
         self.object_profile = dict(object_profile)
-        self.hand_actuation_profile = self._read_hand_actuation_profile(self.hand_profile)
+        self.root_stabilization = (
+            dict(root_stabilization) if root_stabilization is not None else None
+        )
+        self.hand_actuation_profile = self._read_hand_actuation_profile(
+            self.hand_profile
+        )
+        self.side_swing_indices = np.asarray(
+            self.hand_profile["side_swing_indices"],
+            dtype=int,
+        )
+        self.side_swing_index_set = set(self.side_swing_indices.tolist())
+        self.thumb_relax_indices = np.asarray(
+            self.hand_profile["thumb_relax_indices"],
+            dtype=int,
+        )
+        self.thumb_relax_divisor = float(self.hand_profile["thumb_relax_divisor"])
 
         self.spec = self._add_hand(self.hand_xml_path)
         self._add_object(self.obj_info, fixed=self.object_fixed)
@@ -108,8 +124,9 @@ class MjWarpHO:
         self.mj_model.opt.ccd_iterations = max(
             int(self.mj_model.opt.ccd_iterations), self.ccd_iterations
         )
-        self.mjw_model = mjw.put_model(self.mj_model)
         self.cpu_data = mujoco.MjData(self.mj_model)
+        self._apply_root_stabilization()
+        self.mjw_model = mjw.put_model(self.mj_model)
 
         self.nq = int(self.mj_model.nq)
         self.nv = int(self.mj_model.nv)
@@ -152,7 +169,9 @@ class MjWarpHO:
             self.object_root_body_id = int(self.body_name_to_id[self.obj_asset_name])
         else:
             self.object_root_body_id = self.nbody - 1
-        self.object_body_ids = self._collect_descendant_body_ids(self.object_root_body_id)
+        self.object_body_ids = self._collect_descendant_body_ids(
+            self.object_root_body_id
+        )
         self.nconmax = int(nconmax)
         self.naconmax = int(naconmax)
         self.njmax = self._resolve_njmax(njmax=njmax, nconmax=self.nconmax)
@@ -211,7 +230,9 @@ class MjWarpHO:
             self.anchor_plane_axes = np.asarray(axes, dtype=float)
             for body_name in anchor_body_names:
                 if body_name not in self.body_name_to_id:
-                    raise ValueError(f"Body name '{body_name}' not found in MJWarp model.")
+                    raise ValueError(
+                        f"Body name '{body_name}' not found in MJWarp model."
+                    )
                 self.anchor_body_ids.append(int(self.body_name_to_id[body_name]))
             self.n_anchors = len(self.anchor_body_ids)
         self.anchor_body_ids = np.asarray(self.anchor_body_ids, dtype=np.int32)
@@ -254,7 +275,9 @@ class MjWarpHO:
                 continue
             value = float(profile[key])
             if (not np.isfinite(value)) or value <= 0.0:
-                raise ValueError(f"hand.profile.{key} must be finite and > 0 when provided.")
+                raise ValueError(
+                    f"hand.profile.{key} must be finite and > 0 when provided."
+                )
             out[key] = value
         return out
 
@@ -328,7 +351,9 @@ class MjWarpHO:
 
     def _set_ccd_iterations(self) -> None:
         if self.ccd_iterations <= 0:
-            raise ValueError(f"ccd_iterations must be positive, got {self.ccd_iterations}.")
+            raise ValueError(
+                f"ccd_iterations must be positive, got {self.ccd_iterations}."
+            )
         self.spec.option.ccd_iterations = max(
             int(self.spec.option.ccd_iterations), self.ccd_iterations
         )
@@ -341,8 +366,38 @@ class MjWarpHO:
                 raise ValueError(f"njmax must be positive, got {resolved}.")
             return resolved
         if int(nconmax) <= 0:
-            raise ValueError(f"nconmax must be positive when njmax is unset, got {nconmax}.")
+            raise ValueError(
+                f"nconmax must be positive when njmax is unset, got {nconmax}."
+            )
         return max(128, int(nconmax) * 4)
+
+    def _apply_root_stabilization(self) -> None:
+        if self.root_stabilization is None:
+            return
+        body_name = self.root_stabilization.get("root_body_name")
+        try:
+            root_scale = float(self.root_stabilization.get("root_scale"))
+        except Exception as exc:
+            raise ValueError("root_stabilization.root_scale must be numeric.") from exc
+        if not isinstance(body_name, str) or not body_name.strip():
+            raise ValueError(
+                "root_stabilization.root_body_name must be a non-empty string."
+            )
+        if (not np.isfinite(root_scale)) or root_scale <= 0.0:
+            raise ValueError("root_stabilization.root_scale must be finite and > 0.")
+
+        body_id = mujoco.mj_name2id(
+            self.mj_model,
+            mujoco.mjtObj.mjOBJ_BODY,
+            body_name,
+        )
+        if int(body_id) < 0:
+            raise ValueError(f"Body '{body_name}' not found for root stabilization.")
+
+        self.mj_model.body_mass[body_id] *= root_scale
+        self.mj_model.body_inertia[body_id] *= root_scale
+        mujoco.mj_setConst(self.mj_model, self.cpu_data)
+        mujoco.mj_forward(self.mj_model, self.cpu_data)
 
     def _build_default_qpos(self) -> np.ndarray:
         qpos = np.zeros((self.nworld, self.nq), dtype=np.float32)
@@ -376,7 +431,9 @@ class MjWarpHO:
         dtype,
     ) -> None:
         src = wp.array(np.ascontiguousarray(row_value), dtype=dtype, device=self.device)
-        wp.copy(dest, src, dest_offset=int(row_idx) * int(row_width), count=int(row_width))
+        wp.copy(
+            dest, src, dest_offset=int(row_idx) * int(row_width), count=int(row_width)
+        )
 
     @staticmethod
     def _normalize_world_ids(world_ids: np.ndarray | Sequence[int]) -> np.ndarray:
@@ -409,8 +466,71 @@ class MjWarpHO:
             np.float32, copy=False
         )
         if ctrl.shape[1] != self.nu:
-            raise ValueError(f"ctrl width {ctrl.shape[1]} does not match model.nu {self.nu}.")
+            raise ValueError(
+                f"ctrl width {ctrl.shape[1]} does not match model.nu {self.nu}."
+            )
         return ctrl
+
+    def build_squeeze_qpos_batch(
+        self,
+        qpos_grasp_batch: np.ndarray,
+        grip_delta: float = 0.05,
+    ) -> np.ndarray:
+        """Return hand qpos rows with extra squeeze on non-side-swing joints."""
+        hand_qpos_batch = np.asarray(qpos_grasp_batch, dtype=np.float32).copy()
+        if hand_qpos_batch.ndim == 1:
+            hand_qpos_batch = hand_qpos_batch[None, :]
+        if hand_qpos_batch.ndim != 2:
+            raise ValueError(
+                f"qpos_grasp_batch must be 1D or 2D, got shape {hand_qpos_batch.shape}."
+            )
+        if hand_qpos_batch.shape[1] == self.nq:
+            hand_qpos_batch = hand_qpos_batch[:, : self.nq_hand].copy()
+        elif hand_qpos_batch.shape[1] != self.nq_hand:
+            raise ValueError(
+                f"Unsupported qpos width {hand_qpos_batch.shape[1]} for build_squeeze_qpos_batch."
+            )
+
+        for idx in range(7, self.nq_hand):
+            if (idx - 7) not in self.side_swing_index_set:
+                hand_qpos_batch[:, idx] += float(grip_delta)
+        return hand_qpos_batch.astype(np.float32, copy=False)
+
+    def build_pregrasp_qpos_batch(
+        self,
+        qpos_target_batch: np.ndarray,
+        prepared_joints_batch: np.ndarray,
+    ) -> np.ndarray:
+        """Return hand qpos rows using target poses with prepared finger joints."""
+        hand_qpos_batch = np.asarray(qpos_target_batch, dtype=np.float32).copy()
+        if hand_qpos_batch.ndim == 1:
+            hand_qpos_batch = hand_qpos_batch[None, :]
+        if hand_qpos_batch.ndim != 2:
+            raise ValueError(
+                f"qpos_target_batch must be 1D or 2D, got shape {hand_qpos_batch.shape}."
+            )
+        if hand_qpos_batch.shape[1] == self.nq:
+            hand_qpos_batch = hand_qpos_batch[:, : self.nq_hand].copy()
+        elif hand_qpos_batch.shape[1] != self.nq_hand:
+            raise ValueError(
+                f"Unsupported qpos width {hand_qpos_batch.shape[1]} for build_pregrasp_qpos_batch."
+            )
+
+        prepared_joints_batch = np.asarray(prepared_joints_batch, dtype=np.float32)
+        if prepared_joints_batch.ndim == 1:
+            prepared_joints_batch = prepared_joints_batch[None, :]
+        expected_joint_dim = self.nq_hand - 7
+        if prepared_joints_batch.shape != (
+            hand_qpos_batch.shape[0],
+            expected_joint_dim,
+        ):
+            raise ValueError(
+                "prepared_joints_batch must have shape "
+                f"({hand_qpos_batch.shape[0]}, {expected_joint_dim}), got {prepared_joints_batch.shape}."
+            )
+
+        hand_qpos_batch[:, 7:] = prepared_joints_batch
+        return hand_qpos_batch.astype(np.float32, copy=False)
 
     def set_hand_qpos_batch(
         self,
@@ -443,7 +563,9 @@ class MjWarpHO:
 
         self._host_qpos[:valid_count, : self.nq_hand] = hand_qpos_batch[:valid_count]
         if self.nu > 0:
-            self._host_ctrl[:valid_count] = self.qpos_to_ctrl_batch(hand_qpos_batch[:valid_count])
+            self._host_ctrl[:valid_count] = self.qpos_to_ctrl_batch(
+                hand_qpos_batch[:valid_count]
+            )
 
         self._upload_state()
         if do_forward:
@@ -452,7 +574,9 @@ class MjWarpHO:
     def forward_batch(self) -> None:
         mjw.forward(self.mjw_model, self.data)
 
-    def step_batch(self, n_steps: int = 1, ctrl_batch: Optional[np.ndarray] = None) -> None:
+    def step_batch(
+        self, n_steps: int = 1, ctrl_batch: Optional[np.ndarray] = None
+    ) -> None:
         if ctrl_batch is not None:
             ctrl_batch = np.asarray(ctrl_batch, dtype=np.float32)
             if ctrl_batch.shape != (self.nworld, self.nu):
@@ -460,7 +584,9 @@ class MjWarpHO:
                     f"ctrl_batch must have shape ({self.nworld}, {self.nu}), got {ctrl_batch.shape}."
                 )
             self._host_ctrl = ctrl_batch.copy()
-            self.data.ctrl = wp.array(self._host_ctrl, dtype=wp.float32, device=self.device)
+            self.data.ctrl = wp.array(
+                self._host_ctrl, dtype=wp.float32, device=self.device
+            )
 
         for _ in range(int(n_steps)):
             mjw.step(self.mjw_model, self.data)
@@ -479,7 +605,9 @@ class MjWarpHO:
     def get_hand_qpos_batch(self, valid_count: Optional[int] = None) -> np.ndarray:
         if valid_count is None:
             valid_count = self.nworld
-        return np.asarray(self.data.qpos.numpy()[:valid_count, : self.nq_hand], dtype=np.float32)
+        return np.asarray(
+            self.data.qpos.numpy()[:valid_count, : self.nq_hand], dtype=np.float32
+        )
 
     def get_obj_pose_batch(self, valid_count: Optional[int] = None) -> np.ndarray:
         if valid_count is None:
@@ -490,11 +618,15 @@ class MjWarpHO:
             return pose
         return np.asarray(self.data.qpos.numpy()[:valid_count, -7:], dtype=np.float32)
 
-    def get_anchor_positions_batch(self, valid_count: Optional[int] = None) -> np.ndarray:
+    def get_anchor_positions_batch(
+        self, valid_count: Optional[int] = None
+    ) -> np.ndarray:
         if valid_count is None:
             valid_count = self.nworld
         if self.n_anchors <= 0:
-            raise RuntimeError("anchor_body_ids are unavailable; hand.anchor_params must be configured.")
+            raise RuntimeError(
+                "anchor_body_ids are unavailable; hand.anchor_params must be configured."
+            )
         return np.asarray(
             self.data.xpos.numpy()[:valid_count][:, self.anchor_body_ids],
             dtype=np.float32,
@@ -534,7 +666,9 @@ class MjWarpHO:
         self._host_ctrl = ctrl_batch.copy()
         self.data.ctrl = wp.array(self._host_ctrl, dtype=wp.float32, device=self.device)
 
-    def reset_worlds(self, world_ids: np.ndarray | Sequence[int], do_forward: bool = False) -> None:
+    def reset_worlds(
+        self, world_ids: np.ndarray | Sequence[int], do_forward: bool = False
+    ) -> None:
         world_ids = self._normalize_world_ids(world_ids)
         if world_ids.size == 0:
             return
@@ -583,11 +717,21 @@ class MjWarpHO:
             qpos_row[: self.nq_hand] = hand_qpos_batch[local_idx]
             ctrl_row[:] = ctrl_batch[local_idx]
 
-            self._copy_world_row(self.data.qpos, qpos_row, int(world_id), self.nq, wp.float32)
-            self._copy_world_row(self.data.qvel, qvel_row, int(world_id), self.nv, wp.float32)
-            self._copy_world_row(self.data.ctrl, ctrl_row, int(world_id), self.nu, wp.float32)
             self._copy_world_row(
-                self.data.xfrc_applied, xfrc_row, int(world_id), self.nbody, wp.spatial_vectorf
+                self.data.qpos, qpos_row, int(world_id), self.nq, wp.float32
+            )
+            self._copy_world_row(
+                self.data.qvel, qvel_row, int(world_id), self.nv, wp.float32
+            )
+            self._copy_world_row(
+                self.data.ctrl, ctrl_row, int(world_id), self.nu, wp.float32
+            )
+            self._copy_world_row(
+                self.data.xfrc_applied,
+                xfrc_row,
+                int(world_id),
+                self.nbody,
+                wp.spatial_vectorf,
             )
 
         if do_forward:
@@ -611,10 +755,16 @@ class MjWarpHO:
             xfrc_row = self._default_xfrc[int(world_id)].copy()
             xfrc_row[int(body_id), :] = body_force_batch[local_idx]
             self._copy_world_row(
-                self.data.xfrc_applied, xfrc_row, int(world_id), self.nbody, wp.spatial_vectorf
+                self.data.xfrc_applied,
+                xfrc_row,
+                int(world_id),
+                self.nbody,
+                wp.spatial_vectorf,
             )
 
-    def get_obj_pose_for_worlds(self, world_ids: np.ndarray | Sequence[int]) -> np.ndarray:
+    def get_obj_pose_for_worlds(
+        self, world_ids: np.ndarray | Sequence[int]
+    ) -> np.ndarray:
         world_ids = self._normalize_world_ids(world_ids)
         if world_ids.size == 0:
             return np.zeros((0, 7), dtype=np.float32)
@@ -639,13 +789,17 @@ class MjWarpHO:
         contact_world_ids = np.asarray(
             self.data.contact.worldid.numpy()[:active_contact_count], dtype=np.int32
         )
-        distances = np.asarray(self.data.contact.dist.numpy()[:active_contact_count], dtype=np.float32)
+        distances = np.asarray(
+            self.data.contact.dist.numpy()[:active_contact_count], dtype=np.float32
+        )
         valid = distances <= float(dist_threshold)
         contact_world_ids = contact_world_ids[valid]
         if contact_world_ids.size == 0:
             return np.zeros((world_ids.size,), dtype=bool)
         contact_set = set(np.unique(contact_world_ids).tolist())
-        return np.asarray([int(world_id) in contact_set for world_id in world_ids], dtype=bool)
+        return np.asarray(
+            [int(world_id) in contact_set for world_id in world_ids], dtype=bool
+        )
 
     def get_qpos_for_worlds(self, world_ids: np.ndarray | Sequence[int]) -> np.ndarray:
         world_ids = self._normalize_world_ids(world_ids)
@@ -696,11 +850,33 @@ class MjWarpHO:
 
         for local_idx, world_id in enumerate(world_ids):
             xfrc_row = self._default_xfrc[int(world_id)].copy()
-            self._copy_world_row(self.data.qpos, qpos_batch[local_idx], int(world_id), self.nq, wp.float32)
-            self._copy_world_row(self.data.qvel, qvel_batch[local_idx], int(world_id), self.nv, wp.float32)
-            self._copy_world_row(self.data.ctrl, ctrl_batch[local_idx], int(world_id), self.nu, wp.float32)
             self._copy_world_row(
-                self.data.xfrc_applied, xfrc_row, int(world_id), self.nbody, wp.spatial_vectorf
+                self.data.qpos,
+                qpos_batch[local_idx],
+                int(world_id),
+                self.nq,
+                wp.float32,
+            )
+            self._copy_world_row(
+                self.data.qvel,
+                qvel_batch[local_idx],
+                int(world_id),
+                self.nv,
+                wp.float32,
+            )
+            self._copy_world_row(
+                self.data.ctrl,
+                ctrl_batch[local_idx],
+                int(world_id),
+                self.nu,
+                wp.float32,
+            )
+            self._copy_world_row(
+                self.data.xfrc_applied,
+                xfrc_row,
+                int(world_id),
+                self.nbody,
+                wp.spatial_vectorf,
             )
 
         if do_forward:
@@ -724,10 +900,18 @@ class MjWarpHO:
                 active_contact_count=0,
             )
 
-        world_ids = np.asarray(self.data.contact.worldid.numpy()[:active_contact_count], dtype=np.int32)
-        distances = np.asarray(self.data.contact.dist.numpy()[:active_contact_count], dtype=np.float32)
+        world_ids = np.asarray(
+            self.data.contact.worldid.numpy()[:active_contact_count], dtype=np.int32
+        )
+        distances = np.asarray(
+            self.data.contact.dist.numpy()[:active_contact_count], dtype=np.float32
+        )
 
-        valid = (world_ids >= 0) & (world_ids < valid_count) & (distances <= float(dist_threshold))
+        valid = (
+            (world_ids >= 0)
+            & (world_ids < valid_count)
+            & (distances <= float(dist_threshold))
+        )
         has_contact = np.zeros((valid_count,), dtype=bool)
         if np.any(valid):
             has_contact[np.unique(world_ids[valid])] = True
@@ -745,11 +929,17 @@ class MjWarpHO:
         valid_count: Optional[int] = None,
         dist_threshold: float = 0.0,
     ) -> ContactBatchResult:
-        self.set_hand_qpos_batch(hand_qpos_batch, valid_count=valid_count, do_forward=False)
+        self.set_hand_qpos_batch(
+            hand_qpos_batch, valid_count=valid_count, do_forward=False
+        )
         self.forward_batch()
-        return self.read_contact_batch(valid_count=valid_count, dist_threshold=dist_threshold)
+        return self.read_contact_batch(
+            valid_count=valid_count, dist_threshold=dist_threshold
+        )
 
-    def warmup(self, hand_qpos_batch: np.ndarray, valid_count: Optional[int] = None) -> float:
+    def warmup(
+        self, hand_qpos_batch: np.ndarray, valid_count: Optional[int] = None
+    ) -> float:
         ts = time.perf_counter()
         self.check_contact_batch(hand_qpos_batch, valid_count=valid_count)
         return time.perf_counter() - ts
@@ -766,9 +956,15 @@ class MjWarpHO:
         if active_contact_count <= 0:
             return counts
 
-        world_ids = np.asarray(self.data.contact.worldid.numpy()[:active_contact_count], dtype=np.int32)
-        dists = np.asarray(self.data.contact.dist.numpy()[:active_contact_count], dtype=np.float32)
-        geom_pairs = np.asarray(self.data.contact.geom.numpy()[:active_contact_count], dtype=np.int32)
+        world_ids = np.asarray(
+            self.data.contact.worldid.numpy()[:active_contact_count], dtype=np.int32
+        )
+        dists = np.asarray(
+            self.data.contact.dist.numpy()[:active_contact_count], dtype=np.float32
+        )
+        geom_pairs = np.asarray(
+            self.data.contact.geom.numpy()[:active_contact_count], dtype=np.int32
+        )
         for world_id, dist, geom_pair in zip(world_ids, dists, geom_pairs):
             if world_id < 0 or world_id >= valid_count or dist > obj_margin:
                 continue
@@ -788,14 +984,12 @@ class MjWarpHO:
         if self.nq_hand <= 7:
             return delta
         delta[7:] = float(joint_step)
-        side_swing = self.hand_profile["side_swing_indices"]
-        for idx in side_swing:
+        for idx in self.side_swing_indices:
             joint_idx = 7 + int(idx)
             if 0 <= joint_idx < self.nq_hand:
                 delta[joint_idx] = 0.0
-        thumb_indices = self.hand_profile["thumb_relax_indices"]
-        thumb_div = max(float(self.hand_profile["thumb_relax_divisor"]), 1e-6)
-        for idx in thumb_indices:
+        thumb_div = max(float(self.thumb_relax_divisor), 1e-6)
+        for idx in self.thumb_relax_indices:
             joint_idx = 7 + int(idx)
             if 0 <= joint_idx < self.nq_hand:
                 delta[joint_idx] /= thumb_div
@@ -817,7 +1011,9 @@ class MjWarpHO:
         if valid_count <= 0:
             raise ValueError("valid_count must be positive for sim_grasp_batch.")
 
-        self.set_hand_qpos_batch(qpos_prepared_batch, valid_count=valid_count, do_forward=True)
+        self.set_hand_qpos_batch(
+            qpos_prepared_batch, valid_count=valid_count, do_forward=True
+        )
         target_qpos = self.get_hand_qpos_batch(valid_count=valid_count).copy()
 
         joint_step = min(0.05, max(0.01, float(speed_gain) * float(max_tip_speed)))
@@ -827,15 +1023,21 @@ class MjWarpHO:
             target_qpos += close_delta[None, :]
             ctrl_batch = np.zeros((self.nworld, self.nu), dtype=np.float32)
             if self.nu > 0:
-                ctrl_batch[:valid_count] = self.qpos_to_ctrl_batch(target_qpos[:valid_count])
+                ctrl_batch[:valid_count] = self.qpos_to_ctrl_batch(
+                    target_qpos[:valid_count]
+                )
             self.step_batch(1, ctrl_batch=ctrl_batch)
 
         qpos_grasp = self.get_hand_qpos_batch(valid_count=valid_count)
         ho_contact_counts = self.count_ho_contacts_batch(valid_count=valid_count)
-        return GraspBatchResult(qpos_grasp=qpos_grasp, ho_contact_counts=ho_contact_counts)
+        return GraspBatchResult(
+            qpos_grasp=qpos_grasp, ho_contact_counts=ho_contact_counts
+        )
 
     @staticmethod
-    def _pose_delta_batch(initial_pose: np.ndarray, current_pose: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+    def _pose_delta_batch(
+        initial_pose: np.ndarray, current_pose: np.ndarray
+    ) -> Tuple[np.ndarray, np.ndarray]:
         delta_pos = np.linalg.norm(current_pose[:, :3] - initial_pose[:, :3], axis=1)
         q1 = initial_pose[:, 3:7]
         q2 = current_pose[:, 3:7]
@@ -862,7 +1064,9 @@ class MjWarpHO:
         if valid_count is None:
             valid_count = int(np.asarray(qpos_grasp_batch).shape[0])
         if valid_count <= 0:
-            raise ValueError("valid_count must be positive for sim_under_extforce_batch.")
+            raise ValueError(
+                "valid_count must be positive for sim_under_extforce_batch."
+            )
 
         qpos_grasp_batch = np.asarray(qpos_grasp_batch, dtype=np.float32)
         grip_qpos = qpos_grasp_batch[:valid_count].copy()
@@ -902,7 +1106,9 @@ class MjWarpHO:
         angle_delta = np.zeros((valid_count,), dtype=np.float32)
 
         for dir_vec in external_force_dirs:
-            self.set_hand_qpos_batch(grip_qpos, valid_count=valid_count, do_forward=True)
+            self.set_hand_qpos_batch(
+                grip_qpos, valid_count=valid_count, do_forward=True
+            )
             initial_obj_pose = self.get_obj_pose_batch(valid_count=valid_count).copy()
             body_force_batch = np.zeros((valid_count, 6), dtype=np.float32)
             self.set_object_force_batch(body_force_batch, valid_count=valid_count)
@@ -919,11 +1125,17 @@ class MjWarpHO:
             for steps_this_chunk in chunk_steps:
                 self.step_batch(int(steps_this_chunk))
 
-                has_contact = self.read_contact_batch(valid_count=valid_count).has_contact
+                has_contact = self.read_contact_batch(
+                    valid_count=valid_count
+                ).has_contact
                 current_obj_pose = self.get_obj_pose_batch(valid_count=valid_count)
-                dir_pos_delta, dir_angle_delta = self._pose_delta_batch(initial_obj_pose, current_obj_pose)
-                still_ok = has_contact & (dir_pos_delta < float(trans_thresh)) & (
-                    dir_angle_delta < float(angle_thresh)
+                dir_pos_delta, dir_angle_delta = self._pose_delta_batch(
+                    initial_obj_pose, current_obj_pose
+                )
+                still_ok = (
+                    has_contact
+                    & (dir_pos_delta < float(trans_thresh))
+                    & (dir_angle_delta < float(angle_thresh))
                 )
                 dir_alive &= still_ok
                 pos_delta = np.maximum(pos_delta, dir_pos_delta)

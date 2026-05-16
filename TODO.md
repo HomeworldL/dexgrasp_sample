@@ -12,7 +12,7 @@
   - [x] 为根部稳定与接触参数建立小规模对比实验方案，避免凭经验直接改主线
 
 - [ ] 阶段 C：后续回到 GPU / MJWarp 版本适配
-  - [ ] `global_pc.npy` 导出与 `run_multi_mjw.py` 的跳过条件对齐
-  - [ ] `grasp_fail.h5` / `grasp_fail.npy` 的失败样本导出策略对齐
-  - [ ] `sim_under_extforce(qpos_target, qpos_prepared)` 的新接口与回放语义对齐
+  - [x] `global_pc.npy` 导出与 `run_multi_mjw.py` 的跳过条件对齐
+  - [x] `grasp_fail.h5` / `grasp_fail.npy` 的失败样本导出策略对齐
+  - [x] `sim_under_extforce(qpos_target, qpos_prepared)` 的新接口与回放语义对齐
   - [ ] 数据集构建、回放验证与可视化入口在 GPU 产物上完成一轮兼容性检查

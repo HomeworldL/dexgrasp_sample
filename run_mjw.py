@@ -20,7 +20,6 @@ from utils.utils_file import (
     load_run_config,
     object_profile_cfg,
 )
-from utils.utils_pointcloud import sample_surface_o3d
 from utils.utils_sample import (
     ARRAY_DTYPE,
     H5_DTYPE,
@@ -34,10 +33,11 @@ from utils.utils_sample import (
     parse_object_scale_key,
     sample_frames_from_points,
     write_fail_npy_from_h5,
+    write_global_normals,
     write_global_pc,
     write_grasp_npy_from_h5,
 )
-from utils.utils_seed import set_seed
+from utils.utils_seed import set_seed, stable_seed
 
 
 def build_valid_backend(
@@ -249,6 +249,7 @@ def run_sampling(
         seed=int(cfg["seed"]),
     )
 
+    set_seed(stable_seed(int(cfg["seed"]), object_scale_key, "sample_frames"))
     transforms_np = sample_frames_from_points(cfg, points, normals)
     pose = build_pose_candidates(cfg, transforms_np)
     qpos_init, qpos_approach, qpos_prepared = make_qpos_triplets(cfg, pose)
@@ -846,6 +847,18 @@ def main() -> None:
         "--mjcf-path", type=str, required=True, help="Path to scaled object MJCF."
     )
     p.add_argument(
+        "--global-pc-path",
+        type=str,
+        default=None,
+        help="Path to prepared global_pc.npy. Defaults to pc_subdir next to mjcf-path.",
+    )
+    p.add_argument(
+        "--global-normals-path",
+        type=str,
+        default=None,
+        help="Path to prepared global_normals.npy. Defaults to pc_subdir next to mjcf-path.",
+    )
+    p.add_argument(
         "--output-dir",
         type=str,
         required=True,
@@ -903,18 +916,39 @@ def main() -> None:
 
     hand_xml_path = os.path.abspath(cfg["hand"]["xml_path"])
     hand_name = Path(hand_xml_path).stem
-    n_points = int(cfg["sampling"]["n_points"])
-    _, parsed_scale = parse_object_scale_key(args.object_scale_key)
-    mesh_scale = 1.0 if parsed_scale is None else float(parsed_scale)
-    pts, norms = sample_surface_o3d(
-        args.coacd_path,
-        n_points=n_points,
-        method="poisson",
-        scale=mesh_scale,
+    pc_path = (
+        Path(args.global_pc_path)
+        if args.global_pc_path is not None
+        else Path(args.mjcf_path).resolve().parent / render_subdir / "global_pc.npy"
     )
+    normals_path = (
+        Path(args.global_normals_path)
+        if args.global_normals_path is not None
+        else Path(args.mjcf_path).resolve().parent
+        / render_subdir
+        / "global_normals.npy"
+    )
+    if not pc_path.exists():
+        raise FileNotFoundError(f"Prepared global_pc.npy not found: {pc_path}")
+    if not normals_path.exists():
+        raise FileNotFoundError(
+            f"Prepared global_normals.npy not found: {normals_path}"
+        )
+    pts = np.load(pc_path).astype(np.float32, copy=False)
+    norms = np.load(normals_path).astype(np.float32, copy=False)
+    if pts.ndim != 2 or pts.shape[1] != 3:
+        raise ValueError(f"global_pc.npy must have shape (N, 3), got {pts.shape}.")
+    if norms.shape != pts.shape:
+        raise ValueError(
+            f"global_normals.npy shape {norms.shape} does not match global_pc.npy {pts.shape}."
+        )
     global_pc_path = write_global_pc(pts, args.output_dir, render_subdir)
+    global_normals_path = write_global_normals(norms, args.output_dir, render_subdir)
     if verbose:
         print(f"[{args.object_scale_key}] saved global_pc to {global_pc_path}")
+        print(
+            f"[{args.object_scale_key}] saved global_normals to {global_normals_path}"
+        )
     if (not args.force) and has_grasp_outputs and has_fail_outputs:
         if verbose:
             print(

@@ -1003,28 +1003,141 @@ class MjWarpHO:
         steps: int = 40,
         speed_gain: float = 1.5,
         max_tip_speed: float = 0.05,
+        target_point_method: int = 2,
         visualize: bool = False,
     ) -> GraspBatchResult:
-        del Mp, visualize
+        del visualize
         if valid_count is None:
             valid_count = int(np.asarray(qpos_prepared_batch).shape[0])
         if valid_count <= 0:
             raise ValueError("valid_count must be positive for sim_grasp_batch.")
+        method_id = int(target_point_method)
+        if method_id not in {1, 2, 3}:
+            raise ValueError(
+                f"sim_grasp.target_point_method must be one of [1, 2, 3], got {target_point_method}."
+            )
+        if self.n_anchors <= 0:
+            raise ValueError(
+                "hand.anchor_params must be configured for sim_grasp_batch."
+            )
+        if self.obj_tree is None:
+            raise ValueError("Object point cloud must be set before sim_grasp_batch.")
 
         self.set_hand_qpos_batch(
             qpos_prepared_batch, valid_count=valid_count, do_forward=True
         )
-        target_qpos = self.get_hand_qpos_batch(valid_count=valid_count).copy()
-
-        joint_step = min(0.05, max(0.01, float(speed_gain) * float(max_tip_speed)))
-        close_delta = self._build_close_delta(joint_step)
+        body_ids_host = np.zeros((self.nworld,), dtype=np.int32)
+        jac_points_host = np.zeros((self.nworld, 3), dtype=np.float32)
+        jacp_wp = wp.zeros(
+            (self.nworld, 3, self.nv), dtype=wp.float32, device=self.device
+        )
+        dof_dim = self.nq_hand - 7
+        side_swing_mask = np.isin(np.arange(dof_dim), self.side_swing_indices)
 
         for _ in range(int(steps)):
-            target_qpos += close_delta[None, :]
+            hand_qpos = self.get_hand_qpos_batch(valid_count=valid_count).copy()
+            xpos = np.asarray(
+                self.data.xpos.numpy()[:valid_count][:, self.anchor_body_ids],
+                dtype=np.float32,
+            )
+            xmat = np.asarray(
+                self.data.xmat.numpy()[:valid_count][:, self.anchor_body_ids],
+                dtype=np.float32,
+            ).reshape(valid_count, self.n_anchors, 3, 3)
+
+            target_points = np.zeros((valid_count, self.n_anchors, 3), dtype=np.float32)
+            for anchor_idx in range(self.n_anchors):
+                anchor_pos = xpos[:, anchor_idx, :]
+                axis_local = self.anchor_plane_axes[anchor_idx].astype(np.float32)
+                axis_world = np.einsum(
+                    "nij,j->ni",
+                    xmat[:, anchor_idx, :, :],
+                    axis_local,
+                )
+                axis_world /= np.linalg.norm(axis_world, axis=1, keepdims=True) + 1e-12
+
+                if method_id == 1:
+                    _, idx_near = self.obj_tree.query(anchor_pos, k=int(Mp))
+                    idx_near = np.atleast_2d(np.asarray(idx_near, dtype=np.int64))
+                    pts_top = self.obj_pts[idx_near].reshape(valid_count, -1, 3)
+                    target_points[:, anchor_idx, :] = pts_top.mean(axis=1)
+                elif method_id == 2:
+                    r_all = self.obj_pts[None, :, :] - anchor_pos[:, None, :]
+                    abs_signed = np.abs(np.einsum("wnc,wc->wn", r_all, axis_world))
+                    if int(Mp) == 1:
+                        top_idx = np.argmin(abs_signed, axis=1)[:, None]
+                    else:
+                        top_idx = np.argpartition(abs_signed, int(Mp) - 1, axis=1)[
+                            :, : int(Mp)
+                        ]
+                    pts_top = self.obj_pts[top_idx]
+                    dists = np.linalg.norm(pts_top - anchor_pos[:, None, :], axis=2)
+                    chosen = np.argmin(dists, axis=1)
+                    target_points[:, anchor_idx, :] = pts_top[
+                        np.arange(valid_count), chosen
+                    ]
+                else:
+                    _, idx_near = self.obj_tree.query(anchor_pos, k=int(Mp))
+                    idx_near = np.atleast_2d(np.asarray(idx_near, dtype=np.int64))
+                    pts_top = self.obj_pts[idx_near].reshape(valid_count, -1, 3)
+                    plane_dist = np.abs(
+                        np.einsum(
+                            "wmc,wc->wm",
+                            pts_top - anchor_pos[:, None, :],
+                            axis_world,
+                        )
+                    )
+                    chosen = np.argmin(plane_dist, axis=1)
+                    target_points[:, anchor_idx, :] = pts_top[
+                        np.arange(valid_count), chosen
+                    ]
+
+            v_anchors = float(speed_gain) * (target_points - xpos)
+            norms = np.linalg.norm(v_anchors, axis=2, keepdims=True)
+            too_fast = norms[..., 0] > float(max_tip_speed)
+            if np.any(too_fast):
+                v_anchors[too_fast] = (
+                    v_anchors[too_fast] / (norms[too_fast] + 1e-12)
+                ) * float(max_tip_speed)
+
+            total_dq = np.zeros((valid_count, dof_dim), dtype=np.float32)
+            for anchor_idx, body_id in enumerate(self.anchor_body_ids):
+                body_ids_host[:valid_count] = int(body_id)
+                jac_points_host[:valid_count] = xpos[:, anchor_idx, :]
+                body_wp = wp.array(body_ids_host, dtype=wp.int32, device=self.device)
+                point_wp = wp.array(jac_points_host, dtype=wp.vec3, device=self.device)
+                jacp_wp.zero_()
+                mjw.jac(self.mjw_model, self.data, jacp_wp, None, point_wp, body_wp)
+                jacp = np.asarray(jacp_wp.numpy()[:valid_count], dtype=np.float32)
+                j_hand = jacp[:, :, 6 : 6 + dof_dim]
+                if j_hand.shape[2] != dof_dim:
+                    raise RuntimeError(
+                        f"Unexpected hand Jacobian width {j_hand.shape[2]}, expected {dof_dim}."
+                    )
+                dq = np.einsum(
+                    "wdc,wc->wd",
+                    np.linalg.pinv(j_hand),
+                    v_anchors[:, anchor_idx, :],
+                )
+                total_dq += float(self.anchor_weights[anchor_idx]) * dq.astype(
+                    np.float32,
+                    copy=False,
+                )
+
+            total_dq[:, ~side_swing_mask] = np.maximum(
+                total_dq[:, ~side_swing_mask],
+                0.0,
+            )
+            thumb_div = max(float(self.thumb_relax_divisor), 1e-6)
+            for idx in self.thumb_relax_indices:
+                if 0 <= int(idx) < dof_dim:
+                    total_dq[:, int(idx)] /= thumb_div
+
+            hand_qpos[:, 7:] += total_dq
             ctrl_batch = np.zeros((self.nworld, self.nu), dtype=np.float32)
             if self.nu > 0:
                 ctrl_batch[:valid_count] = self.qpos_to_ctrl_batch(
-                    target_qpos[:valid_count]
+                    hand_qpos[:valid_count]
                 )
             self.step_batch(1, ctrl_batch=ctrl_batch)
 

@@ -6,6 +6,7 @@ from typing import Dict, List, Optional, Sequence, Tuple
 
 import mujoco
 import numpy as np
+import torch
 import warp as wp
 from scipy.spatial import cKDTree
 
@@ -197,6 +198,8 @@ class MjWarpBucketHO(MjWarpHO):
         self.slot_obj_pts: List[np.ndarray] = []
         self.slot_obj_norms: List[np.ndarray] = []
         self.slot_obj_trees: List[cKDTree] = []
+        self.slot_obj_pts_torch = None
+        self.slot_origins_torch = None
 
         self.reset_batch()
 
@@ -475,6 +478,22 @@ class MjWarpBucketHO(MjWarpHO):
         self.slot_obj_pts = pts_out
         self.slot_obj_norms = norms_out
         self.slot_obj_trees = trees
+        point_shape = pts_out[0].shape
+        if any(pts.shape != point_shape for pts in pts_out):
+            raise ValueError(
+                "All bucket slot point clouds must have the same shape for GPU sim_grasp."
+            )
+        device = torch.device(self.device)
+        self.slot_obj_pts_torch = torch.as_tensor(
+            np.stack(pts_out, axis=0),
+            dtype=torch.float32,
+            device=device,
+        )
+        self.slot_origins_torch = torch.as_tensor(
+            self.slot_origins,
+            dtype=torch.float32,
+            device=device,
+        )
 
     def _target_points_for_anchor(
         self,
@@ -546,91 +565,207 @@ class MjWarpBucketHO(MjWarpHO):
             raise ValueError(
                 "set_slot_object_points must be called before sim_grasp_for_worlds."
             )
+        if self.slot_obj_pts_torch is None or self.slot_origins_torch is None:
+            raise ValueError(
+                "Bucket object point tensors must be set before sim_grasp_for_worlds."
+            )
 
         active_count = int(world_ids.size)
-        body_ids_host = np.zeros((self.nworld,), dtype=np.int32)
-        jac_points_host = np.zeros((self.nworld, 3), dtype=np.float32)
+        device = torch.device(self.device)
+        world_ids_t = torch.as_tensor(world_ids, dtype=torch.long, device=device)
+        slot_ids_t = torch.as_tensor(slot_ids, dtype=torch.long, device=device)
+        anchor_body_ids_t = torch.as_tensor(
+            self.anchor_body_ids,
+            dtype=torch.long,
+            device=device,
+        )
+        anchor_axes_t = torch.as_tensor(
+            self.anchor_plane_axes,
+            dtype=torch.float32,
+            device=device,
+        )
+        anchor_weights_t = torch.as_tensor(
+            self.anchor_weights,
+            dtype=torch.float32,
+            device=device,
+        )
+        ctrl_qpos_indices_t = torch.as_tensor(
+            self.ctrl_qpos_indices,
+            dtype=torch.long,
+            device=device,
+        )
+        side_swing_mask_t = torch.as_tensor(
+            np.isin(np.arange(self.nq_hand - 7), self.side_swing_indices),
+            dtype=torch.bool,
+            device=device,
+        )
+        thumb_relax_indices_t = torch.as_tensor(
+            self.thumb_relax_indices,
+            dtype=torch.long,
+            device=device,
+        )
+        world_body_ids_t = [
+            torch.full(
+                (self.nworld,),
+                int(body_id),
+                dtype=torch.int32,
+                device=device,
+            )
+            for body_id in self.anchor_body_ids
+        ]
+        world_body_ids_wp = [wp.from_torch(body_ids) for body_ids in world_body_ids_t]
+        jac_points_t = torch.zeros((self.nworld, 3), dtype=torch.float32, device=device)
+        jac_points_wp = wp.from_torch(jac_points_t, dtype=wp.vec3)
+        ctrl_t = torch.zeros(
+            (self.nworld, self.nu),
+            dtype=torch.float32,
+            device=device,
+        )
+        if self.nu > 0:
+            self.data.ctrl = wp.from_torch(ctrl_t)
         jacp_wp = wp.zeros(
             (self.nworld, 3, self.nv), dtype=wp.float32, device=self.device
         )
         dof_dim = self.nq_hand - 7
-        side_swing_mask = np.isin(np.arange(dof_dim), self.side_swing_indices)
+        top_k = min(max(int(Mp), 1), int(self.slot_obj_pts_torch.shape[1]))
+        arange_active_t = torch.arange(active_count, dtype=torch.long, device=device)
 
         for _ in range(int(steps)):
-            hand_qpos = self.get_hand_qpos_for_worlds(
-                world_ids, slot_ids, remove_slot_offsets=False
-            ).copy()
-            xpos = np.asarray(
-                self.data.xpos.numpy()[world_ids][:, self.anchor_body_ids],
-                dtype=np.float32,
+            hand_qpos_t = wp.to_torch(self.data.qpos)[
+                world_ids_t, : self.nq_hand
+            ].clone()
+            xpos_t = wp.to_torch(self.data.xpos)[world_ids_t].index_select(
+                1, anchor_body_ids_t
             )
-            xmat = np.asarray(
-                self.data.xmat.numpy()[world_ids][:, self.anchor_body_ids],
-                dtype=np.float32,
-            ).reshape(active_count, self.n_anchors, 3, 3)
+            xmat_t = wp.to_torch(self.data.xmat)[world_ids_t].index_select(
+                1, anchor_body_ids_t
+            )
+            axis_world_t = torch.einsum("waij,aj->wai", xmat_t, anchor_axes_t)
+            axis_world_t = axis_world_t / (
+                torch.linalg.vector_norm(axis_world_t, dim=2, keepdim=True) + 1e-12
+            )
+            pts_world_t = (
+                self.slot_obj_pts_torch[slot_ids_t]
+                + self.slot_origins_torch[slot_ids_t, None, :]
+            )
 
-            target_points = np.zeros(
-                (active_count, self.n_anchors, 3), dtype=np.float32
+            target_points_t = torch.empty_like(xpos_t)
+            for anchor_idx in range(self.n_anchors):
+                anchor_pos_t = xpos_t[:, anchor_idx, :]
+                axis_t = axis_world_t[:, anchor_idx, :]
+                if method_id == 1:
+                    all_dist_t = torch.linalg.vector_norm(
+                        pts_world_t - anchor_pos_t[:, None, :],
+                        dim=2,
+                    )
+                    top_idx_t = torch.topk(
+                        all_dist_t,
+                        k=top_k,
+                        dim=1,
+                        largest=False,
+                        sorted=False,
+                    ).indices
+                    target_points_t[:, anchor_idx, :] = pts_world_t[
+                        arange_active_t[:, None], top_idx_t
+                    ].mean(dim=1)
+                elif method_id == 2:
+                    diff_t = pts_world_t - anchor_pos_t[:, None, :]
+                    abs_signed_t = torch.abs(
+                        torch.sum(diff_t * axis_t[:, None, :], dim=2)
+                    )
+                    top_idx_t = torch.topk(
+                        abs_signed_t,
+                        k=top_k,
+                        dim=1,
+                        largest=False,
+                        sorted=False,
+                    ).indices
+                    pts_top_t = pts_world_t[arange_active_t[:, None], top_idx_t]
+                    dist_top_t = torch.linalg.vector_norm(
+                        pts_top_t - anchor_pos_t[:, None, :],
+                        dim=2,
+                    )
+                    chosen_t = torch.argmin(dist_top_t, dim=1)
+                    target_points_t[:, anchor_idx, :] = pts_top_t[
+                        arange_active_t, chosen_t
+                    ]
+                else:
+                    all_dist_t = torch.linalg.vector_norm(
+                        pts_world_t - anchor_pos_t[:, None, :],
+                        dim=2,
+                    )
+                    top_idx_t = torch.topk(
+                        all_dist_t,
+                        k=top_k,
+                        dim=1,
+                        largest=False,
+                        sorted=False,
+                    ).indices
+                    pts_top_t = pts_world_t[arange_active_t[:, None], top_idx_t]
+                    plane_dist_t = torch.abs(
+                        torch.sum(
+                            (pts_top_t - anchor_pos_t[:, None, :]) * axis_t[:, None, :],
+                            dim=2,
+                        )
+                    )
+                    chosen_t = torch.argmin(plane_dist_t, dim=1)
+                    target_points_t[:, anchor_idx, :] = pts_top_t[
+                        arange_active_t, chosen_t
+                    ]
+
+            v_anchors_t = float(speed_gain) * (target_points_t - xpos_t)
+            norms_t = torch.linalg.vector_norm(v_anchors_t, dim=2, keepdim=True)
+            speed_scale_t = torch.clamp(
+                float(max_tip_speed) / (norms_t + 1e-12),
+                max=1.0,
+            )
+            v_anchors_t = v_anchors_t * speed_scale_t
+
+            total_dq_t = torch.zeros(
+                (active_count, dof_dim),
+                dtype=torch.float32,
+                device=device,
             )
             for anchor_idx in range(self.n_anchors):
-                axis_local = self.anchor_plane_axes[anchor_idx].astype(np.float32)
-                axis_world = np.einsum(
-                    "wij,j->wi",
-                    xmat[:, anchor_idx, :, :],
-                    axis_local,
-                )
-                target_points[:, anchor_idx, :] = self._target_points_for_anchor(
-                    xpos[:, anchor_idx, :],
-                    axis_world,
-                    slot_ids,
-                    int(Mp),
-                    method_id,
-                )
-
-            v_anchors = float(speed_gain) * (target_points - xpos)
-            norms = np.linalg.norm(v_anchors, axis=2, keepdims=True)
-            too_fast = norms[..., 0] > float(max_tip_speed)
-            if np.any(too_fast):
-                v_anchors[too_fast] = (
-                    v_anchors[too_fast] / (norms[too_fast] + 1e-12)
-                ) * float(max_tip_speed)
-
-            total_dq = np.zeros((active_count, dof_dim), dtype=np.float32)
-            for anchor_idx, body_id in enumerate(self.anchor_body_ids):
-                body_ids_host.fill(0)
-                jac_points_host.fill(0.0)
-                body_ids_host[world_ids] = int(body_id)
-                jac_points_host[world_ids] = xpos[:, anchor_idx, :]
-                body_wp = wp.array(body_ids_host, dtype=wp.int32, device=self.device)
-                point_wp = wp.array(jac_points_host, dtype=wp.vec3, device=self.device)
+                jac_points_t.zero_()
+                jac_points_t[world_ids_t] = xpos_t[:, anchor_idx, :]
                 jacp_wp.zero_()
-                mjw.jac(self.mjw_model, self.data, jacp_wp, None, point_wp, body_wp)
-                jacp = np.asarray(jacp_wp.numpy()[world_ids], dtype=np.float32)
-                j_hand = jacp[:, :, 6 : 6 + dof_dim]
-                dq = np.einsum(
-                    "wdc,wc->wd",
-                    np.linalg.pinv(j_hand),
-                    v_anchors[:, anchor_idx, :],
+                mjw.jac(
+                    self.mjw_model,
+                    self.data,
+                    jacp_wp,
+                    None,
+                    jac_points_wp,
+                    world_body_ids_wp[anchor_idx],
                 )
-                total_dq += float(self.anchor_weights[anchor_idx]) * dq.astype(
-                    np.float32,
-                    copy=False,
-                )
+                jacp_t = wp.to_torch(jacp_wp)[world_ids_t]
+                j_hand_t = jacp_t[:, :, 6 : 6 + dof_dim]
+                dq_t = torch.matmul(
+                    torch.linalg.pinv(j_hand_t),
+                    v_anchors_t[:, anchor_idx, :, None],
+                ).squeeze(-1)
+                total_dq_t += anchor_weights_t[anchor_idx] * dq_t
 
-            total_dq[:, ~side_swing_mask] = np.maximum(
-                total_dq[:, ~side_swing_mask],
+            total_dq_t[:, ~side_swing_mask_t] = torch.clamp_min(
+                total_dq_t[:, ~side_swing_mask_t],
                 0.0,
             )
             thumb_div = max(float(self.thumb_relax_divisor), 1e-6)
-            for idx in self.thumb_relax_indices:
-                if 0 <= int(idx) < dof_dim:
-                    total_dq[:, int(idx)] /= thumb_div
+            valid_thumb_t = thumb_relax_indices_t[
+                (thumb_relax_indices_t >= 0) & (thumb_relax_indices_t < dof_dim)
+            ]
+            if valid_thumb_t.numel() > 0:
+                total_dq_t[:, valid_thumb_t] = total_dq_t[:, valid_thumb_t] / thumb_div
 
-            hand_qpos[:, 7:] += total_dq
-            ctrl_batch = np.zeros((self.nworld, self.nu), dtype=np.float32)
+            hand_qpos_t[:, 7:] = hand_qpos_t[:, 7:] + total_dq_t
             if self.nu > 0:
-                ctrl_batch[world_ids] = self.qpos_to_ctrl_batch(hand_qpos)
-            self.step_batch(1, ctrl_batch=ctrl_batch)
+                ctrl_t.zero_()
+                ctrl_t[world_ids_t] = torch.index_select(
+                    hand_qpos_t,
+                    1,
+                    ctrl_qpos_indices_t,
+                )
+            self.step_batch(1)
 
         qpos_grasp = self.get_hand_qpos_for_worlds(
             world_ids, slot_ids, remove_slot_offsets=True

@@ -17,6 +17,7 @@ from typing import Dict, List, Optional, Sequence, Tuple
 
 import mujoco
 import numpy as np
+import torch
 import warp as wp
 from scipy.spatial import cKDTree
 
@@ -240,6 +241,7 @@ class MjWarpHO:
         self.obj_pts = None
         self.obj_norms = None
         self.obj_tree = None
+        self.obj_pts_torch = None
 
         self.reset_batch()
 
@@ -601,6 +603,11 @@ class MjWarpHO:
         self.obj_pts = obj_pts
         self.obj_norms = obj_norms
         self.obj_tree = cKDTree(obj_pts)
+        self.obj_pts_torch = torch.as_tensor(
+            obj_pts,
+            dtype=torch.float32,
+            device=torch.device(self.device),
+        )
 
     def get_hand_qpos_batch(self, valid_count: Optional[int] = None) -> np.ndarray:
         if valid_count is None:
@@ -1022,124 +1029,204 @@ class MjWarpHO:
             )
         if self.obj_tree is None:
             raise ValueError("Object point cloud must be set before sim_grasp_batch.")
+        if self.obj_pts_torch is None:
+            raise ValueError("Object point tensor must be set before sim_grasp_batch.")
 
         self.set_hand_qpos_batch(
             qpos_prepared_batch, valid_count=valid_count, do_forward=True
         )
-        body_ids_host = np.zeros((self.nworld,), dtype=np.int32)
-        jac_points_host = np.zeros((self.nworld, 3), dtype=np.float32)
+        device = torch.device(self.device)
+        obj_pts_t = self.obj_pts_torch
+        anchor_body_ids_t = torch.as_tensor(
+            self.anchor_body_ids,
+            dtype=torch.long,
+            device=device,
+        )
+        anchor_axes_t = torch.as_tensor(
+            self.anchor_plane_axes,
+            dtype=torch.float32,
+            device=device,
+        )
+        anchor_weights_t = torch.as_tensor(
+            self.anchor_weights,
+            dtype=torch.float32,
+            device=device,
+        )
+        ctrl_qpos_indices_t = torch.as_tensor(
+            self.ctrl_qpos_indices,
+            dtype=torch.long,
+            device=device,
+        )
+        side_swing_mask_t = torch.as_tensor(
+            np.isin(np.arange(self.nq_hand - 7), self.side_swing_indices),
+            dtype=torch.bool,
+            device=device,
+        )
+        thumb_relax_indices_t = torch.as_tensor(
+            self.thumb_relax_indices,
+            dtype=torch.long,
+            device=device,
+        )
+        world_body_ids_t = [
+            torch.full(
+                (self.nworld,),
+                int(body_id),
+                dtype=torch.int32,
+                device=device,
+            )
+            for body_id in self.anchor_body_ids
+        ]
+        world_body_ids_wp = [wp.from_torch(body_ids) for body_ids in world_body_ids_t]
+        jac_points_t = torch.zeros((self.nworld, 3), dtype=torch.float32, device=device)
+        jac_points_wp = wp.from_torch(jac_points_t, dtype=wp.vec3)
+        ctrl_t = torch.zeros(
+            (self.nworld, self.nu),
+            dtype=torch.float32,
+            device=device,
+        )
+        if self.nu > 0:
+            self.data.ctrl = wp.from_torch(ctrl_t)
+        arange_valid_t = torch.arange(valid_count, dtype=torch.long, device=device)
         jacp_wp = wp.zeros(
             (self.nworld, 3, self.nv), dtype=wp.float32, device=self.device
         )
         dof_dim = self.nq_hand - 7
-        side_swing_mask = np.isin(np.arange(dof_dim), self.side_swing_indices)
+        top_k = min(max(int(Mp), 1), int(obj_pts_t.shape[0]))
 
         for _ in range(int(steps)):
-            hand_qpos = self.get_hand_qpos_batch(valid_count=valid_count).copy()
-            xpos = np.asarray(
-                self.data.xpos.numpy()[:valid_count][:, self.anchor_body_ids],
-                dtype=np.float32,
+            hand_qpos_t = wp.to_torch(self.data.qpos)[
+                :valid_count, : self.nq_hand
+            ].clone()
+            xpos_t = wp.to_torch(self.data.xpos)[:valid_count].index_select(
+                1, anchor_body_ids_t
             )
-            xmat = np.asarray(
-                self.data.xmat.numpy()[:valid_count][:, self.anchor_body_ids],
-                dtype=np.float32,
-            ).reshape(valid_count, self.n_anchors, 3, 3)
+            xmat_t = wp.to_torch(self.data.xmat)[:valid_count].index_select(
+                1, anchor_body_ids_t
+            )
+            axis_world_t = torch.einsum("waij,aj->wai", xmat_t, anchor_axes_t)
+            axis_world_t = axis_world_t / (
+                torch.linalg.vector_norm(axis_world_t, dim=2, keepdim=True) + 1e-12
+            )
 
-            target_points = np.zeros((valid_count, self.n_anchors, 3), dtype=np.float32)
+            target_points_t = torch.empty_like(xpos_t)
             for anchor_idx in range(self.n_anchors):
-                anchor_pos = xpos[:, anchor_idx, :]
-                axis_local = self.anchor_plane_axes[anchor_idx].astype(np.float32)
-                axis_world = np.einsum(
-                    "nij,j->ni",
-                    xmat[:, anchor_idx, :, :],
-                    axis_local,
-                )
-                axis_world /= np.linalg.norm(axis_world, axis=1, keepdims=True) + 1e-12
-
+                anchor_pos_t = xpos_t[:, anchor_idx, :]
+                axis_t = axis_world_t[:, anchor_idx, :]
                 if method_id == 1:
-                    _, idx_near = self.obj_tree.query(anchor_pos, k=int(Mp))
-                    idx_near = np.atleast_2d(np.asarray(idx_near, dtype=np.int64))
-                    pts_top = self.obj_pts[idx_near].reshape(valid_count, -1, 3)
-                    target_points[:, anchor_idx, :] = pts_top.mean(axis=1)
+                    all_dist_t = torch.linalg.vector_norm(
+                        obj_pts_t[None, :, :] - anchor_pos_t[:, None, :],
+                        dim=2,
+                    )
+                    top_idx_t = torch.topk(
+                        all_dist_t,
+                        k=top_k,
+                        dim=1,
+                        largest=False,
+                        sorted=False,
+                    ).indices
+                    target_points_t[:, anchor_idx, :] = obj_pts_t[top_idx_t].mean(dim=1)
                 elif method_id == 2:
-                    r_all = self.obj_pts[None, :, :] - anchor_pos[:, None, :]
-                    abs_signed = np.abs(np.einsum("wnc,wc->wn", r_all, axis_world))
-                    if int(Mp) == 1:
-                        top_idx = np.argmin(abs_signed, axis=1)[:, None]
-                    else:
-                        top_idx = np.argpartition(abs_signed, int(Mp) - 1, axis=1)[
-                            :, : int(Mp)
-                        ]
-                    pts_top = self.obj_pts[top_idx]
-                    dists = np.linalg.norm(pts_top - anchor_pos[:, None, :], axis=2)
-                    chosen = np.argmin(dists, axis=1)
-                    target_points[:, anchor_idx, :] = pts_top[
-                        np.arange(valid_count), chosen
+                    diff_t = obj_pts_t[None, :, :] - anchor_pos_t[:, None, :]
+                    abs_signed_t = torch.abs(
+                        torch.sum(diff_t * axis_t[:, None, :], dim=2)
+                    )
+                    top_idx_t = torch.topk(
+                        abs_signed_t,
+                        k=top_k,
+                        dim=1,
+                        largest=False,
+                        sorted=False,
+                    ).indices
+                    pts_top_t = obj_pts_t[top_idx_t]
+                    dist_top_t = torch.linalg.vector_norm(
+                        pts_top_t - anchor_pos_t[:, None, :],
+                        dim=2,
+                    )
+                    chosen_t = torch.argmin(dist_top_t, dim=1)
+                    target_points_t[:, anchor_idx, :] = pts_top_t[
+                        arange_valid_t, chosen_t
                     ]
                 else:
-                    _, idx_near = self.obj_tree.query(anchor_pos, k=int(Mp))
-                    idx_near = np.atleast_2d(np.asarray(idx_near, dtype=np.int64))
-                    pts_top = self.obj_pts[idx_near].reshape(valid_count, -1, 3)
-                    plane_dist = np.abs(
-                        np.einsum(
-                            "wmc,wc->wm",
-                            pts_top - anchor_pos[:, None, :],
-                            axis_world,
+                    all_dist_t = torch.linalg.vector_norm(
+                        obj_pts_t[None, :, :] - anchor_pos_t[:, None, :],
+                        dim=2,
+                    )
+                    top_idx_t = torch.topk(
+                        all_dist_t,
+                        k=top_k,
+                        dim=1,
+                        largest=False,
+                        sorted=False,
+                    ).indices
+                    pts_top_t = obj_pts_t[top_idx_t]
+                    plane_dist_t = torch.abs(
+                        torch.sum(
+                            (pts_top_t - anchor_pos_t[:, None, :]) * axis_t[:, None, :],
+                            dim=2,
                         )
                     )
-                    chosen = np.argmin(plane_dist, axis=1)
-                    target_points[:, anchor_idx, :] = pts_top[
-                        np.arange(valid_count), chosen
+                    chosen_t = torch.argmin(plane_dist_t, dim=1)
+                    target_points_t[:, anchor_idx, :] = pts_top_t[
+                        arange_valid_t, chosen_t
                     ]
 
-            v_anchors = float(speed_gain) * (target_points - xpos)
-            norms = np.linalg.norm(v_anchors, axis=2, keepdims=True)
-            too_fast = norms[..., 0] > float(max_tip_speed)
-            if np.any(too_fast):
-                v_anchors[too_fast] = (
-                    v_anchors[too_fast] / (norms[too_fast] + 1e-12)
-                ) * float(max_tip_speed)
+            v_anchors_t = float(speed_gain) * (target_points_t - xpos_t)
+            norms_t = torch.linalg.vector_norm(v_anchors_t, dim=2, keepdim=True)
+            speed_scale_t = torch.clamp(
+                float(max_tip_speed) / (norms_t + 1e-12),
+                max=1.0,
+            )
+            v_anchors_t = v_anchors_t * speed_scale_t
 
-            total_dq = np.zeros((valid_count, dof_dim), dtype=np.float32)
-            for anchor_idx, body_id in enumerate(self.anchor_body_ids):
-                body_ids_host[:valid_count] = int(body_id)
-                jac_points_host[:valid_count] = xpos[:, anchor_idx, :]
-                body_wp = wp.array(body_ids_host, dtype=wp.int32, device=self.device)
-                point_wp = wp.array(jac_points_host, dtype=wp.vec3, device=self.device)
+            total_dq_t = torch.zeros(
+                (valid_count, dof_dim),
+                dtype=torch.float32,
+                device=device,
+            )
+            for anchor_idx in range(self.n_anchors):
+                jac_points_t.zero_()
+                jac_points_t[:valid_count] = xpos_t[:, anchor_idx, :]
                 jacp_wp.zero_()
-                mjw.jac(self.mjw_model, self.data, jacp_wp, None, point_wp, body_wp)
-                jacp = np.asarray(jacp_wp.numpy()[:valid_count], dtype=np.float32)
-                j_hand = jacp[:, :, 6 : 6 + dof_dim]
-                if j_hand.shape[2] != dof_dim:
+                mjw.jac(
+                    self.mjw_model,
+                    self.data,
+                    jacp_wp,
+                    None,
+                    jac_points_wp,
+                    world_body_ids_wp[anchor_idx],
+                )
+                jacp_t = wp.to_torch(jacp_wp)[:valid_count]
+                j_hand_t = jacp_t[:, :, 6 : 6 + dof_dim]
+                if j_hand_t.shape[2] != dof_dim:
                     raise RuntimeError(
-                        f"Unexpected hand Jacobian width {j_hand.shape[2]}, expected {dof_dim}."
+                        f"Unexpected hand Jacobian width {j_hand_t.shape[2]}, expected {dof_dim}."
                     )
-                dq = np.einsum(
-                    "wdc,wc->wd",
-                    np.linalg.pinv(j_hand),
-                    v_anchors[:, anchor_idx, :],
-                )
-                total_dq += float(self.anchor_weights[anchor_idx]) * dq.astype(
-                    np.float32,
-                    copy=False,
-                )
+                dq_t = torch.matmul(
+                    torch.linalg.pinv(j_hand_t),
+                    v_anchors_t[:, anchor_idx, :, None],
+                ).squeeze(-1)
+                total_dq_t += anchor_weights_t[anchor_idx] * dq_t
 
-            total_dq[:, ~side_swing_mask] = np.maximum(
-                total_dq[:, ~side_swing_mask],
+            total_dq_t[:, ~side_swing_mask_t] = torch.clamp_min(
+                total_dq_t[:, ~side_swing_mask_t],
                 0.0,
             )
             thumb_div = max(float(self.thumb_relax_divisor), 1e-6)
-            for idx in self.thumb_relax_indices:
-                if 0 <= int(idx) < dof_dim:
-                    total_dq[:, int(idx)] /= thumb_div
+            valid_thumb_t = thumb_relax_indices_t[
+                (thumb_relax_indices_t >= 0) & (thumb_relax_indices_t < dof_dim)
+            ]
+            if valid_thumb_t.numel() > 0:
+                total_dq_t[:, valid_thumb_t] = total_dq_t[:, valid_thumb_t] / thumb_div
 
-            hand_qpos[:, 7:] += total_dq
-            ctrl_batch = np.zeros((self.nworld, self.nu), dtype=np.float32)
+            hand_qpos_t[:, 7:] = hand_qpos_t[:, 7:] + total_dq_t
             if self.nu > 0:
-                ctrl_batch[:valid_count] = self.qpos_to_ctrl_batch(
-                    hand_qpos[:valid_count]
+                ctrl_t.zero_()
+                ctrl_t[:valid_count] = torch.index_select(
+                    hand_qpos_t,
+                    1,
+                    ctrl_qpos_indices_t,
                 )
-            self.step_batch(1, ctrl_batch=ctrl_batch)
+            self.step_batch(1)
 
         qpos_grasp = self.get_hand_qpos_batch(valid_count=valid_count)
         ho_contact_counts = self.count_ho_contacts_batch(valid_count=valid_count)

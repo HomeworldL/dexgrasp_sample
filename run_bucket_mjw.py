@@ -435,8 +435,17 @@ def run_extforce(
     bucket_free: MjWarpBucketHO,
     args: argparse.Namespace,
 ) -> Dict[str, int]:
+    object_count = len(writers)
     if contact_rows["object_id"].size == 0:
-        return {"loops": 0, "settle_fail": 0, "force_fail": 0, "valid": 0}
+        return {
+            "loops": 0,
+            "settle_fail": 0,
+            "force_fail": 0,
+            "valid": 0,
+            "per_object_settle_fail": [0] * object_count,
+            "per_object_force_fail": [0] * object_count,
+            "per_object_valid": [0] * object_count,
+        }
 
     extforce_cfg = dict(cfg.get("extforce", {}))
     extforce_cfg.pop("visualize", None)
@@ -489,7 +498,6 @@ def run_extforce(
     settle_fail = 0
     force_fail = 0
     valid_written = 0
-    object_count = len(writers)
     per_object_settle_fail = np.zeros((object_count,), dtype=np.int64)
     per_object_force_fail = np.zeros((object_count,), dtype=np.int64)
     per_object_valid = np.zeros((object_count,), dtype=np.int64)
@@ -694,6 +702,183 @@ def run_extforce(
     }
 
 
+def run_streaming_sampling(
+    cfg: Dict,
+    object_states: List[Dict],
+    writers: List[ObjectGraspWriter],
+    bucket_fixed: MjWarpBucketHO,
+    bucket_free: MjWarpBucketHO,
+    args: argparse.Namespace,
+) -> tuple[Dict[str, np.ndarray], Dict[str, int]]:
+    batch_size = int(args.batch_size)
+    object_count = len(object_states)
+    contact_min_count = int(cfg["sim_grasp"]["contact_min_count"])
+    sim_grasp_cfg = dict(cfg.get("sim_grasp", {}))
+    sim_grasp_cfg.pop("visualize", None)
+    sim_grasp_cfg.pop("contact_min_count", None)
+    sim_grasp_cfg.pop("record_history", None)
+
+    collision_batches = 0
+    sim_grasp_batches = 0
+    no_col_count = 0
+    contact_ok_count = 0
+    per_object_no_col = np.zeros((object_count,), dtype=np.int64)
+    per_object_contact_ok = np.zeros((object_count,), dtype=np.int64)
+    ext_total = {
+        "loops": 0,
+        "settle_fail": 0,
+        "force_fail": 0,
+        "valid": 0,
+        "per_object_settle_fail": [0] * object_count,
+        "per_object_force_fail": [0] * object_count,
+        "per_object_valid": [0] * object_count,
+    }
+
+    pbar = tqdm(desc="bucket-stream", disable=not args.verbose, unit="cand")
+    while not all(writer.done for writer in writers):
+        candidate_ids, object_ids = take_candidate_batch(
+            object_states, writers, max_rows=batch_size
+        )
+        if candidate_ids.size == 0:
+            break
+
+        valid_count = int(candidate_ids.size)
+        world_ids = np.arange(valid_count, dtype=np.int32)
+        slot_ids = object_ids.astype(np.int32, copy=False)
+        qpos_prepared = np.stack(
+            [
+                object_states[int(obj_id)]["qpos_prepared"][int(candidate_id)]
+                for obj_id, candidate_id in zip(object_ids, candidate_ids)
+            ],
+            axis=0,
+        )
+        qpos_approach = np.stack(
+            [
+                object_states[int(obj_id)]["qpos_approach"][int(candidate_id)]
+                for obj_id, candidate_id in zip(object_ids, candidate_ids)
+            ],
+            axis=0,
+        )
+        qpos_init = np.stack(
+            [
+                object_states[int(obj_id)]["qpos_init"][int(candidate_id)]
+                for obj_id, candidate_id in zip(object_ids, candidate_ids)
+            ],
+            axis=0,
+        )
+
+        bucket_fixed.reset_worlds(world_ids)
+        bucket_fixed.load_hand_qpos_to_worlds(
+            world_ids, qpos_prepared, slot_ids, do_forward=True
+        )
+        prepared_contact = bucket_fixed.read_contact_mask_for_worlds(
+            world_ids, slot_ids
+        )
+        bucket_fixed.load_hand_qpos_to_worlds(
+            world_ids, qpos_approach, slot_ids, do_forward=True
+        )
+        approach_contact = bucket_fixed.read_contact_mask_for_worlds(
+            world_ids, slot_ids
+        )
+        bucket_fixed.load_hand_qpos_to_worlds(
+            world_ids, qpos_init, slot_ids, do_forward=True
+        )
+        init_contact = bucket_fixed.read_contact_mask_for_worlds(world_ids, slot_ids)
+        collision_batches += 1
+
+        for row_idx in np.flatnonzero(prepared_contact):
+            writers[int(object_ids[row_idx])].add_fail(
+                qpos_prepared[int(row_idx)], "prepared_contact"
+            )
+
+        no_col_mask = ~(prepared_contact | approach_contact | init_contact)
+        no_col_count += int(no_col_mask.sum())
+        if np.any(no_col_mask):
+            per_object_no_col += np.bincount(
+                object_ids[no_col_mask],
+                minlength=object_count,
+            )
+
+        contact_rows = {
+            "object_id": np.zeros((0,), dtype=np.int32),
+            "qpos_init": np.zeros((0, bucket_fixed.nq_hand), dtype=np.float32),
+            "qpos_approach": np.zeros((0, bucket_fixed.nq_hand), dtype=np.float32),
+            "qpos_prepared": np.zeros((0, bucket_fixed.nq_hand), dtype=np.float32),
+            "qpos_grasp": np.zeros((0, bucket_fixed.nq_hand), dtype=np.float32),
+        }
+        if np.any(no_col_mask):
+            no_col_worlds = np.arange(int(no_col_mask.sum()), dtype=np.int32)
+            no_col_slots = slot_ids[no_col_mask]
+            no_col_init = qpos_init[no_col_mask]
+            no_col_approach = qpos_approach[no_col_mask]
+            no_col_prepared = qpos_prepared[no_col_mask]
+            bucket_fixed.reset_worlds(no_col_worlds)
+            bucket_fixed.load_hand_qpos_to_worlds(
+                no_col_worlds,
+                no_col_prepared,
+                no_col_slots,
+                do_forward=True,
+            )
+            qpos_grasp, ho_counts = bucket_fixed.sim_grasp_for_worlds(
+                no_col_worlds,
+                no_col_slots,
+                **sim_grasp_cfg,
+            )
+            sim_grasp_batches += 1
+
+            contact_ok_mask = ho_counts >= contact_min_count
+            contact_ok_count += int(contact_ok_mask.sum())
+            if np.any(contact_ok_mask):
+                per_object_contact_ok += np.bincount(
+                    no_col_slots[contact_ok_mask],
+                    minlength=object_count,
+                )
+            for local_idx in np.flatnonzero(~contact_ok_mask):
+                writers[int(no_col_slots[int(local_idx)])].add_fail(
+                    qpos_grasp[int(local_idx)], "insufficient_contact"
+                )
+            contact_rows = {
+                "object_id": no_col_slots[contact_ok_mask].astype(np.int32, copy=False),
+                "qpos_init": no_col_init[contact_ok_mask].astype(
+                    np.float32, copy=False
+                ),
+                "qpos_approach": no_col_approach[contact_ok_mask].astype(
+                    np.float32, copy=False
+                ),
+                "qpos_prepared": no_col_prepared[contact_ok_mask].astype(
+                    np.float32, copy=False
+                ),
+                "qpos_grasp": qpos_grasp[contact_ok_mask].astype(
+                    np.float32, copy=False
+                ),
+            }
+
+        ext_stats = run_extforce(cfg, contact_rows, writers, bucket_free, args)
+        for key in ("loops", "settle_fail", "force_fail", "valid"):
+            ext_total[key] += int(ext_stats[key])
+        for key in (
+            "per_object_settle_fail",
+            "per_object_force_fail",
+            "per_object_valid",
+        ):
+            ext_total[key] = (
+                np.asarray(ext_total[key], dtype=np.int64)
+                + np.asarray(ext_stats[key], dtype=np.int64)
+            ).tolist()
+
+        pbar.update(valid_count)
+    pbar.close()
+    contact_stats = {
+        "stats": np.asarray(
+            [collision_batches, sim_grasp_batches, no_col_count, contact_ok_count],
+            dtype=np.int64,
+        ),
+        "per_object_no_col": per_object_no_col,
+        "per_object_contact_ok": per_object_contact_ok,
+    }
+    return contact_stats, ext_total
+
+
 def main() -> None:
     args = parse_args()
     cfg = load_run_config(args.config)
@@ -772,14 +957,14 @@ def main() -> None:
             )
         )
 
-    contact_rows = run_collision_and_grasp(
+    contact_rows, ext_stats = run_streaming_sampling(
         cfg,
         object_states,
         writers,
         bucket_fixed,
+        bucket_free,
         args,
     )
-    ext_stats = run_extforce(cfg, contact_rows, writers, bucket_free, args)
     for writer in writers:
         writer.close()
         print(

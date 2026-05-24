@@ -1,5 +1,16 @@
 # CHANGELOG
 
+## 2026-05-24
+
+### Added
+- Added optional stage timing output for CPU grasp sampling, including contact, grasp-close, and external-force timing breakdowns.
+- Added experimental dense grasp expansion and extforce duration comparison utilities under `run_dense.py` and `scripts/`.
+
+### Changed
+- Reworked CPU external-force validation to close once, snapshot the settled MuJoCo state, and restore that state for each force direction.
+- Required `data.profile_timing` in run configs and enabled timing output for the default YCB liberhand-right config.
+- Enabled native asset inclusion in the default YCB liberhand-right sampling config.
+
 ## 2026-05-17
 
 ### Added

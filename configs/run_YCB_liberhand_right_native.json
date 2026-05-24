@@ -11,6 +11,7 @@
     "verbose": false,
     "max_cap": 100,
     "max_time_sec": 180.0,
+    "profile_timing": false,
     "flush_every": 25,
     "h5_name": "grasp.h5",
     "npy_name": "grasp.npy",

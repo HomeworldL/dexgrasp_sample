@@ -160,6 +160,7 @@ def run_sampling(
     min_valid_count = int(cfg["data"]["min_valid_count"])
     flush_every = int(cfg["data"]["flush_every"])
     fail_keep_ratio = float(cfg["data"]["fail_keep_ratio"])
+    profile_timing = bool(cfg["data"]["profile_timing"])
     contact_min_count = int(cfg["sim_grasp"]["contact_min_count"])
     sim_grasp_cfg = dict(cfg.get("sim_grasp", {}))
     extforce_cfg = dict(cfg.get("extforce", {}))
@@ -170,12 +171,26 @@ def run_sampling(
     extforce_sim_cfg.pop("grip_delta", None)
     sim_grasp_cfg.pop("contact_min_count", None)
     num_no_col = 0
+    num_contact_ok = 0
     num_valid = 0
     num_samples = transforms_np.shape[0]
     ts = time.time()
     stop_reason = "depleted"
     fail_qpos_rows: List[np.ndarray] = []
     fail_stages: List[str] = []
+    stage_time = {
+        "contact": 0.0,
+        "sim_grasp": 0.0,
+        "extforce": 0.0,
+        "extforce_settle": 0.0,
+        "extforce_restore": 0.0,
+        "extforce_force": 0.0,
+    }
+    stage_count = {
+        "contact": 0,
+        "sim_grasp": 0,
+        "extforce": 0,
+    }
 
     with h5py.File(h5_path, "w") as hf:
         hf.create_dataset("object_name", data=encode_h5_str(object_name))
@@ -216,24 +231,37 @@ def run_sampling(
                 stop_reason = "timeout"
                 break
 
+            stage_start = time.perf_counter()
             mjho.set_hand_qpos(qpos_prepared[i])
             if mjho.is_contact():
+                stage_time["contact"] += time.perf_counter() - stage_start
+                stage_count["contact"] += 1
                 fail_qpos_rows.append(as_array(qpos_prepared[i]))
                 fail_stages.append("prepared_contact")
                 continue
             mjho.set_hand_qpos(qpos_approach[i])
             if mjho.is_contact():
+                stage_time["contact"] += time.perf_counter() - stage_start
+                stage_count["contact"] += 1
                 continue
             mjho.set_hand_qpos(qpos_init[i])
             if mjho.is_contact():
+                stage_time["contact"] += time.perf_counter() - stage_start
+                stage_count["contact"] += 1
                 continue
+            stage_time["contact"] += time.perf_counter() - stage_start
+            stage_count["contact"] += 1
 
             num_no_col += 1
+            stage_start = time.perf_counter()
             mjho.set_hand_qpos(qpos_prepared[i])
             qpos_grasp, _ = mjho.sim_grasp(visualize=False, **sim_grasp_cfg)
             ho_contact_num = mjho.get_contact_num(obj_margin=0.00)
+            stage_time["sim_grasp"] += time.perf_counter() - stage_start
+            stage_count["sim_grasp"] += 1
 
             if ho_contact_num >= contact_min_count:
+                num_contact_ok += 1
                 qpos_grasp = as_array(qpos_grasp)
                 qpos_squeeze = mjho_valid.build_squeeze_qpos(
                     qpos_grasp,
@@ -245,11 +273,24 @@ def run_sampling(
                 )
                 qpos_squeeze = as_array(qpos_squeeze)
                 qpos_prepared_valid = as_array(qpos_prepared_valid)
+                stage_start = time.perf_counter()
                 is_valid, _, _ = mjho_valid.sim_under_extforce(
                     qpos_squeeze.copy(),
                     qpos_prepared_valid.copy(),
                     visualize=False,
                     **extforce_sim_cfg,
+                )
+                stage_time["extforce"] += time.perf_counter() - stage_start
+                stage_count["extforce"] += 1
+                extforce_profile = getattr(mjho_valid, "last_extforce_profile", {})
+                stage_time["extforce_settle"] += float(
+                    extforce_profile.get("settle_time", 0.0)
+                )
+                stage_time["extforce_restore"] += float(
+                    extforce_profile.get("restore_time", 0.0)
+                )
+                stage_time["extforce_force"] += float(
+                    extforce_profile.get("force_time", 0.0)
                 )
                 if is_valid:
                     ds_init[num_valid] = qpos_init[i].astype(ARRAY_DTYPE, copy=False)
@@ -302,12 +343,29 @@ def run_sampling(
 
     duration = time.time() - ts
     total_elapsed = time.perf_counter() - total_stage_start
+    no_col_rate = num_no_col / max(num_samples, 1)
+    contact_ok_rate = num_contact_ok / max(num_no_col, 1)
+    valid_rate = num_valid / max(num_contact_ok, 1)
     print(
-        f"[{object_scale_key}] samples={num_samples} no_col={num_no_col} "
-        f"valid={num_valid} fail={len(kept_fail_qpos)} "
+        f"[{object_scale_key}] samples={num_samples} "
+        f"no_col={num_no_col} ({no_col_rate:.3f}) "
+        f"contact_ok={num_contact_ok} ({contact_ok_rate:.3f}) "
+        f"valid={num_valid} ({valid_rate:.3f}) fail={len(kept_fail_qpos)} "
         f"time={duration:.2f}s total_elapsed={total_elapsed:.2f}s "
         f"stop_reason={stop_reason} out={h5_path}"
     )
+    if profile_timing:
+        extforce_count = max(stage_count["extforce"], 1)
+        print(
+            f"[{object_scale_key}] timing "
+            f"contact={stage_time['contact']:.2f}s/{stage_count['contact']} "
+            f"sim_grasp={stage_time['sim_grasp']:.2f}s/{stage_count['sim_grasp']} "
+            f"extforce={stage_time['extforce']:.2f}s/{stage_count['extforce']} "
+            f"extforce_avg={stage_time['extforce'] / extforce_count:.4f}s "
+            f"extforce_settle={stage_time['extforce_settle']:.2f}s "
+            f"extforce_restore={stage_time['extforce_restore']:.2f}s "
+            f"extforce_force={stage_time['extforce_force']:.2f}s"
+        )
     write_grasp_npy_from_h5(h5_path, npy_path)
     print(f"[{object_scale_key}] converted {h5_path.name} -> {npy_path.name}")
     return str(h5_path)

@@ -5,7 +5,7 @@
     "raw_dataset_root": "assets/objects/processed",
     "generated_dataset_root": "datasets",
     "objdata_tag": "objdata_YCB",
-    "graspdata_tag": "graspdata_YCB_inspire_left",
+    "graspdata_tag": "graspdata_YCB_liberhand_right_extforce_reuse_cap100",
     "run_scales": [
       0.08,
       0.1,
@@ -13,49 +13,65 @@
       0.14,
       0.16
     ],
+    "use_native_asset": false,
     "verbose": false,
     "max_cap": 100,
     "max_time_sec": 180.0,
-    "profile_timing": false,
+    "profile_timing": true,
     "flush_every": 25,
     "h5_name": "grasp.h5",
     "npy_name": "grasp.npy",
     "fail_h5_name": "grasp_fail.h5",
     "fail_npy_name": "grasp_fail.npy",
     "fail_keep_ratio": 1.2,
-    "min_valid_count": 5,
-    "use_native_asset": false
+    "min_valid_count": 5
   },
   "hand": {
-    "xml_path": "./assets/hands/inspire_hand/inspire_hand_left.xml",
+    "xml_path": "./assets/hands/liberhand/liberhand_right.xml",
     "root_stabilization": {
-      "root_body_name": "hand_base_link",
+      "root_body_name": "hand_right_palm",
       "root_scale": 1000000.0
     },
     "prepared_joints": [
-      1.2,
+      0,
+      0.5,
+      0.4,
+      0.4,
+      0,
+      0.5,
+      0.4,
+      0.4,
+      0,
+      0.3,
+      0.3,
+      0.3,
+      0,
+      0.3,
+      0.3,
+      0.3,
+      1.6,
       0.0,
-      0.0,
-      0.0,
-      0.2,
-      0.2,
-      0.2,
-      0.2,
-      0.2,
-      0.2,
-      0.2,
-      0.2
+      0.3,
+      0.3
     ],
     "approach_joints": [
-      1.2,
+      0,
       0.0,
       0.0,
       0.0,
+      0,
       0.0,
       0.0,
       0.0,
+      0,
       0.0,
       0.0,
+      0.0,
+      0,
+      0.0,
+      0.0,
+      0.0,
+      1.6,
       0.0,
       0.0,
       0.0
@@ -67,14 +83,14 @@
     ],
     "transform": {
       "pos": [
-        0.02,
         0.0,
-        0.08
+        0.0,
+        0.0
       ],
       "quat_wxyz": [
-        0.9659258,
+        0.92387953,
         0.0,
-        0.258819,
+        0.38268343,
         0.0
       ]
     },
@@ -82,21 +98,31 @@
       "ctrl_joint_indices": [
         0,
         1,
+        2,
         4,
+        5,
         6,
         8,
-        10
+        9,
+        12,
+        13,
+        16,
+        17,
+        18
       ],
       "side_swing_indices": [
-        0
+        0,
+        4,
+        8,
+        12,
+        16
       ],
       "thumb_relax_indices": [
-        0,
-        1,
-        2,
-        3
+        17,
+        18,
+        19
       ],
-      "thumb_relax_divisor": 1.0,
+      "thumb_relax_divisor": 1.2,
       "friction_coef": [
         0.3,
         0.01
@@ -112,49 +138,49 @@
         0.003,
         1.0
       ],
-      "kp": 6.0,
-      "forcerange": 20.0,
-      "actuatorfrcrange": 20.0
+      "kp": 10.0,
+      "forcerange": 30.0,
+      "actuatorfrcrange": 30.0
     },
     "anchor_params": {
-      "thumb_intermediate": {
-        "weight": 0.9,
+      "hand_right_f13": {
+        "weight": 0.5,
         "axis": "Z"
       },
-      "thumb_tip": {
-        "weight": 0.0,
+      "hand_right_f14_end": {
+        "weight": 0.3,
         "axis": "Z"
       },
-      "index_intermediate": {
-        "weight": 0.9,
+      "hand_right_f23": {
+        "weight": 0.5,
         "axis": "Z"
       },
-      "index_tip": {
-        "weight": 0.0,
+      "hand_right_f24_end": {
+        "weight": 0.3,
         "axis": "Z"
       },
-      "middle_intermediate": {
-        "weight": 0.9,
+      "hand_right_f33": {
+        "weight": 0.5,
         "axis": "Z"
       },
-      "middle_tip": {
-        "weight": 0.0,
+      "hand_right_f34_end": {
+        "weight": 0.3,
         "axis": "Z"
       },
-      "ring_intermediate": {
-        "weight": 0.9,
+      "hand_right_f43": {
+        "weight": 0.5,
         "axis": "Z"
       },
-      "ring_tip": {
-        "weight": 0.0,
+      "hand_right_f44_end": {
+        "weight": 0.3,
         "axis": "Z"
       },
-      "pinky_intermediate": {
-        "weight": 0.9,
+      "hand_right_f53": {
+        "weight": 0.5,
         "axis": "Z"
       },
-      "pinky_tip": {
-        "weight": 0.0,
+      "hand_right_f54_end": {
+        "weight": 0.3,
         "axis": "Z"
       }
     }
@@ -164,8 +190,8 @@
     "downsample_for_sim": 512,
     "Nd": 1,
     "rot_n": 8,
-    "d_min": 0.01,
-    "d_max": 0.05,
+    "d_min": 0.02,
+    "d_max": 0.06,
     "max_points": null,
     "pc_subdir": "pc_warp"
   },
@@ -173,7 +199,7 @@
     "Mp": 20,
     "steps": 40,
     "speed_gain": 1.5,
-    "max_tip_speed": 0.02,
+    "max_tip_speed": 0.05,
     "contact_min_count": 4,
     "target_point_method": 2
   },

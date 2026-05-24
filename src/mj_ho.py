@@ -10,13 +10,14 @@ Provides:
 """
 
 import os
-import numpy as np
-from scipy.spatial import cKDTree
 import time
-import trimesh
+from typing import Dict, List, Optional, Sequence, Tuple
+
 import mujoco
+import numpy as np
 import transforms3d.quaternions as tq
-from typing import Dict, List, Tuple, Optional, Sequence
+import trimesh
+from scipy.spatial import cKDTree
 
 try:
     from mujoco import viewer as mj_viewer
@@ -43,7 +44,9 @@ def _normalize_friction_coef(
             f"Got shape {tuple(values.shape)}."
         )
     if np.any(coeffs < 0.0):
-        raise ValueError(f"friction coefficients must be non-negative, got {coeffs.tolist()}.")
+        raise ValueError(
+            f"friction coefficients must be non-negative, got {coeffs.tolist()}."
+        )
     condim = 6 if coeffs.shape[0] == 3 else 4
     return coeffs, condim
 
@@ -77,7 +80,9 @@ class MjHO:
             raise ValueError("object_profile must be provided explicitly.")
         self.hand_profile = dict(hand_profile)
         self.object_profile = dict(object_profile)
-        self.hand_actuation_profile = self._read_hand_actuation_profile(self.hand_profile)
+        self.hand_actuation_profile = self._read_hand_actuation_profile(
+            self.hand_profile
+        )
         self.root_stabilization = (
             dict(root_stabilization) if root_stabilization is not None else None
         )
@@ -93,6 +98,7 @@ class MjHO:
         self.model = self.spec.compile()
         self.data = mujoco.MjData(self.model)
         self._apply_root_stabilization()
+        self.last_extforce_profile: Dict[str, float | int | bool] = {}
 
         # Set margin and gap to detect contact
         # self._set_margin(0.001)
@@ -208,7 +214,9 @@ class MjHO:
         except Exception as exc:
             raise ValueError("root_stabilization.root_scale must be numeric.") from exc
         if not isinstance(body_name, str) or not body_name.strip():
-            raise ValueError("root_stabilization.root_body_name must be a non-empty string.")
+            raise ValueError(
+                "root_stabilization.root_body_name must be a non-empty string."
+            )
         if (not np.isfinite(root_scale)) or root_scale <= 0.0:
             raise ValueError("root_stabilization.root_scale must be finite and > 0.")
 
@@ -247,7 +255,9 @@ class MjHO:
                 continue
             value = float(profile[key])
             if (not np.isfinite(value)) or value <= 0.0:
-                raise ValueError(f"hand.profile.{key} must be finite and > 0 when provided.")
+                raise ValueError(
+                    f"hand.profile.{key} must be finite and > 0 when provided."
+                )
             out[key] = value
         return out
 
@@ -384,7 +394,9 @@ class MjHO:
             except Exception:
                 pass
         if mj_viewer is None:
-            raise RuntimeError("Official MuJoCo viewer is unavailable in current mujoco build.")
+            raise RuntimeError(
+                "Official MuJoCo viewer is unavailable in current mujoco build."
+            )
         self.viewer = mj_viewer.launch_passive(self.model, self.data)
 
     def _render_viewer(self):
@@ -404,7 +416,6 @@ class MjHO:
         if hasattr(self.viewer, "is_running"):
             return bool(self.viewer.is_running())
         return True
-
 
     def export_xml(self, out_path: str):
         """Export the merged spec to an XML file for inspection."""
@@ -541,7 +552,6 @@ class MjHO:
                 f"ctrl length {ctrl.shape[0]} != model.nu {self.nu} for hand '{self.hand_name}'."
             )
         return ctrl
-            
 
     def step(self, n_steps: int = 1, ctrl: Optional[np.ndarray] = None):
         """
@@ -642,7 +652,9 @@ class MjHO:
                     _, idx_near = self.obj_tree.query(anchor_pos, k=Mp)
                     idx_near = np.atleast_1d(np.asarray(idx_near, dtype=int))
                     pts_top_Mp = self.obj_pts[idx_near].reshape(-1, 3).copy()
-                    abs_plane_dist = np.abs((pts_top_Mp - anchor_pos[None, :]).dot(axis_world))
+                    abs_plane_dist = np.abs(
+                        (pts_top_Mp - anchor_pos[None, :]).dot(axis_world)
+                    )
                     idx_local = int(np.argmin(abs_plane_dist))
                     pts_target = pts_top_Mp[idx_local].copy()
 
@@ -657,8 +669,12 @@ class MjHO:
             # store history (flattened as requested)
             if record_history:
                 history["qpos"].append(hand_qpos.copy())  # (nq_hand,)
-                history["anchor_positions"].append(anchor_positions.copy())  # (n_anchors,3)
-                history["tip_positions"].append(anchor_positions.copy())  # backward compatibility
+                history["anchor_positions"].append(
+                    anchor_positions.copy()
+                )  # (n_anchors,3)
+                history["tip_positions"].append(
+                    anchor_positions.copy()
+                )  # backward compatibility
                 history["pts_top_Mp"].append(all_top_Mp_pts.copy())  # (n_anchors*Mp, 3)
                 history["pts_target"].append(step_targets.copy())  # (n_anchors, 3)
 
@@ -732,9 +748,13 @@ class MjHO:
             if record_history:
                 history["v_anchors"].append(v_anchors.copy())  # (n_anchors, 3)
                 history["dq_per_anchor"].append(np.asarray(dq_per_anchor, dtype=float))
-                history["jacobian_per_anchor"].append(np.asarray(jacobian_per_anchor, dtype=float))
+                history["jacobian_per_anchor"].append(
+                    np.asarray(jacobian_per_anchor, dtype=float)
+                )
                 history["total_dq_hand"].append(total_dq_hand.copy())  # (n_hand_dofs,)
-                history["actuated_dq"].append(np.take(total_dq_hand, self.ctrl_qpos_indices - 7))
+                history["actuated_dq"].append(
+                    np.take(total_dq_hand, self.ctrl_qpos_indices - 7)
+                )
                 history["ctrl"].append(ctrl.copy())  # (nu,)
             self.step(1, ctrl=ctrl)
 
@@ -919,81 +939,119 @@ class MjHO:
         check_steps = max(int(check_steps), 1)
         n_chunks = n_steps // check_steps
         close_steps = max(int(close_steps), 1)
+        profile_start = time.perf_counter()
+        profile: Dict[str, float | int | bool] = {
+            "duration": float(duration),
+            "check_steps": int(check_steps),
+            "close_steps": int(close_steps),
+            "settle_time": 0.0,
+            "restore_time": 0.0,
+            "force_time": 0.0,
+            "total_time": 0.0,
+            "directions_tested": 0,
+        }
+        self.last_extforce_profile = profile
 
-        # perform tests for each direction
-        for dir_vec in external_force_dirs:
-            self.reset()
-            self.set_hand_qpos(qpos_prepared)
-            # Close from prepared joints to target joints before applying external forces.
-            initial_obj_pose = self.get_obj_pose().copy()  # [x,y,z,qw,qx,qy,qz]
-            self.step(close_steps, ctrl=hand_ctrl)
+        def _finish(is_valid: bool, pos_delta: float, angle_delta: float):
+            profile["total_time"] = time.perf_counter() - profile_start
+            self.last_extforce_profile = profile
+            return is_valid, pos_delta, angle_delta
+
+        settle_start = time.perf_counter()
+        self.reset()
+        self.set_hand_qpos(qpos_prepared)
+        initial_obj_pose = self.get_obj_pose().copy()
+        self.step(close_steps, ctrl=hand_ctrl)
+        profile["settle_time"] = float(profile["settle_time"]) + (
+            time.perf_counter() - settle_start
+        )
+        if visualize:
+            self._render_viewer()
+            time.sleep(0.003)
+
+        if not self.is_contact():
             if visualize:
-                self._render_viewer()
-                time.sleep(0.003)
+                print("Object lost contact during settling phase.")
+            return _finish(False, np.inf, np.inf)
+        settle_start = time.perf_counter()
+        settle_pos_delta, settle_angle_delta = self.get_pose_delta(
+            initial_obj_pose, self.get_obj_pose()
+        )
+        profile["settle_time"] = float(profile["settle_time"]) + (
+            time.perf_counter() - settle_start
+        )
+        if (settle_pos_delta >= (trans_thresh)) or (
+            settle_angle_delta >= (angle_thresh)
+        ):
+            if visualize:
+                print(
+                    f"Object moved too much during settling phase: {settle_pos_delta:.6f}, {settle_angle_delta:.6f}"
+                )
+            return _finish(False, settle_pos_delta, settle_angle_delta)
 
-            if not self.is_contact():
-                if visualize:
-                    print("Object lost contact during settling phase.")
-                return False, np.inf, np.inf
-            settle_pos_delta, settle_angle_delta = self.get_pose_delta(
-                initial_obj_pose, self.get_obj_pose()
+        self.data.xfrc_applied[:] = 0.0
+        self.data.ctrl[:] = hand_ctrl
+        settled_data = mujoco.MjData(self.model)
+        mujoco.mj_copyData(settled_data, self.model, self.data)
+
+        for dir_vec in external_force_dirs:
+            profile["directions_tested"] = int(profile["directions_tested"]) + 1
+            restore_start = time.perf_counter()
+            mujoco.mj_copyData(self.data, self.model, settled_data)
+            self.data.xfrc_applied[:] = 0.0
+            self.data.ctrl[:] = hand_ctrl
+            profile["restore_time"] = float(profile["restore_time"]) + (
+                time.perf_counter() - restore_start
             )
-            if (settle_pos_delta >= (trans_thresh)) or (
-                settle_angle_delta >= (angle_thresh)
-            ):
-                if visualize:
-                    print(f"Object moved too much during settling phase: {settle_pos_delta:.6f}, {settle_angle_delta:.6f}")
-                return False, settle_pos_delta, settle_angle_delta
-            settled_obj_pose = self.get_obj_pose().copy()
-            # print(f"Testing direction: {dir_vec}")
-            # print(f"obj pos after reset: {self.get_obj_pose()}")
 
-            # scale direction by force magnitude (only first 3 entries are force)
+            settled_obj_pose = self.get_obj_pose().copy()
             applied = np.zeros(6, dtype=float)
             applied[:3] = dir_vec[:3] * force_mag
-
-            # set external wrench on object body
             self.data.xfrc_applied[obj_body_id] = applied
 
-            # apply force for n_steps
+            force_start = time.perf_counter()
             for chunk_i in range(n_chunks):
-                # step simulation forward by one mj_step
                 self.step(check_steps, ctrl=hand_ctrl)
 
                 if visualize:
                     self._render_viewer()
                     time.sleep(0.003)
 
-                # check if object has moved
                 if not self.is_contact():
                     if visualize:
                         print("Object lost contact during force application.")
-                    return False, np.inf, np.inf
-            
+                    profile["force_time"] = float(profile["force_time"]) + (
+                        time.perf_counter() - force_start
+                    )
+                    return _finish(False, np.inf, np.inf)
+
                 pos_delta, angle_delta = self.get_pose_delta(
                     settled_obj_pose, self.get_obj_pose()
                 )
-                succ_flag = (pos_delta < trans_thresh) & (
-                    angle_delta < angle_thresh
-                )
+                succ_flag = (pos_delta < trans_thresh) & (angle_delta < angle_thresh)
                 # print(f"Step {step_i}: {succ_flag}, {pos_delta}, {angle_delta}")
                 if not succ_flag:
                     if visualize:
-                        print(f"Object moved too much during force application: {pos_delta:.6f}, {angle_delta:.6f}")
-                    return False, pos_delta, angle_delta
+                        print(
+                            f"Object moved too much during force application: {pos_delta:.6f}, {angle_delta:.6f}"
+                        )
+                    profile["force_time"] = float(profile["force_time"]) + (
+                        time.perf_counter() - force_start
+                    )
+                    return _finish(False, pos_delta, angle_delta)
+            profile["force_time"] = float(profile["force_time"]) + (
+                time.perf_counter() - force_start
+            )
 
             self.data.xfrc_applied[obj_body_id] = np.zeros(6, dtype=float)
 
-        # all directions passed
         self.data.xfrc_applied[obj_body_id] = np.zeros(6, dtype=float)
-
-        # compute translation and rotation deltas
         pos_delta, angle_delta = self.get_pose_delta(
             settled_obj_pose, self.get_obj_pose()
         )
         succ_flag = (pos_delta < trans_thresh) & (angle_delta < angle_thresh)
 
-        return succ_flag, pos_delta, angle_delta
+        return _finish(bool(succ_flag), pos_delta, angle_delta)
 
     def viewer_loop(self):
         """Launch simple viewer loop with official MuJoCo viewer."""
@@ -1047,9 +1105,9 @@ class RobotKinematics:
                     continue
 
                 verts = np.asarray(self.model.mesh_vert[vertadr : vertadr + vertnum])
-                faces = np.asarray(self.model.mesh_face[faceadr : faceadr + facenum]).astype(
-                    int
-                )
+                faces = np.asarray(
+                    self.model.mesh_face[faceadr : faceadr + facenum]
+                ).astype(int)
                 mesh_name = mjm.name if hasattr(mjm, "name") else f"mesh_{mesh_id}"
 
                 # collision mesh: check convex-graph hints on the mesh descriptor
@@ -1084,16 +1142,18 @@ class RobotKinematics:
                 else:
                     # 退回到 material rgba（如果 geom 指定了 matid）
                     matid = self._scalar_int(getattr(geom, "matid", -1))
-                    if matid is not None and matid >= 0 and hasattr(self.model, "mat_rgba"):
+                    if (
+                        matid is not None
+                        and matid >= 0
+                        and hasattr(self.model, "mat_rgba")
+                    ):
                         rgba = np.array(self.model.mat_rgba[matid]).flatten()[:4]
             except Exception:
                 rgba = None
 
             body_id = self._scalar_int(getattr(geom, "bodyid", -1))
             body_name = (
-                self.model.body(body_id).name
-                if body_id >= 0
-                else f"body_{body_id}"
+                self.model.body(body_id).name if body_id >= 0 else f"body_{body_id}"
             )
 
             key_base = f"{body_name}_{mesh_name}"
@@ -1238,7 +1298,9 @@ class RobotKinematics:
                 if col is not None:
                     # 确保形状是 (1,4)，然后重复到每个顶点
                     col_arr = np.asarray(col, dtype=float).reshape(1, 4)
-                    tm.visual.vertex_colors = np.tile(col_arr, (tm.vertices.shape[0], 1))
+                    tm.visual.vertex_colors = np.tile(
+                        col_arr, (tm.vertices.shape[0], 1)
+                    )
                 pieces.append(tm)
 
         elif kind == "collision":
@@ -1247,13 +1309,15 @@ class RobotKinematics:
                 posed = self._pose_vertices(ent["vert"], geom_id)
                 if posed.size == 0 or ent["face"].size == 0:
                     continue
-                
+
                 tm = trimesh.Trimesh(vertices=posed, faces=ent["face"], process=False)
                 col = ent.get("color")
                 if col is not None:
                     # 确保形状是 (1,4)，然后重复到每个顶点
                     col_arr = np.asarray(col, dtype=float).reshape(1, 4)
-                    tm.visual.vertex_colors = np.tile(col_arr, (tm.vertices.shape[0], 1))
+                    tm.visual.vertex_colors = np.tile(
+                        col_arr, (tm.vertices.shape[0], 1)
+                    )
                 pieces.append(tm)
         else:
             raise ValueError(f"Unknown kind: {kind}")

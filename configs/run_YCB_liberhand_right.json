@@ -13,10 +13,11 @@
       0.14,
       0.16
     ],
-    "use_native_asset": false,
+    "use_native_asset": true,
     "verbose": false,
     "max_cap": 100,
     "max_time_sec": 180.0,
+    "profile_timing": true,
     "flush_every": 25,
     "h5_name": "grasp.h5",
     "npy_name": "grasp.npy",

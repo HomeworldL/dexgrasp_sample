@@ -542,6 +542,7 @@ def _validate_run_config(cfg: Dict, source_path: str) -> None:
     for key in [
         "max_cap",
         "max_time_sec",
+        "profile_timing",
         "h5_name",
         "npy_name",
         "fail_h5_name",
@@ -555,6 +556,8 @@ def _validate_run_config(cfg: Dict, source_path: str) -> None:
     max_time_sec = float(_require(cfg, "data.max_time_sec"))
     if max_time_sec <= 0.0:
         raise ValueError("data.max_time_sec must be > 0.")
+    if not isinstance(_require(cfg, "data.profile_timing"), bool):
+        raise ValueError("data.profile_timing must be a boolean.")
 
 
 def load_asset_config(config_path: str) -> Dict:

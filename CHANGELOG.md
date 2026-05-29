@@ -1,5 +1,14 @@
 # CHANGELOG
 
+## 2026-05-29
+
+### Added
+- Added experimental GPU root-pose pre-optimization utilities and sweep configs for prepared-pose candidate refinement studies.
+
+### Changed
+- Kept CPU `run.py` mainline free of pose pre-optimization while retaining optional config validation support for the experimental path.
+- Documented the latest sampling, extforce, and pose pre-optimization findings in local research notes under `docs/`.
+
 ## 2026-05-24
 
 ### Added

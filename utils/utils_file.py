@@ -357,6 +357,61 @@ def _validate_anchor_params(cfg: Dict) -> None:
     _ = hand_anchor_params_cfg(cfg)
 
 
+def _validate_pose_preopt(cfg: Dict) -> None:
+    pose_preopt = cfg.get("pose_preopt")
+    if pose_preopt is None:
+        return
+    if not isinstance(pose_preopt, dict):
+        raise ValueError("pose_preopt must be an object when provided.")
+    enabled = pose_preopt.get("enabled")
+    if not isinstance(enabled, bool):
+        raise ValueError("pose_preopt.enabled must be a boolean.")
+    if not enabled:
+        return
+    for key in [
+        "device",
+        "batch_size",
+        "steps",
+        "lr_pos",
+        "lr_rot",
+        "target_dist",
+        "max_pos_delta",
+        "max_rot_deg",
+        "distance_weight",
+        "balance_weight",
+        "normal_weight",
+        "tangent_weight",
+        "loss_mode",
+        "reg_pos_weight",
+        "reg_rot_weight",
+    ]:
+        _require(cfg, f"pose_preopt.{key}")
+    if str(_require(cfg, "pose_preopt.device")) not in {"cuda", "cpu"}:
+        raise ValueError("pose_preopt.device must be one of ['cuda', 'cpu'].")
+    if str(_require(cfg, "pose_preopt.loss_mode")) not in {"unsigned", "signed"}:
+        raise ValueError("pose_preopt.loss_mode must be one of ['unsigned', 'signed'].")
+    for key in ["batch_size", "steps"]:
+        value = int(_require(cfg, f"pose_preopt.{key}"))
+        if value <= 0:
+            raise ValueError(f"pose_preopt.{key} must be > 0.")
+    for key in [
+        "lr_pos",
+        "lr_rot",
+        "target_dist",
+        "max_pos_delta",
+        "max_rot_deg",
+        "distance_weight",
+        "balance_weight",
+        "normal_weight",
+        "tangent_weight",
+        "reg_pos_weight",
+        "reg_rot_weight",
+    ]:
+        value = float(_require(cfg, f"pose_preopt.{key}"))
+        if value < 0.0:
+            raise ValueError(f"pose_preopt.{key} must be >= 0.")
+
+
 def _validate_contact_profile(profile: Dict, path: str, require_control: bool) -> None:
     if not isinstance(profile, dict) or not profile:
         raise ValueError(f"Config field {path} must be a non-empty object.")
@@ -531,6 +586,7 @@ def _validate_run_config(cfg: Dict, source_path: str) -> None:
     _validate_hand_profile(cfg)
     _validate_object_profile(cfg)
     _validate_anchor_params(cfg)
+    _validate_pose_preopt(cfg)
 
     contact_min_count = int(_require(cfg, "sim_grasp.contact_min_count"))
     if contact_min_count <= 0:

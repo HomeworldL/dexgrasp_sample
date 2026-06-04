@@ -155,6 +155,7 @@ def _make_entry(
     scale_tag: str,
     asset_dir: Path,
     coacd_path: Path,
+    manifold_path: Path,
 ) -> dict:
     is_native = scale_tag == ScaleDatasetBuilder.native_tag()
     return {
@@ -162,6 +163,7 @@ def _make_entry(
         "object_scale_key": f"{object_name}__{scale_tag}",
         "asset_dir_abs": str(asset_dir.resolve()),
         "coacd_abs": str(coacd_path.resolve()),
+        "manifold_abs": str(manifold_path.resolve()),
         "urdf_abs": str(ScaleDatasetBuilder.object_urdf_path(asset_dir).resolve()),
         "scale_tag": scale_tag,
         "scale": None if is_native else parse_scale_tag(scale_tag),
@@ -276,6 +278,8 @@ def _rebuild_object_assets_task(task: dict) -> dict:
                     scale_tag=scale_tag,
                     asset_dir=asset_dir,
                     coacd_path=Path(str(rec["coacd_abs"])),
+                    manifold_path=Path(str(rec["coacd_abs"])).resolve().parent
+                    / ScaleDatasetBuilder.MANIFOLD_OBJ_NAME,
                 )
             )
         except Exception as exc:
@@ -323,6 +327,8 @@ def _rebuild_object_assets_task(task: dict) -> dict:
                         scale_tag=native_tag,
                         asset_dir=asset_dir,
                         coacd_path=Path(str(rec["coacd_abs"])),
+                        manifold_path=Path(str(rec["coacd_abs"])).resolve().parent
+                        / ScaleDatasetBuilder.MANIFOLD_OBJ_NAME,
                     )
                 )
         except Exception as exc:
@@ -463,6 +469,7 @@ def _load_existing_entries(cfg: dict, config_path: str) -> list[dict]:
                     scale_tag=scale_tag,
                     asset_dir=asset_dir,
                     coacd_path=coacd_path,
+                    manifold_path=manifold_path,
                 )
             )
     if not entries:
@@ -484,7 +491,7 @@ def _prepare_global_pc_task(task: dict) -> str:
 
     set_seed(int(task["seed"]))
     points, normals = sample_surface_o3d(
-        str(task["coacd_abs"]),
+        str(task["manifold_abs"]),
         n_points=n_points,
         method=POINTCLOUD_SAMPLE_METHOD,
         scale=float(task["mesh_scale"]),
@@ -598,13 +605,13 @@ def main() -> None:
         )
 
     # Phase 2: build deterministic global point clouds from the entry-resolved
-    # COACD mesh. This runs after the asset scan so both rebuild and validate
+    # manifold mesh. This runs after the asset scan so both rebuild and validate
     # modes share the same point-cloud preparation path.
     pc_tasks = [
         {
             "asset_dir_abs": str(entry["asset_dir_abs"]),
             "object_scale_key": str(entry["object_scale_key"]),
-            "coacd_abs": str(entry["coacd_abs"]),
+            "manifold_abs": str(entry["manifold_abs"]),
             "mesh_scale": (
                 1.0 if bool(entry.get("is_native", False)) else float(entry["scale"])
             ),

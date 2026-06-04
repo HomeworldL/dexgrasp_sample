@@ -396,7 +396,7 @@ class DatasetObjects:
         preview: bool = False,
     ) -> Tuple[np.ndarray, np.ndarray]:
         return self._sample_surface_o3d(
-            obj_path=str(self._get_shared_coacd_path(info)),
+            obj_path=str(self._get_shared_manifold_path(info)),
             n_points=n_points,
             method=method,
             preview=preview,

@@ -127,7 +127,7 @@ def test_dataset_missing_dir_raises(tmp_path: Path):
         pass
 
 
-def test_sample_surface_for_entry_uses_coacd(tmp_path: Path):
+def test_sample_surface_for_entry_uses_manifold(tmp_path: Path):
     pytest.importorskip("open3d")
     _make_dataset_with_manifest(tmp_path, "YCB", "YCB_001_obj")
     _build_objdata_assets(tmp_path, "YCB", "YCB_001_obj", scales=[0.06])

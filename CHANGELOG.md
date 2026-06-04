@@ -1,5 +1,11 @@
 # CHANGELOG
 
+## 2026-06-05
+
+### Changed
+- Switched `DatasetObjects.sample_surface_for_entry()` to sample grasp candidates from shared `manifold.obj` meshes instead of `coacd.obj`.
+- Switched `prepare_object_assets.py` global point-cloud generation to sample `pc_warp/global_pc.npy` and `global_normals.npy` from `manifold.obj` during asset preparation.
+
 ## 2026-05-29
 
 ### Added

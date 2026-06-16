@@ -1,5 +1,14 @@
 # CHANGELOG
 
+## 2026-06-16
+
+### Added
+- Added `configs/assets_DGN_pool120.json` plus `prepare_object_assets_pool.py` and `build_dataset_subset_pool.py` for a single-scale DGN pool workflow with geometric prefiltering, shape clustering, and fixed-count subset export.
+- Added `test/test_pool120_workflow.py` to cover pool-filter defaults and deterministic subset selection behavior.
+
+### Changed
+- Added progress reporting to shape-cluster point-cloud loading and autoencoder training in `src/shape_cluster.py`.
+
 ## 2026-06-05
 
 ### Changed

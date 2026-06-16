@@ -1,0 +1,85 @@
+{
+  "seed": 0,
+  "data": {
+    "raw_dataset_name": "DGN",
+    "raw_dataset_root": "assets/objects/processed",
+    "generated_dataset_root": "datasets",
+    "objdata_tag": "objdata_DGN_pool120",
+    "asset_scales": [0.12],
+    "build_native_asset": false,
+    "verbose": false
+  },
+  "pool_filter": {
+    "enabled": true,
+    "version": "v1",
+    "mesh_kind": "manifold",
+    "thin_ratio_min": 0.12,
+    "flat_ratio_min": 0.12
+  },
+  "sampling": {
+    "n_points": 4096
+  },
+  "shape_cluster": {
+    "scale_tag": "scale120",
+    "fps_points": 1024,
+    "feature_dim": 128,
+    "kmeans_k": 20,
+    "epochs": 100,
+    "batch_size": 64,
+    "lr": 0.0005,
+    "weight_decay": 0.00001,
+    "scheduler_eta_min": 0.0000001,
+    "kmeans_n_init": 10,
+    "kmeans_max_iter": 100,
+    "version": "v1"
+  },
+  "usd_convert": {
+    "backend": "urdf",
+    "force": true,
+    "merge_joints": false,
+    "fix_base": false,
+    "make_instanceable": false,
+    "convex_decompose_mesh": true,
+    "import_sites": false,
+    "verify_inertial": true
+  },
+  "warp_render": {
+    "gpu_lst": [
+      0
+    ],
+    "thread_per_gpu": 1,
+    "output_subdir": "pc_warp",
+    "max_point_num": 4096,
+    "save_pc": true,
+    "save_rgb": false,
+    "save_depth": false,
+    "skip_existing": true,
+    "depth_max": 5.0,
+    "tile_width": 640,
+    "tile_height": 480,
+    "n_cols": 5,
+    "n_rows": 5,
+    "z_near": 0.1,
+    "z_far": 10.0,
+    "intrinsics": {
+      "preset": "kinect",
+      "fx": 608.6939697265625,
+      "fy": 608.6422119140625,
+      "cx": 320.0,
+      "cy": 240.0
+    },
+    "camera": {
+      "type": "spherical",
+      "radius": 0.6,
+      "pos_noise": 0.3,
+      "lookat": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "lookat_noise": 0.1,
+      "up": null,
+      "up_noise": 0.2
+    }
+  }
+}

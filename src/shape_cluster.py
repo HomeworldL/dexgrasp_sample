@@ -9,6 +9,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, Dataset
+from tqdm import tqdm
 
 from src.pointnet import PointNet
 from src.sample import farthest_point_sampling
@@ -37,14 +38,20 @@ def downsample_point_cloud(points: np.ndarray, n_points: int, seed: int) -> np.n
 
     rng = np.random.default_rng(seed)
     extra = rng.choice(points.shape[0], size=n_points - points.shape[0], replace=True)
-    return np.concatenate([points, points[extra]], axis=0).astype(np.float32, copy=False)
+    return np.concatenate([points, points[extra]], axis=0).astype(
+        np.float32, copy=False
+    )
 
 
 class PointCloudDataset(Dataset):
     def __init__(self, point_clouds: np.ndarray):
         if point_clouds.ndim != 3 or point_clouds.shape[-1] != 3:
-            raise ValueError(f"point_clouds must have shape (B, N, 3), got {point_clouds.shape}")
-        self.point_clouds = torch.from_numpy(point_clouds.astype(np.float32, copy=False))
+            raise ValueError(
+                f"point_clouds must have shape (B, N, 3), got {point_clouds.shape}"
+            )
+        self.point_clouds = torch.from_numpy(
+            point_clouds.astype(np.float32, copy=False)
+        )
 
     def __len__(self) -> int:
         return int(self.point_clouds.shape[0])
@@ -139,7 +146,9 @@ def train_autoencoder(
         generator=generator,
     )
 
-    model = PointCloudAutoencoder(num_points=point_clouds.shape[1], feature_dim=feature_dim).to(device)
+    model = PointCloudAutoencoder(
+        num_points=point_clouds.shape[1], feature_dim=feature_dim
+    ).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
     num_steps = max(epochs * len(loader), 1)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
@@ -149,7 +158,13 @@ def train_autoencoder(
     )
 
     history: List[float] = []
-    for _ in range(epochs):
+    epoch_iter = tqdm(
+        range(epochs),
+        desc="shape-ae",
+        total=epochs,
+        leave=True,
+    )
+    for _ in epoch_iter:
         model.train()
         epoch_loss = 0.0
         count = 0
@@ -163,7 +178,9 @@ def train_autoencoder(
             scheduler.step()
             epoch_loss += float(loss.item()) * int(batch.shape[0])
             count += int(batch.shape[0])
-        history.append(epoch_loss / max(count, 1))
+        mean_loss = epoch_loss / max(count, 1)
+        history.append(mean_loss)
+        epoch_iter.set_postfix(loss=f"{mean_loss:.6f}")
 
     return TrainingResult(model=model, history=history)
 
@@ -187,12 +204,18 @@ def extract_embeddings(
     return np.concatenate(outputs, axis=0)
 
 
-def standardize_features(features: np.ndarray) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+def standardize_features(
+    features: np.ndarray,
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     mean = features.mean(axis=0, keepdims=True)
     std = features.std(axis=0, keepdims=True)
     std = np.where(std < 1e-8, 1.0, std)
     normalized = (features - mean) / std
-    return normalized.astype(np.float32), mean.astype(np.float32), std.astype(np.float32)
+    return (
+        normalized.astype(np.float32),
+        mean.astype(np.float32),
+        std.astype(np.float32),
+    )
 
 
 @dataclass
@@ -202,14 +225,18 @@ class KMeansResult:
     inertia: float
 
 
-def _assign_clusters(features: np.ndarray, centers: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+def _assign_clusters(
+    features: np.ndarray, centers: np.ndarray
+) -> Tuple[np.ndarray, np.ndarray]:
     distances = np.sum((features[:, None, :] - centers[None, :, :]) ** 2, axis=2)
     labels = np.argmin(distances, axis=1).astype(np.int32)
     min_dist = distances[np.arange(features.shape[0]), labels]
     return labels, min_dist
 
 
-def _compute_centers(features: np.ndarray, labels: np.ndarray, k: int, rng: np.random.Generator) -> np.ndarray:
+def _compute_centers(
+    features: np.ndarray, labels: np.ndarray, k: int, rng: np.random.Generator
+) -> np.ndarray:
     centers = np.empty((k, features.shape[1]), dtype=np.float32)
     for cluster_id in range(k):
         mask = labels == cluster_id
@@ -287,7 +314,11 @@ def reorder_clusters_by_global_center_distance(
     reordered_labels = remap[labels]
     reordered_centers = centers[sorted_old_ids]
     reordered_distances = center_distances[sorted_old_ids].astype(np.float32)
-    return reordered_labels.astype(np.int32), reordered_centers.astype(np.float32), reordered_distances
+    return (
+        reordered_labels.astype(np.int32),
+        reordered_centers.astype(np.float32),
+        reordered_distances,
+    )
 
 
 def load_object_point_clouds(
@@ -301,13 +332,23 @@ def load_object_point_clouds(
     object_dirs: List[Path] = []
     point_clouds: List[np.ndarray] = []
 
-    for object_dir in sorted(p for p in objdata_root.iterdir() if p.is_dir() and p.name != "_meta"):
+    object_iter = sorted(
+        p for p in objdata_root.iterdir() if p.is_dir() and p.name != "_meta"
+    )
+    for object_dir in tqdm(
+        object_iter,
+        desc="shape-pc",
+        total=len(object_iter),
+        leave=True,
+    ):
         pc_path = object_dir / scale_tag / pc_subdir / "global_pc.npy"
         if not pc_path.exists():
             continue
         points = np.load(pc_path)
         normalized = normalize_point_cloud(points)
-        sampled = downsample_point_cloud(normalized, fps_points, seed=seed + len(object_names))
+        sampled = downsample_point_cloud(
+            normalized, fps_points, seed=seed + len(object_names)
+        )
         object_names.append(object_dir.name)
         object_dirs.append(object_dir)
         point_clouds.append(sampled)
@@ -348,11 +389,15 @@ def save_cluster_artifacts(
     torch.save(model_state_dict, output_dir / "ae_state_dict.pt")
 
     history_payload = {"train_loss": [float(v) for v in train_history]}
-    (output_dir / "train_history.json").write_text(json.dumps(history_payload, indent=2), encoding="utf-8")
+    (output_dir / "train_history.json").write_text(
+        json.dumps(history_payload, indent=2), encoding="utf-8"
+    )
 
     distances = np.linalg.norm(normalized_embeddings - centers[labels], axis=1)
     global_center = normalized_embeddings.mean(axis=0)
-    global_distances = np.linalg.norm(normalized_embeddings - global_center[None, :], axis=1)
+    global_distances = np.linalg.norm(
+        normalized_embeddings - global_center[None, :], axis=1
+    )
 
     cluster_labels_payload: Dict[str, Dict] = {}
     object_labels_payload: Dict[str, Dict] = {}
@@ -360,7 +405,9 @@ def save_cluster_artifacts(
     unique_cluster_ids = sorted(int(cluster_id) for cluster_id in np.unique(labels))
     for cluster_id in unique_cluster_ids:
         member_indices = np.where(labels == cluster_id)[0]
-        ordered_indices = member_indices[np.argsort(distances[member_indices], kind="stable")]
+        ordered_indices = member_indices[
+            np.argsort(distances[member_indices], kind="stable")
+        ]
 
         members_payload: List[Dict] = []
         for rank_in_cluster, member_index in enumerate(ordered_indices):

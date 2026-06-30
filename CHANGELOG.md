@@ -1,5 +1,12 @@
 # CHANGELOG
 
+## 2026-06-30
+
+### Changed
+- Updated the DGN pool120 shape-cluster config to use `kmeans_k=30`.
+- Extended `build_dataset_subset_pool.py` to export train/test/subtest/OOD/subOOD pools with balanced per-cluster quotas, odd/even in-domain candidate splitting, and compact `pool_seed` subset tags.
+- Expanded pool workflow tests to cover in-domain/OOD cluster selection, balanced refill behavior, and prefix subtest/subOOD outputs.
+
 ## 2026-06-16
 
 ### Added
